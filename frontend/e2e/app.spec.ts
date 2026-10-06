@@ -37,7 +37,7 @@ test('остатки по партиям отображаются с себес�
   const table = page.getByTestId('stock-table')
   await expect(table).toBeVisible()
   await expect(table.getByText('SKU-1')).toBeVisible()
-  await expect(table.getByText('Материал')).toBeVisible()
+  await expect(table.getByText('Материал', { exact: true })).toBeVisible()
   await expect(page.getByTestId('total-value')).toHaveText('1 500,00 ₽')
 })
 
