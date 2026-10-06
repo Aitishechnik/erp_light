@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Project pre-commit: форматирует staged-файлы и прогоняет быстрые ворота.
+#
+# Полный прогон (pytest + сборка) — на коммитах в main-checkout:
+#   .githooks/pre-commit
+# Быстрый режим для промежуточных коммитов:
+#   PRECOMMIT_FAST=1 git commit ...
+# Полный прогон без коммита:
+#   PRECOMMIT_FORCE_FULL=1 .githooks/pre-commit
+#
+# Включить один раз на клон:  git config core.hooksPath .githooks
+set -u
+
+ROOT="$(git rev-parse --show-toplevel)"
+fail() { printf 'pre-commit: %s\n' "$1" >&2; exit 1; }
+
+cd "$ROOT" || exit 1
+
+mode="${PRECOMMIT_MODE:-}"
+if [ -n "${PRECOMMIT_FORCE_FULL:-}" ]; then
+  mode="full"
+elif [ -n "${PRECOMMIT_FAST:-}" ]; then
+  mode="fast"
+else
+  # Полный гейт только в главном рабочем дереве и только на ветке main.
+  branch="$(git symbolic-ref --quiet --short HEAD || echo '')"
+  if [ "$branch" = "main" ] && [ "$(git rev-parse --git-dir)" = ".git" ]; then
+    mode="full"
+  else
+    mode="fast"
+  fi
+fi
+
+# ── 1. Запрет Float в финансовых данных ────────────────────────────────────
+money_files=()
+while IFS= read -r -d '' f; do
+  case "$f" in
+    backend/app/models/*.py | backend/app/services/*.py | backend/app/schemas/*.py) money_files+=("$f") ;;
+  esac
+done < <(git diff --cached --name-only --diff-filter=ACM -z)
+
+for f in ${money_files[@]+"${money_files[@]}"}; do
+  # Комментарии не считаются использованием типа.
+  hits="$(grep -nE '\bFloat\b|\bREAL\b' "$f" | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+  if [ -n "$hits" ]; then
+    printf '%s\n' "$hits" >&2
+    fail "$f: числа с плавающей точкой запрещены в финансовых данных — только Numeric/Decimal"
+  fi
+done
+
+# ── 2. Backend: формат изменённых файлов + быстрые ворота ──────────────────
+if [ -x backend/.venv/bin/ruff ]; then
+  if [ "$mode" = "full" ]; then
+    (cd backend && .venv/bin/ruff format --check . && .venv/bin/ruff check . && .venv/bin/mypy .) \
+      || fail "backend: ruff/mypy не прошли"
+  else
+    (cd backend && .venv/bin/ruff format . && .venv/bin/ruff check .) \
+      || fail "backend: ruff не прошёл"
+  fi
+fi
+
+# ── 3. Frontend: формат staged-файлов + typecheck ──────────────────────────
+if [ -x frontend/node_modules/.bin/biome ]; then
+  fe_files=()
+  while IFS= read -r -d '' f; do
+    case "$f" in
+      frontend/*.ts | frontend/*.tsx | frontend/*.js | frontend/*.json | frontend/*.css) fe_files+=("$f") ;;
+    esac
+  done < <(git diff --cached --name-only --diff-filter=ACM -z)
+
+  if [ ${#fe_files[@]} -gt 0 ]; then
+    (cd frontend && node_modules/.bin/biome check --write --no-errors-on-unmatched \
+      --files-ignore-unknown=true "${fe_files[@]#frontend/}") || fail "frontend: biome не прошёл"
+    git add -- "${fe_files[@]}"
+    (cd frontend && node_modules/.bin/tsc --noEmit) || fail "frontend: typecheck не прошёл"
+  fi
+fi
+
+# ── 4. Полный прогон: pytest + сборка фронта ───────────────────────────────
+if [ "$mode" = "full" ]; then
+  if [ -x backend/.venv/bin/pytest ]; then
+    (cd backend && .venv/bin/pytest) || fail "backend: pytest не прошёл"
+  fi
+  if [ -x frontend/node_modules/.bin/tsc ]; then
+    (cd frontend && pnpm build) || fail "frontend: сборка не прошла"
+  fi
+fi
+
+exit 0

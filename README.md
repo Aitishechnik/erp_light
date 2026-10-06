@@ -1,0 +1,52 @@
+# erp_lite
+
+Лёгкое приложение для закупок, коммерческого отдела и ген. директора.
+Данные приходят выгрузками из 1С УПП (`.xlsx`) либо вводятся вручную.
+
+Универсального ERP здесь нет: производство, склады и внешние интеграции остаются в 1С.
+
+## Что уже есть
+
+| Раздел | Состояние |
+|---|---|
+| Партии и остатки (оперативная себестоимость) | работает |
+| Матрица цен | не начат |
+| Планирование продаж → закупок | не начат |
+| PnL / Cashflow | не начат |
+| Таск-трекер | не начат |
+
+## Состав
+
+- `backend/` — FastAPI + SQLAlchemy, порт **4111**
+- `frontend/` — Vite + React + TypeScript, порт **4110**
+- PostgreSQL проекта — контейнер `erp_lite-db-1` на **127.0.0.1:5547**
+
+## Запуск
+
+```sh
+docker compose up -d --wait     # PostgreSQL проекта
+cd backend && make install      # один раз: venv + зависимости
+cd backend && make run          # API на 127.0.0.1:4111
+cd frontend && pnpm install     # один раз
+cd frontend && pnpm dev         # UI на 127.0.0.1:4110
+```
+
+## Проверки
+
+```sh
+cd backend && make check        # ruff format --check + ruff check + mypy + pytest
+cd frontend && pnpm typecheck && pnpm lint && pnpm test && pnpm e2e && pnpm build
+```
+
+## Себестоимость
+
+Единая оперативная формула (перенесена из `custom_erp` без изменений, бухгалтерский
+слой не переносился):
+
+```
+remaining_payment = max(0, инвойс партии в валюте − оплачено в валюте)
+final_cost_rub    = оплачено в рублях + доп.расходы + remaining_payment × курс
+себестоимость ед. = final_cost_rub / инвойс партии × инвойс строки / количество строки
+```
+
+См. [`backend/app/services/cost.py`](backend/app/services/cost.py).

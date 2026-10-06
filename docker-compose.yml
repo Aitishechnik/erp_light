@@ -1,0 +1,23 @@
+name: erp_lite
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-erp_lite}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD задайте в .env}
+      POSTGRES_DB: ${POSTGRES_DB:-erp_lite}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5547}:5432"
+    volumes:
+      - erp_lite_pgdata:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-erp_lite} -d ${POSTGRES_DB:-erp_lite}"]
+      interval: 3s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  erp_lite_pgdata:

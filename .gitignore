@@ -1,0 +1,32 @@
+# Секреты и окружение
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+coverage/
+
+# Артефакты прогонов
+artifacts/
+test-results/
+playwright-report/
+blob-report/
+*.log
+
+# Данные выгрузок 1С (не в git)
+data/
+!data/.gitkeep
+
+.DS_Store
