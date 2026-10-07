@@ -3,6 +3,10 @@
 .env.*
 !.env.example
 
+# Локальные доступы (логины и пароли стенда) — в git не попадают
+ACCESS.md
+ACCESS*.local.md
+
 # Python
 __pycache__/
 *.py[cod]
