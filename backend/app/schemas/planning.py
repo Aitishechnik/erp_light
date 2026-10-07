@@ -1,4 +1,7 @@
-"""Схемы плана продаж. Деньги и количество — Decimal, в JSON уходят строкой."""
+"""Схемы плана продаж. Количество — Decimal, в JSON уходит строкой.
+
+Цен в плане продаж нет: планируем объём, деньги считаются в других разделах.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +17,6 @@ class SalesPlanItemIn(BaseModel):
     product_id: uuid.UUID
     month: int = Field(ge=1, le=12)
     quantity: Decimal = Field(ge=0, description="Количество на месяц")
-    price: Decimal | None = Field(default=None, ge=0, description="Цена за единицу, одна на строку")
     notes: str | None = Field(default=None, max_length=255)
 
 
@@ -45,8 +47,6 @@ class SalesPlanItemOut(BaseModel):
     unit: str
     month: int
     quantity: Decimal
-    price: Decimal | None
-    amount: Decimal | None = Field(description="Количество × цена")
     notes: str | None
 
 
@@ -63,4 +63,3 @@ class SalesPlanOut(BaseModel):
     updated_at: datetime
     editable_months: list[int] = Field(description="Месяцы, которые сейчас можно менять")
     items: list[SalesPlanItemOut]
-    total_amount: Decimal = Field(description="Сумма по всем строкам плана")

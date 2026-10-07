@@ -46,7 +46,6 @@ function plan(overrides: Partial<SalesPlan> = {}): SalesPlan {
     created_at: '2026-10-06T10:00:00Z',
     updated_at: '2026-10-06T10:00:00Z',
     editable_months: [12],
-    total_amount: '1000.00',
     items: [
       {
         id: 'item-1',
@@ -59,8 +58,6 @@ function plan(overrides: Partial<SalesPlan> = {}): SalesPlan {
         unit: 'шт',
         month: 12,
         quantity: '10.000',
-        price: '100.00',
-        amount: '1000.00',
         notes: null,
       },
     ],
@@ -105,12 +102,14 @@ describe('SalesPlansPage', () => {
     expect(await screen.findByText('Менеджер по продажам')).toBeInTheDocument()
     expect(screen.getByText('На проверке')).toBeInTheDocument()
     await waitFor(() => {
-      expect(screen.getByTestId('plan-total')).toHaveTextContent('1 000,00')
+      expect(screen.getByTestId('row-total-SKU-1')).toHaveTextContent('10 шт')
     })
     // Строка клиента ООО Ромашка видна, замороженный январь недоступен для правки.
     expect(screen.getByTestId('current-client')).toHaveTextContent('ООО Ромашка')
     expect(screen.getByLabelText('SKU-1 Декабрь')).toHaveValue('10.000')
     expect(screen.getByLabelText('SKU-1 Январь')).toBeDisabled()
+    // Цен в плане продаж нет — только количество.
+    expect(screen.queryByLabelText('Цена SKU-1')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Утвердить' }))
     await waitFor(() => {
@@ -118,7 +117,7 @@ describe('SalesPlansPage', () => {
     })
   })
 
-  it('сохраняет строки с клиентом и товаром', async () => {
+  it('сохраняет строки с клиентом, товаром и количеством', async () => {
     const user = userEvent.setup()
     mockApi(
       routes({
@@ -139,6 +138,7 @@ describe('SalesPlansPage', () => {
     expect(sent).toBeDefined()
     expect(sent).toContain('client-1')
     expect(sent).toContain('product-1')
+    expect(sent).not.toContain('price')
   })
 
   it('добавляет к плану второго клиента', async () => {

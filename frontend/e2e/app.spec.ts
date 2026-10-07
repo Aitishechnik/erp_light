@@ -65,7 +65,6 @@ function plan(overrides: Record<string, unknown> = {}) {
     created_at: '2026-10-06T10:00:00Z',
     updated_at: '2026-10-06T10:00:00Z',
     editable_months: ALL_MONTHS,
-    total_amount: '0.00',
     items: [],
     ...overrides,
   }
@@ -174,11 +173,8 @@ test('менеджер заполняет план продаж по клиен�
           unit: 'шт',
           month: index + 1,
           quantity: item.quantity,
-          price: '100.00',
-          amount: '1000.00',
           notes: null,
         })),
-        total_amount: '12000.00',
       }),
     })
   })
@@ -199,11 +195,10 @@ test('менеджер заполняет план продаж по клиен�
 
   await page.getByLabel('Добавить товар').selectOption('p-1')
   await page.getByRole('button', { name: 'Добавить строку' }).click()
-  await page.getByLabel('Цена SKU-1').fill('100.00')
   await page.getByLabel('SKU-1 Декабрь').fill('10')
 
   await page.getByRole('button', { name: 'Сохранить' }).click()
-  await expect(page.getByTestId('plan-total')).toHaveText('1 000,00 ₽')
+  await expect(page.getByTestId('row-total-SKU-1')).toHaveText('10 шт')
 
   await page.getByRole('button', { name: 'Отправить на проверку' }).click()
   await expect(page.getByText('На проверке')).toBeVisible()

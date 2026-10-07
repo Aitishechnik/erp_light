@@ -49,8 +49,6 @@ export type SalesPlanItem = {
   unit: string
   month: number
   quantity: string
-  price: string | null
-  amount: string | null
   notes: string | null
 }
 
@@ -69,7 +67,6 @@ export type SalesPlan = {
   updated_at: string
   editable_months: number[]
   items: SalesPlanItem[]
-  total_amount: string
 }
 
 export type SalesPlanItemIn = {
@@ -77,7 +74,6 @@ export type SalesPlanItemIn = {
   product_id: string
   month: number
   quantity: string
-  price: string | null
 }
 
 export type Client = {

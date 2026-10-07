@@ -1,6 +1,7 @@
 """Планирование: годовой план продаж по менеджерам.
 
-Строка плана — клиент × товар × месяц, цена одна на строку и разносится по месяцам.
+Строка плана — клиент × товар × месяц и только количество: цены в плане продаж нет
+(цены живут в матрице ценообразования и в закупках).
 Прошедшие месяцы заморожены (см. app/services/plan_freeze.py).
 """
 
@@ -98,7 +99,6 @@ class SalesPlanItem(Base):
     )
     month: Mapped[int] = mapped_column(Integer, nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False, default=Decimal("0"))
-    price: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
     notes: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

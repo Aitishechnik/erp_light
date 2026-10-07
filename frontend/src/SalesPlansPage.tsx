@@ -8,7 +8,7 @@ import {
   fetchProducts,
   fetchSalesPlans,
   fetchUsers,
-  formatMoney,
+  formatQuantity,
   MONTH_SHORT,
   MONTH_TITLES,
   type Product,
@@ -25,7 +25,6 @@ type DraftRow = {
   code: string
   name: string
   unit: string
-  price: string
   months: Record<number, string>
 }
 
@@ -49,12 +48,10 @@ function draftsFromPlan(plan: SalesPlan): Drafts {
         code: item.product_code,
         name: item.product_name,
         unit: item.unit,
-        price: item.price ?? '',
         months: {},
       }
       rows.push(row)
     }
-    if (!row.price && item.price) row.price = item.price
     if (Number(item.quantity) !== 0) row.months[item.month] = item.quantity
     drafts[item.client_id] = rows
   }
@@ -162,13 +159,11 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
             )
             return null
           }
-          const price = normalize(row.price)
           items.push({
             client_id: currentClientId,
             product_id: row.productId,
             month,
             quantity: raw,
-            price: price === '' ? null : price,
           })
         }
       }
@@ -184,12 +179,6 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
     )
   }
 
-  const setPrice = (productId: string, value: string) => {
-    setRows((current) =>
-      current.map((row) => (row.productId === productId ? { ...row, price: value } : row)),
-    )
-  }
-
   const addRow = () => {
     const product = products.find((row) => row.id === productToAdd)
     if (!product || !clientId) return
@@ -200,7 +189,6 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
         code: product.code,
         name: product.name,
         unit: product.unit,
-        price: '',
         months: {},
       },
     ])
@@ -214,18 +202,11 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
     setClientToAdd('')
   }
 
-  const rowTotal = (row: DraftRow): number => {
-    const price = Number(normalize(row.price) || 0)
-    return editable.reduce(
-      (sum, month) => sum + Number(normalize(row.months[month] ?? '') || 0) * price,
-      0,
-    )
-  }
+  /** Итог строки — сумма месяцев: единица измерения у строки одна, складывать корректно. */
+  const rowQuantity = (row: DraftRow): number =>
+    editable.reduce((sum, month) => sum + Number(normalize(row.months[month] ?? '') || 0), 0)
 
   const planClients = Object.keys(drafts)
-  const total = Object.values(drafts)
-    .flat()
-    .reduce((sum, row) => sum + rowTotal(row), 0)
   const canEdit =
     plan !== null &&
     (isCommercialDirector || (isOwner && ['draft', 'filling'].includes(plan.status)))
@@ -239,7 +220,8 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
       <header className="page-head">
         <h1>Планирование продаж</h1>
         <p className="hint">
-          Годовой план на менеджера: клиент × товар × месяц. Утверждает коммерческий директор.
+          Годовой план на менеджера: клиент × товар × месяц, только количество. Утверждает
+          коммерческий директор.
         </p>
         <div className="toolbar">
           <button type="button" onClick={() => setYear(year - 1)} aria-label="Предыдущий год">
@@ -312,7 +294,10 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
             >
               <span className="plan-card-title">{row.manager_name}</span>
               <span className={`badge status-${row.status}`}>{row.status_title}</span>
-              <span className="plan-card-sum">{formatMoney(row.total_amount)} ₽</span>
+              <span className="plan-card-sum">
+                строк: {row.items.length}, клиентов:{' '}
+                {new Set(row.items.map((item) => item.client_id)).size}
+              </span>
             </button>
           ))
         )}
@@ -392,11 +377,6 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
               </button>
             ) : null}
             {isExecutive ? <span className="hint">Просмотр без правок</span> : null}
-            <span className="sep" />
-            <span className="hint">
-              Всего по плану:{' '}
-              <strong data-testid="plan-total">{formatMoney(String(total))} ₽</strong>
-            </span>
           </div>
 
           {plan.notes ? <p className="hint">Примечания: {plan.notes}</p> : null}
@@ -469,23 +449,20 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
             <thead>
               <tr>
                 <th scope="col">Товар</th>
-                <th scope="col" className="num">
-                  Цена, ₽
-                </th>
                 {MONTH_SHORT.map((title, index) => (
                   <th key={title} scope="col" className="num" title={MONTH_TITLES[index]}>
                     {title}
                   </th>
                 ))}
                 <th scope="col" className="num">
-                  Сумма, ₽
+                  Итого
                 </th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={15} className="hint" data-testid="plan-empty">
+                  <td colSpan={14} className="hint" data-testid="plan-empty">
                     {clientId
                       ? 'Строк по этому клиенту пока нет — добавьте товар.'
                       : 'Добавьте клиента в план.'}
@@ -497,15 +474,6 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
                     <td>
                       {row.code} · {row.name}
                       <span className="unit">, {row.unit}</span>
-                    </td>
-                    <td className="num">
-                      <input
-                        className="cell"
-                        aria-label={`Цена ${row.code}`}
-                        value={row.price}
-                        disabled={!canEdit}
-                        onChange={(event) => setPrice(row.productId, event.target.value)}
-                      />
                     </td>
                     {MONTH_SHORT.map((title, index) => {
                       const month = index + 1
@@ -523,7 +491,9 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
                         </td>
                       )
                     })}
-                    <td className="num">{formatMoney(String(rowTotal(row)))}</td>
+                    <td className="num" data-testid={`row-total-${row.code}`}>
+                      {formatQuantity(String(rowQuantity(row)))} {row.unit}
+                    </td>
                   </tr>
                 ))
               )}

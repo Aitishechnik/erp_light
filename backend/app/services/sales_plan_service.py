@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import uuid
-from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -27,10 +26,8 @@ from app.models.planning import (
     SalesPlanItem,
 )
 from app.schemas.planning import SalesPlanCreate, SalesPlanItemIn, SalesPlanItemOut, SalesPlanOut
-from app.services.cost import q2
 from app.services.plan_freeze import check_months_editable, editable_months
 
-ZERO = Decimal("0.00")
 EDITABLE_BY_OWNER = ("draft", "filling")
 
 
@@ -104,15 +101,12 @@ def _serialize(plan: SalesPlan) -> SalesPlanOut:
             unit=item.product.unit,
             month=item.month,
             quantity=item.quantity,
-            price=item.price,
-            amount=q2(item.quantity * item.price) if item.price is not None else None,
             notes=item.notes,
         )
         for item in sorted(
             plan.items, key=lambda row: (row.client.name, row.product.name, row.month)
         )
     ]
-    total = sum((item.amount for item in items if item.amount is not None), ZERO)
     return SalesPlanOut(
         id=plan.id,
         year=plan.year,
@@ -126,7 +120,6 @@ def _serialize(plan: SalesPlan) -> SalesPlanOut:
         updated_at=plan.updated_at,
         editable_months=editable_months(plan.year),
         items=items,
-        total_amount=q2(total),
     )
 
 
@@ -233,7 +226,6 @@ def update_items(
                 product_id=item.product_id,
                 month=item.month,
                 quantity=item.quantity,
-                price=item.price,
                 notes=item.notes,
             )
         )

@@ -34,15 +34,12 @@ def clients(db_session: Session) -> list[Client]:
     return [first, second]
 
 
-def _item(
-    product: Product, month: int, quantity: str, price: str, client_row: Client
-) -> dict[str, str | int]:
+def _item(product: Product, month: int, quantity: str, client_row: Client) -> dict[str, str | int]:
     return {
         "client_id": str(client_row.id),
         "product_id": str(product.id),
         "month": month,
         "quantity": quantity,
-        "price": price,
     }
 
 
@@ -65,15 +62,14 @@ def test_manager_fills_and_commercial_director_approves(
     month = TODAY.month
     updated = client.put(
         f"/api/v1/sales-plans/{plan['id']}/items",
-        json={"items": [_item(products[0], month, "10", "100.00", clients[0])]},
+        json={"items": [_item(products[0], month, "10", clients[0])]},
     )
     assert updated.status_code == 200, updated.text
     body = updated.json()
-    assert body["items"][0]["amount"] == "1000.00"
     assert body["items"][0]["client_name"] == "ООО Ромашка"
-    assert body["total_amount"] == "1000.00"
-    # Деньги уходят строкой — точность не теряется.
-    assert isinstance(body["items"][0]["price"], str)
+    assert body["items"][0]["quantity"] == "10.000"
+    # Количество уходит строкой — точность не теряется.
+    assert isinstance(body["items"][0]["quantity"], str)
     assert month in body["editable_months"]
 
     submitted = client.post(f"/api/v1/sales-plans/{plan['id']}/submit")
@@ -89,7 +85,7 @@ def test_manager_fills_and_commercial_director_approves(
     login("sales")
     denied = client.put(
         f"/api/v1/sales-plans/{plan['id']}/items",
-        json={"items": [_item(products[1], TODAY.month, "5", "10.00", clients[0])]},
+        json={"items": [_item(products[1], TODAY.month, "5", clients[0])]},
     )
     assert denied.status_code == 409
 
@@ -103,15 +99,15 @@ def test_same_product_for_two_clients_is_allowed(
         f"/api/v1/sales-plans/{plan['id']}/items",
         json={
             "items": [
-                _item(products[0], TODAY.month, "10", "100.00", clients[0]),
-                _item(products[0], TODAY.month, "4", "100.00", clients[1]),
+                _item(products[0], TODAY.month, "10", clients[0]),
+                _item(products[0], TODAY.month, "4", clients[1]),
             ]
         },
     )
     assert saved.status_code == 200, saved.text
     body = saved.json()
     assert [row["client_name"] for row in body["items"]] == ["ООО Вектор", "ООО Ромашка"]
-    assert Decimal(body["total_amount"]) == Decimal("1400.00")
+    assert [row["quantity"] for row in body["items"]] == ["4.000", "10.000"]
 
 
 def test_line_without_client_is_rejected(
@@ -127,7 +123,6 @@ def test_line_without_client_is_rejected(
                     "product_id": str(products[0].id),
                     "month": TODAY.month,
                     "quantity": "1",
-                    "price": "1.00",
                 }
             ]
         },
@@ -147,7 +142,6 @@ def test_unknown_client_is_rejected(client: TestClient, login, products: list[Pr
                     "product_id": str(products[0].id),
                     "month": TODAY.month,
                     "quantity": "1",
-                    "price": "1.00",
                 }
             ]
         },
@@ -172,7 +166,7 @@ def test_commercial_director_creates_plan_and_rejects(
     login("sales")
     filled = client.put(
         f"/api/v1/sales-plans/{plan['id']}/items",
-        json={"items": [_item(products[0], TODAY.month, "3", "50.00", clients[0])]},
+        json={"items": [_item(products[0], TODAY.month, "3", clients[0])]},
     )
     assert filled.status_code == 200, filled.text
     assert client.post(f"/api/v1/sales-plans/{plan['id']}/submit").json()["status"] == "on_review"
@@ -209,7 +203,7 @@ def test_past_year_is_frozen(
     plan = _create_plan(client, TODAY.year - 1)
     response = client.put(
         f"/api/v1/sales-plans/{plan['id']}/items",
-        json={"items": [_item(products[0], 1, "1", "1.00", clients[0])]},
+        json={"items": [_item(products[0], 1, "1", clients[0])]},
     )
     assert response.status_code == 409
     assert "Замороженные месяцы" in response.json()["detail"]
@@ -224,7 +218,7 @@ def test_past_month_of_current_year_is_frozen(
     plan = _create_plan(client, TODAY.year)
     response = client.put(
         f"/api/v1/sales-plans/{plan['id']}/items",
-        json={"items": [_item(products[0], 1, "1", "1.00", clients[0])]},
+        json={"items": [_item(products[0], 1, "1", clients[0])]},
     )
     assert response.status_code == 409
     assert "Замороженные месяцы" in response.json()["detail"]
@@ -261,7 +255,7 @@ def test_commercial_director_edit_returns_approved_plan_to_review(
     plan = _create_plan(client, TODAY.year)
     client.put(
         f"/api/v1/sales-plans/{plan['id']}/items",
-        json={"items": [_item(products[0], TODAY.month, "10", "100.00", clients[0])]},
+        json={"items": [_item(products[0], TODAY.month, "10", clients[0])]},
     )
     client.post(f"/api/v1/sales-plans/{plan['id']}/submit")
 
@@ -269,11 +263,11 @@ def test_commercial_director_edit_returns_approved_plan_to_review(
     client.post(f"/api/v1/sales-plans/{plan['id']}/approve")
     edited = client.put(
         f"/api/v1/sales-plans/{plan['id']}/items",
-        json={"items": [_item(products[0], TODAY.month, "12", "100.00", clients[0])]},
+        json={"items": [_item(products[0], TODAY.month, "12", clients[0])]},
     )
     assert edited.status_code == 200, edited.text
     assert edited.json()["status"] == "on_review"
-    assert Decimal(edited.json()["total_amount"]) == Decimal("1200.00")
+    assert Decimal(edited.json()["items"][0]["quantity"]) == Decimal("12.000")
 
 
 def test_duplicate_row_is_rejected(
@@ -285,8 +279,8 @@ def test_duplicate_row_is_rejected(
         f"/api/v1/sales-plans/{plan['id']}/items",
         json={
             "items": [
-                _item(products[0], TODAY.month, "1", "1.00", clients[0]),
-                _item(products[0], TODAY.month, "2", "1.00", clients[0]),
+                _item(products[0], TODAY.month, "1", clients[0]),
+                _item(products[0], TODAY.month, "2", clients[0]),
             ]
         },
     )
