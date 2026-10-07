@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Client, SalesPlan, SessionUser } from './api'
+import type { Counterparty, SalesPlan, SessionUser } from './api'
 import { mockApi } from './apiMock'
 import { SalesPlansPage } from './SalesPlansPage'
 
@@ -23,9 +23,29 @@ const MANAGER: SessionUser = {
   role_title: 'Менеджер по продажам',
 }
 
-const CLIENTS: Client[] = [
-  { id: 'client-1', name: 'ООО Ромашка', inn: '7701234567', note: null, is_active: true },
-  { id: 'client-2', name: 'ООО Вектор', inn: null, note: null, is_active: true },
+const CLIENTS: Counterparty[] = [
+  {
+    id: 'client-1',
+    name: 'ООО Ромашка',
+    inn: '7701234567',
+    note: null,
+    is_customer: true,
+    is_local_supplier: false,
+    is_import_supplier: false,
+    source: '1c',
+    is_active: true,
+  },
+  {
+    id: 'client-2',
+    name: 'ООО Вектор',
+    inn: null,
+    note: null,
+    is_customer: true,
+    is_local_supplier: false,
+    is_import_supplier: false,
+    source: '1c',
+    is_active: true,
+  },
 ]
 
 const PRODUCTS = [
@@ -67,7 +87,7 @@ function plan(overrides: Partial<SalesPlan> = {}): SalesPlan {
 
 function routes(extra: Record<string, { status?: number; body?: unknown }> = {}) {
   return {
-    '/api/v1/clients': { body: CLIENTS },
+    '/api/v1/counterparties': { body: CLIENTS },
     '/api/v1/products': { body: PRODUCTS },
     '/api/v1/users': { body: [MANAGER] },
     ...extra,

@@ -35,6 +35,7 @@ export type Product = {
   name: string
   kind: string
   unit: string
+  source: string
   is_active: boolean
 }
 
@@ -76,18 +77,49 @@ export type SalesPlanItemIn = {
   quantity: string
 }
 
-export type Client = {
+export type CounterpartyRole = 'customer' | 'local_supplier' | 'import_supplier'
+
+export type Counterparty = {
   id: string
   name: string
   inn: string | null
   note: string | null
+  is_customer: boolean
+  is_local_supplier: boolean
+  is_import_supplier: boolean
+  source: string
   is_active: boolean
 }
 
-export type ClientIn = {
+export type CounterpartyIn = {
   name: string
   inn?: string | null
   note?: string | null
+  is_customer?: boolean
+  is_local_supplier?: boolean
+  is_import_supplier?: boolean
+}
+
+export type ImportKind = {
+  kind: string
+  title: string
+  entity: string
+  columns: string[]
+}
+
+export type ImportSession = {
+  id: string
+  kind: string
+  kind_title: string
+  file_name: string
+  status: string
+  rows_total: number
+  rows_created: number
+  rows_updated: number
+  rows_skipped: number
+  rows_failed: number
+  message: string | null
+  created_at: string
 }
 
 export type ProductIn = {
@@ -165,6 +197,31 @@ export function formatDate(value: string | null | undefined): string {
 export const PRODUCT_KIND_LABELS: Record<string, string> = {
   goods: 'Товар',
   material: 'Материал',
+  raw: 'Сырьё',
+  finished: 'Готовая продукция',
+}
+
+/** Названия видов для фильтров: там уместно множественное число. */
+export const PRODUCT_KIND_FILTER_TITLES: Record<string, string> = {
+  material: 'Материалы',
+  raw: 'Сырьё',
+  finished: 'Готовая продукция',
+  goods: 'Товары',
+}
+
+export const PRODUCT_KINDS = ['material', 'raw', 'finished', 'goods']
+
+/** Роли контрагента из его признаков. */
+export function counterpartyRoles(row: {
+  is_customer: boolean
+  is_local_supplier: boolean
+  is_import_supplier: boolean
+}): string[] {
+  const roles: string[] = []
+  if (row.is_customer) roles.push('Покупатель')
+  if (row.is_local_supplier) roles.push('Локальный поставщик')
+  if (row.is_import_supplier) roles.push('Импортный поставщик')
+  return roles
 }
 
 /** Роли, которым виден раздел планирования продаж. */
@@ -175,9 +232,10 @@ export const SALES_PLAN_ROLES: Role[] = [
 ]
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const isFormData = init?.body instanceof FormData
   const response = await fetch(url, {
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
+    headers: isFormData ? undefined : { 'Content-Type': 'application/json' },
     ...init,
   })
   if (!response.ok) {
@@ -239,26 +297,46 @@ export function updateProduct(
   })
 }
 
-export function fetchClients(includeInactive = false): Promise<Client[]> {
-  const query = includeInactive ? '?include_inactive=true' : ''
-  return request<Client[]>(`/api/v1/clients${query}`)
+export function fetchCounterparties(options?: {
+  role?: CounterpartyRole
+  includeInactive?: boolean
+}): Promise<Counterparty[]> {
+  const params = new URLSearchParams()
+  if (options?.role) params.set('role', options.role)
+  if (options?.includeInactive) params.set('include_inactive', 'true')
+  const query = params.toString()
+  return request<Counterparty[]>(`/api/v1/counterparties${query ? `?${query}` : ''}`)
 }
 
-export function createClient(payload: ClientIn): Promise<Client> {
-  return request<Client>('/api/v1/clients', {
+export function createCounterparty(payload: CounterpartyIn): Promise<Counterparty> {
+  return request<Counterparty>('/api/v1/counterparties', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
 }
 
-export function updateClient(
-  clientId: string,
-  payload: Partial<ClientIn> & { is_active?: boolean },
-): Promise<Client> {
-  return request<Client>(`/api/v1/clients/${clientId}`, {
+export function updateCounterparty(
+  counterpartyId: string,
+  payload: Partial<CounterpartyIn> & { is_active?: boolean },
+): Promise<Counterparty> {
+  return request<Counterparty>(`/api/v1/counterparties/${counterpartyId}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
   })
+}
+
+export function fetchImportKinds(): Promise<ImportKind[]> {
+  return request<ImportKind[]>('/api/v1/imports/kinds')
+}
+
+export function fetchImports(limit = 20): Promise<ImportSession[]> {
+  return request<ImportSession[]>(`/api/v1/imports?limit=${limit}`)
+}
+
+export function uploadImport(kind: string, file: File): Promise<ImportSession> {
+  const form = new FormData()
+  form.append('file', file)
+  return request<ImportSession>(`/api/v1/imports/${kind}`, { method: 'POST', body: form })
 }
 
 export function fetchSalesPlans(): Promise<SalesPlan[]> {

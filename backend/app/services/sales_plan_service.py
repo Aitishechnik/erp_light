@@ -19,7 +19,7 @@ from app.models.auth import (
     ROLE_SALES_MANAGER,
     User,
 )
-from app.models.clients import Client
+from app.models.counterparties import Counterparty
 from app.models.planning import (
     SALES_PLAN_STATUS_TITLES,
     SalesPlan,
@@ -79,13 +79,17 @@ def _check_commercial_director(user: User) -> None:
 
 
 def _check_clients(db: Session, client_ids: set[uuid.UUID]) -> None:
-    """Все клиенты строк должны существовать и быть активными."""
+    """Клиент строки — активный контрагент с признаком «покупатель»."""
     for client_id in client_ids:
-        client = db.get(Client, client_id)
+        client = db.get(Counterparty, client_id)
         if client is None:
             raise PlanError("Клиент не найден", status_code=404)
         if not client.is_active:
             raise PlanError(f"Клиент «{client.name}» отключён — строку по нему не сохранить")
+        if not client.is_customer:
+            raise PlanError(
+                f"«{client.name}» не отмечен покупателем — в плане продаж не используется"
+            )
 
 
 def _serialize(plan: SalesPlan) -> SalesPlanOut:

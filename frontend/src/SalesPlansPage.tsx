@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  type Client,
+  type Counterparty,
   createSalesPlan,
   deleteSalesPlan,
   errorMessage,
-  fetchClients,
+  fetchCounterparties,
   fetchProducts,
   fetchSalesPlans,
   fetchUsers,
@@ -74,7 +74,7 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
   const [drafts, setDrafts] = useState<Drafts>({})
   const [clientId, setClientId] = useState<string>('')
   const [products, setProducts] = useState<Product[]>([])
-  const [clients, setClients] = useState<Client[]>([])
+  const [clients, setClients] = useState<Counterparty[]>([])
   const [managers, setManagers] = useState<SessionUser[]>([])
   const [managerId, setManagerId] = useState('')
   const [productToAdd, setProductToAdd] = useState('')
@@ -109,7 +109,7 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
     fetchProducts()
       .then((rows) => setProducts(rows.filter((product) => product.is_active)))
       .catch(() => setProducts([]))
-    fetchClients(true)
+    fetchCounterparties({ role: 'customer', includeInactive: true })
       .then(setClients)
       .catch(() => setClients([]))
     if (isCommercialDirector) {

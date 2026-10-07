@@ -1,6 +1,7 @@
-"""Справочники: клиенты и номенклатура — ручное заведение и правка.
+"""Справочники: контрагенты и номенклатура — ручное заведение и правка.
 
 Читать справочники может любой вошедший, менять — продажи, коммерция и закупки.
+Основное наполнение приходит загрузкой выгрузок 1С (см. import_service).
 """
 
 from __future__ import annotations
@@ -16,9 +17,9 @@ from app.models.auth import (
     ROLE_PURCHASE_DIRECTOR,
     ROLE_SALES_MANAGER,
 )
-from app.models.clients import Client
+from app.models.counterparties import Counterparty, name_key
 from app.models.domain import PRODUCT_KINDS, Product
-from app.schemas.clients import ClientIn, ClientUpdate
+from app.schemas.counterparties import CounterpartyIn, CounterpartyUpdate
 from app.schemas.domain import ProductIn, ProductUpdate
 
 # Кто заводит и правит справочники.
@@ -34,57 +35,83 @@ class DirectoryError(Exception):
         self.status_code = status_code
 
 
-# ── Клиенты ────────────────────────────────────────────────────────────────
+# ── Контрагенты ────────────────────────────────────────────────────────────
 
 
-def list_clients(db: Session, *, include_inactive: bool = False) -> list[Client]:
-    statement = select(Client).order_by(Client.name)
+def list_counterparties(
+    db: Session, *, role_field: str | None = None, include_inactive: bool = False
+) -> list[Counterparty]:
+    statement = select(Counterparty).order_by(Counterparty.name)
+    if role_field is not None:
+        statement = statement.where(getattr(Counterparty, role_field).is_(True))
     if not include_inactive:
-        statement = statement.where(Client.is_active.is_(True))
+        statement = statement.where(Counterparty.is_active.is_(True))
     return list(db.execute(statement).scalars().all())
 
 
-def get_client(db: Session, client_id: uuid.UUID) -> Client:
-    client = db.get(Client, client_id)
-    if client is None:
-        raise DirectoryError("Клиент не найден", status_code=404)
-    return client
+def get_counterparty(db: Session, counterparty_id: uuid.UUID) -> Counterparty:
+    row = db.get(Counterparty, counterparty_id)
+    if row is None:
+        raise DirectoryError("Контрагент не найден", status_code=404)
+    return row
 
 
-def create_client(db: Session, payload: ClientIn) -> Client:
-    name = payload.name.strip()
+def create_counterparty(db: Session, payload: CounterpartyIn) -> Counterparty:
+    name = " ".join(payload.name.split()).strip()
     if not name:
-        raise DirectoryError("Укажите наименование клиента")
-    exists = db.execute(select(Client).where(Client.name == name)).scalars().one_or_none()
+        raise DirectoryError("Укажите наименование контрагента")
+    key = name_key(name)
+    exists = (
+        db.execute(select(Counterparty).where(Counterparty.name_key == key)).scalars().one_or_none()
+    )
     if exists is not None:
-        raise DirectoryError(f"Клиент «{name}» уже есть в справочнике", status_code=409)
-    client = Client(name=name, inn=payload.inn, note=payload.note)
-    db.add(client)
+        raise DirectoryError(f"Контрагент «{name}» уже есть в справочнике", status_code=409)
+    counterparty = Counterparty(
+        name=name,
+        name_key=key,
+        inn=payload.inn,
+        note=payload.note,
+        is_customer=payload.is_customer,
+        is_local_supplier=payload.is_local_supplier,
+        is_import_supplier=payload.is_import_supplier,
+        source="manual",
+    )
+    db.add(counterparty)
     try:
         db.commit()
     except IntegrityError as exc:  # гонка двух одновременных созданий
         db.rollback()
-        raise DirectoryError(f"Клиент «{name}» уже есть в справочнике", status_code=409) from exc
-    db.refresh(client)
-    return client
+        raise DirectoryError(
+            f"Контрагент «{name}» уже есть в справочнике", status_code=409
+        ) from exc
+    db.refresh(counterparty)
+    return counterparty
 
 
-def update_client(db: Session, client_id: uuid.UUID, payload: ClientUpdate) -> Client:
-    client = get_client(db, client_id)
+def update_counterparty(
+    db: Session, counterparty_id: uuid.UUID, payload: CounterpartyUpdate
+) -> Counterparty:
+    counterparty = get_counterparty(db, counterparty_id)
     data = payload.model_dump(exclude_unset=True)
-    if "name" in data and data["name"] is not None:
-        name = str(data["name"]).strip()
+    if data.get("name") is not None:
+        name = " ".join(str(data["name"]).split()).strip()
         if not name:
-            raise DirectoryError("Наименование клиента не может быть пустым")
-        twin = db.execute(select(Client).where(Client.name == name)).scalars().one_or_none()
-        if twin is not None and twin.id != client.id:
-            raise DirectoryError(f"Клиент «{name}» уже есть в справочнике", status_code=409)
+            raise DirectoryError("Наименование контрагента не может быть пустым")
+        key = name_key(name)
+        twin = (
+            db.execute(select(Counterparty).where(Counterparty.name_key == key))
+            .scalars()
+            .one_or_none()
+        )
+        if twin is not None and twin.id != counterparty.id:
+            raise DirectoryError(f"Контрагент «{name}» уже есть в справочнике", status_code=409)
         data["name"] = name
+        data["name_key"] = key
     for field, value in data.items():
-        setattr(client, field, value)
+        setattr(counterparty, field, value)
     db.commit()
-    db.refresh(client)
-    return client
+    db.refresh(counterparty)
+    return counterparty
 
 
 # ── Номенклатура ───────────────────────────────────────────────────────────
@@ -106,7 +133,10 @@ def get_product(db: Session, product_id: uuid.UUID) -> Product:
 
 def _check_kind(kind: str) -> None:
     if kind not in PRODUCT_KINDS:
-        raise DirectoryError("Вид номенклатуры: goods (товар) или material (материал)")
+        raise DirectoryError(
+            "Вид номенклатуры: goods, material (материалы), raw (сырьё) "
+            "или finished (готовая продукция)"
+        )
 
 
 def create_product(db: Session, payload: ProductIn) -> Product:
@@ -122,6 +152,7 @@ def create_product(db: Session, payload: ProductIn) -> Product:
         name=payload.name.strip(),
         kind=payload.kind,
         unit=payload.unit.strip(),
+        source="manual",
     )
     db.add(product)
     try:

@@ -3,18 +3,22 @@ import {
   createProduct,
   errorMessage,
   fetchProducts,
+  PRODUCT_KIND_FILTER_TITLES,
   PRODUCT_KIND_LABELS,
+  PRODUCT_KINDS,
   type Product,
   updateProduct,
 } from './api'
 
-const EMPTY_FORM = { code: '', name: '', kind: 'goods', unit: 'шт' }
+const EMPTY_FORM = { code: '', name: '', kind: 'material', unit: 'шт' }
+const VISIBLE_LIMIT = 100
 
 export function NomenclaturePage() {
   const [rows, setRows] = useState<Product[]>([])
   const [form, setForm] = useState(EMPTY_FORM)
   const [kindFilter, setKindFilter] = useState('')
-  const [showInactive, setShowInactive] = useState(true)
+  const [search, setSearch] = useState('')
+  const [showInactive, setShowInactive] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -58,17 +62,24 @@ export function NomenclaturePage() {
     }
   }
 
-  const visible = rows
+  const needle = search.trim().toLowerCase()
+  const filtered = rows
     .filter((row) => (kindFilter ? row.kind === kindFilter : true))
     .filter((row) => (showInactive ? true : row.is_active))
+    .filter((row) =>
+      needle
+        ? row.name.toLowerCase().includes(needle) || row.code.toLowerCase().includes(needle)
+        : true,
+    )
+  const visible = filtered.slice(0, VISIBLE_LIMIT)
 
   return (
     <section>
       <header className="page-head">
         <h1>Номенклатура</h1>
         <p className="hint">
-          Товары и материалы, по которым ведётся учёт и планирование. Позиции из партий попадают
-          сюда автоматически.
+          Материалы, сырьё и готовая продукция из выгрузок 1С плюс позиции, заведённые вручную. Код
+          — код из 1С, поэтому повторная загрузка обновляет позицию, а не создаёт дубль.
         </p>
       </header>
 
@@ -98,8 +109,11 @@ export function NomenclaturePage() {
           value={form.kind}
           onChange={(event) => setForm({ ...form, kind: event.target.value })}
         >
-          <option value="goods">Товар</option>
-          <option value="material">Материал</option>
+          {PRODUCT_KINDS.map((kind) => (
+            <option key={kind} value={kind}>
+              {PRODUCT_KIND_LABELS[kind]}
+            </option>
+          ))}
         </select>
         <input
           aria-label="Единица"
@@ -120,9 +134,18 @@ export function NomenclaturePage() {
           onChange={(event) => setKindFilter(event.target.value)}
         >
           <option value="">Все виды</option>
-          <option value="goods">Товары</option>
-          <option value="material">Материалы</option>
+          {PRODUCT_KINDS.map((kind) => (
+            <option key={kind} value={kind}>
+              {PRODUCT_KIND_FILTER_TITLES[kind]}
+            </option>
+          ))}
         </select>
+        <input
+          aria-label="Поиск по коду или наименованию"
+          placeholder="Поиск по коду или наименованию"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
         <label className="check">
           <input
             type="checkbox"
@@ -133,7 +156,8 @@ export function NomenclaturePage() {
         </label>
         <span className="sep" />
         <span className="hint">
-          Всего позиций: <strong data-testid="products-count">{visible.length}</strong>
+          Найдено: <strong data-testid="products-count">{filtered.length}</strong>
+          {filtered.length > VISIBLE_LIMIT ? `, показаны первые ${VISIBLE_LIMIT}` : null}
         </span>
       </div>
 
@@ -144,6 +168,7 @@ export function NomenclaturePage() {
             <th scope="col">Наименование</th>
             <th scope="col">Вид</th>
             <th scope="col">Ед.</th>
+            <th scope="col">Источник</th>
             <th scope="col">Состояние</th>
             <th scope="col" />
           </tr>
@@ -151,8 +176,8 @@ export function NomenclaturePage() {
         <tbody>
           {visible.length === 0 ? (
             <tr>
-              <td colSpan={6} className="hint">
-                Номенклатуры пока нет — добавьте первую позицию.
+              <td colSpan={7} className="hint">
+                Номенклатуры не найдено.
               </td>
             </tr>
           ) : (
@@ -162,6 +187,7 @@ export function NomenclaturePage() {
                 <td>{product.name}</td>
                 <td>{PRODUCT_KIND_LABELS[product.kind] ?? product.kind}</td>
                 <td>{product.unit}</td>
+                <td>{product.source === '1c' ? '1С' : 'вручную'}</td>
                 <td>
                   <span className={product.is_active ? 'badge status-approved' : 'badge'}>
                     {product.is_active ? 'Активна' : 'Отключена'}

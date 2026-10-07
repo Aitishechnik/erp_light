@@ -29,7 +29,7 @@ from app.db import Base
 
 if TYPE_CHECKING:
     from app.models.auth import User
-    from app.models.clients import Client
+    from app.models.counterparties import Counterparty
     from app.models.domain import Product
 
 # Статусы плана продаж: черновик → заполняется → на проверке → утверждён.
@@ -94,8 +94,10 @@ class SalesPlanItem(Base):
     product_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("products.id", ondelete="RESTRICT"), nullable=False, index=True
     )
+    # Клиент плана — контрагент с признаком «покупатель» (client_id оставлен
+    # ради совместимости с уже согласованным API плана продаж).
     client_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("clients.id", ondelete="RESTRICT"), nullable=False, index=True
+        Uuid, ForeignKey("counterparties.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     month: Mapped[int] = mapped_column(Integer, nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False, default=Decimal("0"))
@@ -106,4 +108,4 @@ class SalesPlanItem(Base):
 
     plan: Mapped[SalesPlan] = relationship(back_populates="items")
     product: Mapped[Product] = relationship(lazy="joined")
-    client: Mapped[Client] = relationship(lazy="joined")
+    client: Mapped[Counterparty] = relationship(lazy="joined")

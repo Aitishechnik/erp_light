@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { logout as apiLogout, fetchMe, type Role, SALES_PLAN_ROLES, type SessionUser } from './api'
-import { ClientsPage } from './ClientsPage'
+import { CounterpartiesPage } from './CounterpartiesPage'
+import { ImportsPage } from './ImportsPage'
 import { LoginPage } from './LoginPage'
 import { NomenclaturePage } from './NomenclaturePage'
 import { SalesPlansPage } from './SalesPlansPage'
@@ -11,7 +12,8 @@ type SectionId =
   | 'sales'
   | 'purchase'
   | 'nomenclature'
-  | 'clients'
+  | 'counterparties'
+  | 'imports'
   | 'pricing'
   | 'finance'
   | 'tasks'
@@ -33,7 +35,8 @@ const SECTIONS: Section[] = [
     roles: ['purchase_director', 'import_manager', 'executive_director'],
   },
   { id: 'nomenclature', title: 'Номенклатура', ready: true },
-  { id: 'clients', title: 'Клиенты', ready: true },
+  { id: 'counterparties', title: 'Контрагенты', ready: true },
+  { id: 'imports', title: 'Загрузка данных', ready: true },
   { id: 'pricing', title: 'Матрица цен', ready: false },
   { id: 'finance', title: 'PnL / Cashflow', ready: false },
   { id: 'tasks', title: 'Задачи', ready: false },
@@ -108,7 +111,8 @@ export function App() {
         {current.id === 'stock' && current.ready ? <StockPage /> : null}
         {current.id === 'sales' && current.ready ? <SalesPlansPage user={user} /> : null}
         {current.id === 'nomenclature' && current.ready ? <NomenclaturePage /> : null}
-        {current.id === 'clients' && current.ready ? <ClientsPage /> : null}
+        {current.id === 'counterparties' && current.ready ? <CounterpartiesPage /> : null}
+        {current.id === 'imports' && current.ready ? <ImportsPage /> : null}
         {!current.ready ? (
           <section>
             <h1>{current.title}</h1>

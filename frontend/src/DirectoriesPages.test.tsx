@@ -1,70 +1,149 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Client, Product } from './api'
+import type { Counterparty, ImportKind, ImportSession, Product } from './api'
 import { mockApi } from './apiMock'
-import { ClientsPage } from './ClientsPage'
+import { CounterpartiesPage } from './CounterpartiesPage'
+import { ImportsPage } from './ImportsPage'
 import { NomenclaturePage } from './NomenclaturePage'
 
-const CLIENTS: Client[] = [
-  { id: 'c1', name: 'ООО Ромашка', inn: '7701234567', note: null, is_active: true },
-  { id: 'c2', name: 'ООО Вектор', inn: null, note: 'Старый клиент', is_active: false },
-]
-
-const PRODUCTS: Product[] = [
-  { id: 'p1', code: 'SKU-100', name: 'Краска белая', kind: 'goods', unit: 'шт', is_active: true },
+const COUNTERPARTIES: Counterparty[] = [
   {
-    id: 'p2',
-    code: 'SKU-200',
-    name: 'Растворитель',
-    kind: 'material',
-    unit: 'кг',
+    id: 'c1',
+    name: 'ООО Ромашка',
+    inn: '7701234567',
+    note: null,
+    is_customer: true,
+    is_local_supplier: false,
+    is_import_supplier: false,
+    source: '1c',
+    is_active: true,
+  },
+  {
+    id: 'c2',
+    name: 'Комус',
+    inn: null,
+    note: null,
+    is_customer: true,
+    is_local_supplier: true,
+    is_import_supplier: false,
+    source: '1c',
     is_active: false,
   },
 ]
+
+const PRODUCTS: Product[] = [
+  {
+    id: 'p1',
+    code: 'ТОВ394895',
+    name: 'Антиоксидант',
+    kind: 'material',
+    unit: 'л',
+    source: '1c',
+    is_active: true,
+  },
+  {
+    id: 'p2',
+    code: 'ТОВ396451',
+    name: 'Абрикос цукаты',
+    kind: 'raw',
+    unit: 'кг',
+    source: '1c',
+    is_active: false,
+  },
+]
+
+const KINDS: ImportKind[] = [
+  { kind: 'customers', title: 'Покупатели', entity: 'counterparties', columns: ['Наименование'] },
+  {
+    kind: 'materials',
+    title: 'Материалы',
+    entity: 'products',
+    columns: ['Код', 'Наименование', 'Базовая единица измерения'],
+  },
+]
+
+const SESSION: ImportSession = {
+  id: 's1',
+  kind: 'customers',
+  kind_title: 'Покупатели',
+  file_name: 'Покупатели.xlsx',
+  status: 'ok',
+  rows_total: 789,
+  rows_created: 775,
+  rows_updated: 4,
+  rows_skipped: 10,
+  rows_failed: 0,
+  message: null,
+  created_at: '2026-10-08T01:00:00Z',
+}
 
 afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('ClientsPage', () => {
-  it('показывает клиентов и их состояние', async () => {
-    mockApi({ '/api/v1/clients': { body: CLIENTS } })
-    render(<ClientsPage />)
+/** Тела запросов: у POST это строка JSON внутри init.body. */
+function bodies(): string[] {
+  const mock = fetch as unknown as { mock: { calls: unknown[][] } }
+  return mock.mock.calls.map((call) =>
+    String((call[1] as { body?: unknown } | undefined)?.body ?? ''),
+  )
+}
 
-    expect(await screen.findByTestId('clients-table')).toHaveTextContent('ООО Ромашка')
-    expect(screen.getByText('7701234567')).toBeInTheDocument()
-    expect(screen.getByText('Отключён')).toBeInTheDocument()
-    expect(screen.getByTestId('clients-count')).toHaveTextContent('1')
+describe('CounterpartiesPage', () => {
+  it('показывает роли контрагента; отключённые скрыты до запроса', async () => {
+    const user = userEvent.setup()
+    mockApi({ '/api/v1/counterparties': { body: COUNTERPARTIES } })
+    render(<CounterpartiesPage />)
+
+    expect(await screen.findByTestId('counterparties-table')).toHaveTextContent('ООО Ромашка')
+    expect(screen.getByTestId('counterparties-count')).toHaveTextContent('1')
+    expect(screen.queryByText('Комус')).not.toBeInTheDocument()
+
+    await user.click(screen.getByLabelText('показывать отключённых'))
+    expect(screen.getByTestId('counterparties-count')).toHaveTextContent('2')
+    expect(screen.getByText('Покупатель, Локальный поставщик')).toBeInTheDocument()
   })
 
-  it('добавляет клиента и перечитывает список', async () => {
+  it('фильтрует по поиску', async () => {
     const user = userEvent.setup()
-    mockApi({
-      '/api/v1/clients': { body: CLIENTS },
-      '/api/v1/clients/c1': { body: { ...CLIENTS[0], is_active: false } },
-    })
-    render(<ClientsPage />)
+    mockApi({ '/api/v1/counterparties': { body: COUNTERPARTIES } })
+    render(<CounterpartiesPage />)
 
-    await screen.findByTestId('clients-table')
-    await user.type(screen.getByLabelText('Наименование клиента'), 'ООО Новый')
+    await screen.findByTestId('counterparties-table')
+    await user.type(screen.getByLabelText('Поиск по наименованию'), 'ромашка')
+
+    expect(screen.getByTestId('counterparties-count')).toHaveTextContent('1')
+    expect(screen.getByText('ООО Ромашка')).toBeInTheDocument()
+
+    await user.clear(screen.getByLabelText('Поиск по наименованию'))
+    await user.type(screen.getByLabelText('Поиск по наименованию'), 'нетакого')
+    expect(screen.getByTestId('counterparties-count')).toHaveTextContent('0')
+  })
+
+  it('добавляет контрагента с признаками', async () => {
+    const user = userEvent.setup()
+    mockApi({ '/api/v1/counterparties': { body: COUNTERPARTIES } })
+    render(<CounterpartiesPage />)
+
+    await screen.findByTestId('counterparties-table')
+    await user.type(screen.getByLabelText('Наименование контрагента'), 'Новый Поставщик')
+    await user.click(screen.getByLabelText('импортный поставщик'))
     await user.click(screen.getByRole('button', { name: 'Добавить' }))
 
-    const posted = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.some((call) =>
-      JSON.stringify(call[1] ?? {}).includes('ООО Новый'),
-    )
+    const posted = bodies().some((body) => body.includes('"is_import_supplier":true'))
     expect(posted).toBe(true)
   })
 
-  it('показывает ошибку, если клиент уже есть', async () => {
+  it('показывает ошибку при дубле наименования', async () => {
     const user = userEvent.setup()
     mockApi({
-      '/api/v1/clients': { status: 409, body: { detail: 'Клиент «ООО Ромашка» уже есть' } },
+      '/api/v1/counterparties': { status: 409, body: { detail: 'Контрагент «Комус» уже есть' } },
     })
-    render(<ClientsPage />)
+    render(<CounterpartiesPage />)
 
-    await screen.findByTestId('clients-table')
-    await user.type(screen.getByLabelText('Наименование клиента'), 'ООО Ромашка')
+    await screen.findByTestId('counterparties-table')
+    await user.type(screen.getByLabelText('Наименование контрагента'), 'Комус')
     await user.click(screen.getByRole('button', { name: 'Добавить' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('уже есть')
@@ -72,18 +151,24 @@ describe('ClientsPage', () => {
 })
 
 describe('NomenclaturePage', () => {
-  it('показывает номенклатуру и фильтрует по виду', async () => {
+  it('фильтрует по виду и ищет по коду', async () => {
     const user = userEvent.setup()
     mockApi({ '/api/v1/products': { body: PRODUCTS } })
     render(<NomenclaturePage />)
 
-    expect(await screen.findByTestId('products-table')).toHaveTextContent('Краска белая')
+    expect(await screen.findByTestId('products-table')).toHaveTextContent('Антиоксидант')
+    // Отключённые позиции по умолчанию скрыты.
+    expect(screen.getByTestId('products-count')).toHaveTextContent('1')
+    await user.click(screen.getByLabelText('показывать отключённые'))
     expect(screen.getByTestId('products-count')).toHaveTextContent('2')
 
-    await user.selectOptions(screen.getByLabelText('Фильтр по виду'), 'material')
+    await user.selectOptions(screen.getByLabelText('Фильтр по виду'), 'raw')
     expect(screen.getByTestId('products-count')).toHaveTextContent('1')
-    expect(screen.getByText('Растворитель')).toBeInTheDocument()
-    expect(screen.queryByText('Краска белая')).not.toBeInTheDocument()
+    expect(screen.getByText('Абрикос цукаты')).toBeInTheDocument()
+
+    await user.selectOptions(screen.getByLabelText('Фильтр по виду'), '')
+    await user.type(screen.getByLabelText('Поиск по коду или наименованию'), 'ТОВ3948')
+    expect(screen.getByTestId('products-count')).toHaveTextContent('1')
   })
 
   it('заводит позицию номенклатуры', async () => {
@@ -92,32 +177,52 @@ describe('NomenclaturePage', () => {
     render(<NomenclaturePage />)
 
     await screen.findByTestId('products-table')
-    await user.type(screen.getByLabelText('Код'), 'SKU-300')
+    await user.type(screen.getByLabelText('Код'), 'ТОВ900')
     await user.type(screen.getByLabelText('Наименование'), 'Грунтовка')
     await user.type(screen.getByLabelText('Единица'), 'л')
     await user.click(screen.getByRole('button', { name: 'Добавить' }))
 
     const posted = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.some((call) =>
-      JSON.stringify(call[1] ?? {}).includes('SKU-300'),
+      JSON.stringify(call[1] ?? {}).includes('ТОВ900'),
     )
     expect(posted).toBe(true)
   })
+})
 
-  it('показывает ошибку при дубле кода', async () => {
+describe('ImportsPage', () => {
+  it('показывает карточки типов и журнал загрузок', async () => {
+    mockApi({
+      '/api/v1/imports/kinds': { body: KINDS },
+      '/api/v1/imports?limit=20': { body: [SESSION] },
+    })
+    render(<ImportsPage />)
+
+    expect(await screen.findByTestId('import-card-customers')).toHaveTextContent('Покупатели')
+    expect(screen.getByTestId('import-card-materials')).toHaveTextContent(
+      'Код, Наименование, Базовая единица измерения',
+    )
+    expect(screen.getByTestId('imports-journal')).toHaveTextContent('Покупатели.xlsx')
+    expect(screen.getByTestId('imports-journal')).toHaveTextContent('775')
+  })
+
+  it('загружает файл и показывает итог', async () => {
     const user = userEvent.setup()
     mockApi({
-      '/api/v1/products': {
-        status: 409,
-        body: { detail: 'Номенклатура с кодом «SKU-100» уже есть' },
-      },
+      '/api/v1/imports/kinds': { body: KINDS },
+      '/api/v1/imports?limit=20': { body: [] },
+      '/api/v1/imports/customers': { body: SESSION },
     })
-    render(<NomenclaturePage />)
+    render(<ImportsPage />)
 
-    await screen.findByTestId('products-table')
-    await user.type(screen.getByLabelText('Код'), 'SKU-100')
-    await user.type(screen.getByLabelText('Наименование'), 'Дубль')
-    await user.click(screen.getByRole('button', { name: 'Добавить' }))
+    await screen.findByTestId('import-card-customers')
+    const file = new File(['xlsx'], 'Покупатели.xlsx', { type: 'text/plain' })
+    await user.upload(screen.getByLabelText('Файл: Покупатели'), file)
+    const card = screen.getByTestId('import-card-customers')
+    await user.click(within(card).getByRole('button', { name: 'Загрузить' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('уже есть')
+    await waitFor(() => {
+      expect(screen.getByTestId('import-result-customers')).toHaveTextContent('Создано: 775')
+    })
+    expect(screen.getByTestId('import-result-customers')).toHaveTextContent('пропущено дублей: 10')
   })
 })

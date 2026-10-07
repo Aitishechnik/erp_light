@@ -1,0 +1,165 @@
+import { type ChangeEvent, useCallback, useEffect, useState } from 'react'
+import {
+  errorMessage,
+  fetchImportKinds,
+  fetchImports,
+  type ImportKind,
+  type ImportSession,
+  uploadImport,
+} from './api'
+
+const STATUS_TITLES: Record<string, string> = {
+  ok: 'загружено',
+  partial: 'загружено с замечаниями',
+  failed: 'ошибка',
+}
+
+export function ImportsPage() {
+  const [kinds, setKinds] = useState<ImportKind[]>([])
+  const [journal, setJournal] = useState<ImportSession[]>([])
+  const [files, setFiles] = useState<Record<string, File | null>>({})
+  const [results, setResults] = useState<Record<string, ImportSession>>({})
+  const [busyKind, setBusyKind] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const reload = useCallback(async () => {
+    try {
+      const [loadedKinds, loadedJournal] = await Promise.all([fetchImportKinds(), fetchImports(20)])
+      setKinds(loadedKinds)
+      setJournal(loadedJournal)
+    } catch (err) {
+      setError(errorMessage(err))
+    }
+  }, [])
+
+  useEffect(() => {
+    void reload()
+  }, [reload])
+
+  const pick = (kind: string, event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null
+    setFiles((current) => ({ ...current, [kind]: file }))
+  }
+
+  const send = async (kind: string) => {
+    const file = files[kind]
+    if (!file) return
+    setBusyKind(kind)
+    setError(null)
+    try {
+      const result = await uploadImport(kind, file)
+      setResults((current) => ({ ...current, [kind]: result }))
+      setFiles((current) => ({ ...current, [kind]: null }))
+      await reload()
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusyKind(null)
+    }
+  }
+
+  return (
+    <section>
+      <header className="page-head">
+        <h1>Загрузка данных</h1>
+        <p className="hint">
+          Файлы выгрузок из 1С в формате .xlsx. Номенклатура опознаётся по коду 1С, контрагенты — по
+          наименованию, поэтому повторная загрузка не создаёт дублей, а обновляет найденные записи.
+        </p>
+      </header>
+
+      {error ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : null}
+
+      <div className="import-cards">
+        {kinds.map((kind) => {
+          const result = results[kind.kind]
+          return (
+            <article
+              className="import-card"
+              key={kind.kind}
+              data-testid={`import-card-${kind.kind}`}
+            >
+              <h2>{kind.title}</h2>
+              <p className="hint">Колонки: {kind.columns.join(', ')}</p>
+              <input
+                type="file"
+                accept=".xlsx"
+                aria-label={`Файл: ${kind.title}`}
+                onChange={(event) => pick(kind.kind, event)}
+              />
+              <button
+                type="button"
+                className="primary"
+                disabled={!files[kind.kind] || busyKind !== null}
+                onClick={() => void send(kind.kind)}
+              >
+                {busyKind === kind.kind ? 'Загрузка…' : 'Загрузить'}
+              </button>
+              {result ? (
+                <p className="import-result" data-testid={`import-result-${kind.kind}`}>
+                  Создано: <strong>{result.rows_created}</strong>, обновлено:{' '}
+                  <strong>{result.rows_updated}</strong>, пропущено дублей:{' '}
+                  <strong>{result.rows_skipped}</strong>, ошибок:{' '}
+                  <strong>{result.rows_failed}</strong> (
+                  {STATUS_TITLES[result.status] ?? result.status})
+                </p>
+              ) : null}
+            </article>
+          )
+        })}
+      </div>
+
+      <h2 className="section-title">Журнал загрузок</h2>
+      <table data-testid="imports-journal">
+        <thead>
+          <tr>
+            <th scope="col">Когда</th>
+            <th scope="col">Тип данных</th>
+            <th scope="col">Файл</th>
+            <th scope="col" className="num">
+              Всего
+            </th>
+            <th scope="col" className="num">
+              Создано
+            </th>
+            <th scope="col" className="num">
+              Обновлено
+            </th>
+            <th scope="col" className="num">
+              Дублей
+            </th>
+            <th scope="col" className="num">
+              Ошибок
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {journal.length === 0 ? (
+            <tr>
+              <td colSpan={8} className="hint">
+                Загрузок пока не было.
+              </td>
+            </tr>
+          ) : (
+            journal.map((row) => (
+              <tr key={row.id}>
+                <td>{new Date(row.created_at).toLocaleString('ru-RU')}</td>
+                <td>{row.kind_title}</td>
+                <td>{row.file_name}</td>
+                <td className="num">{row.rows_total}</td>
+                <td className="num">{row.rows_created}</td>
+                <td className="num">{row.rows_updated}</td>
+                <td className="num">{row.rows_skipped}</td>
+                <td className="num">{row.rows_failed}</td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </section>
+  )
+}

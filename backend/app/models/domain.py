@@ -29,8 +29,15 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
 
-# Виды номенклатуры (соответствуют раздельным отчётам «Остатки»).
-PRODUCT_KINDS = ("goods", "material")
+# Виды номенклатуры: соответствуют файлам выгрузки из 1С.
+PRODUCT_KINDS = ("goods", "material", "raw", "finished")
+
+PRODUCT_KIND_TITLES = {
+    "goods": "Товар",
+    "material": "Материалы",
+    "raw": "Сырьё",
+    "finished": "Готовая продукция",
+}
 
 # Типы партий.
 BATCH_TYPES = ("purchase", "production")
@@ -40,7 +47,10 @@ SOURCES = ("1c", "manual")
 
 
 class Product(Base):
-    """Номенклатура: товар или материал."""
+    """Номенклатура: товар, материал, сырьё или готовая продукция.
+
+    Код — код из 1С, поэтому выгрузки обновляют позиции по нему, а не создают дубли.
+    """
 
     __tablename__ = "products"
 
@@ -49,6 +59,7 @@ class Product(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     kind: Mapped[str] = mapped_column(String(16), nullable=False, default="goods", index=True)
     unit: Mapped[str] = mapped_column(String(16), nullable=False, default="шт")
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
     is_active: Mapped[bool] = mapped_column(nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -175,7 +186,9 @@ class ImportSession(Base):
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
     rows_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    rows_ok: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rows_created: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rows_updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rows_skipped: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     rows_failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

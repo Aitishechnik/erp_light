@@ -122,28 +122,78 @@ test('пустой список показывает подсказку', async 
   await expect(page.getByTestId('empty-state')).toBeVisible()
 })
 
-test('клиент заводится в справочнике', async ({ page }) => {
-  let clients: unknown[] = []
+test('контрагент заводится в справочнике с признаком покупателя', async ({ page }) => {
+  let rows: unknown[] = []
   await mockSession(page)
-  await page.route('**/api/v1/clients**', (route) => {
+  await page.route('**/api/v1/counterparties**', (route) => {
     if (route.request().method() === 'POST') {
-      const body = route.request().postDataJSON() as { name: string }
-      clients = [{ ...CLIENT, name: body.name }]
-      return route.fulfill({ status: 201, json: clients[0] })
+      const body = route.request().postDataJSON() as { name: string; is_customer: boolean }
+      rows = [{ ...CLIENT, name: body.name, is_customer: body.is_customer }]
+      return route.fulfill({ status: 201, json: rows[0] })
     }
-    return route.fulfill({ json: clients })
+    return route.fulfill({ json: rows })
   })
 
   await page.goto('/')
-  await page.getByRole('button', { name: 'Клиенты' }).click()
-  await expect(page.getByTestId('clients-table')).toContainText('Клиентов пока нет')
+  await page.getByRole('button', { name: 'Контрагенты' }).click()
+  await expect(page.getByTestId('counterparties-table')).toContainText('Контрагентов не найдено')
 
-  await page.getByLabel('Наименование клиента').fill('ООО Ромашка')
+  await page.getByLabel('Наименование контрагента').fill('ООО Ромашка')
   await page.getByLabel('ИНН').fill('7701234567')
   await page.getByRole('button', { name: 'Добавить' }).click()
 
-  await expect(page.getByTestId('clients-table')).toContainText('ООО Ромашка')
-  await expect(page.getByTestId('clients-count')).toHaveText('1')
+  await expect(page.getByTestId('counterparties-table')).toContainText('ООО Ромашка')
+  await expect(page.getByTestId('counterparties-table')).toContainText('Покупатель')
+  await expect(page.getByTestId('counterparties-count')).toHaveText('1')
+})
+
+test('файл выгрузки загружается на странице «Загрузка данных»', async ({ page }) => {
+  await mockSession(page)
+  await page.route('**/api/v1/imports/kinds', (route) =>
+    route.fulfill({
+      json: [
+        {
+          kind: 'customers',
+          title: 'Покупатели',
+          entity: 'counterparties',
+          columns: ['Наименование'],
+        },
+      ],
+    }),
+  )
+  await page.route('**/api/v1/imports?limit=20', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/imports/customers', (route) =>
+    route.fulfill({
+      json: {
+        id: 's1',
+        kind: 'customers',
+        kind_title: 'Покупатели',
+        file_name: 'Покупатели.xlsx',
+        status: 'ok',
+        rows_total: 789,
+        rows_created: 775,
+        rows_updated: 4,
+        rows_skipped: 10,
+        rows_failed: 0,
+        message: null,
+        created_at: '2026-10-08T01:00:00Z',
+      },
+    }),
+  )
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Загрузка данных' }).click()
+  await expect(page.getByTestId('import-card-customers')).toContainText('Покупатели')
+
+  await page.getByLabel('Файл: Покупатели').setInputFiles({
+    name: 'Покупатели.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    buffer: Buffer.from('test'),
+  })
+  await page.getByTestId('import-card-customers').getByRole('button', { name: 'Загрузить' }).click()
+
+  await expect(page.getByTestId('import-result-customers')).toContainText('Создано: 775')
+  await expect(page.getByTestId('import-result-customers')).toContainText('пропущено дублей: 10')
 })
 
 test('менеджер заполняет план продаж по клиенту и отправляет его на проверку', async ({ page }) => {
@@ -151,7 +201,7 @@ test('менеджер заполняет план продаж по клиен�
   await mockSession(page)
   await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
   await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
-  await page.route('**/api/v1/clients**', (route) => route.fulfill({ json: [CLIENT] }))
+  await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [CLIENT] }))
   await page.route('**/api/v1/sales-plans/*/submit', (route) => {
     submitted = true
     return route.fulfill({ json: plan({ status: 'on_review', status_title: 'На проверке' }) })

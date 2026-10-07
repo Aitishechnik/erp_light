@@ -17,6 +17,7 @@ class ProductOut(BaseModel):
     name: str
     kind: str
     unit: str
+    source: str
     is_active: bool
 
 

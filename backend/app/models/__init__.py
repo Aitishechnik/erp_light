@@ -11,9 +11,10 @@ from app.models.auth import (
     AuthSession,
     User,
 )
-from app.models.clients import Client
+from app.models.counterparties import Counterparty, name_key
 from app.models.domain import (
     BATCH_TYPES,
+    PRODUCT_KIND_TITLES,
     PRODUCT_KINDS,
     SOURCES,
     Batch,
@@ -32,6 +33,7 @@ from app.models.planning import (
 
 __all__ = [
     "BATCH_TYPES",
+    "PRODUCT_KIND_TITLES",
     "PRODUCT_KINDS",
     "ROLES",
     "ROLE_COMMERCIAL_DIRECTOR",
@@ -47,11 +49,12 @@ __all__ = [
     "Batch",
     "BatchExpense",
     "BatchItem",
-    "Client",
+    "Counterparty",
     "ImportSession",
     "Product",
     "SalesPlan",
     "SalesPlanItem",
     "StockSnapshot",
     "User",
+    "name_key",
 ]

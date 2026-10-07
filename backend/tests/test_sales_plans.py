@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.auth import ROLE_SALES_MANAGER, User
-from app.models.clients import Client
+from app.models.counterparties import Counterparty
 from app.models.domain import Product
 from app.services.auth import hash_password
 
@@ -26,15 +26,19 @@ def products(db_session: Session) -> list[Product]:
 
 
 @pytest.fixture
-def clients(db_session: Session) -> list[Client]:
-    first = Client(name="ООО Ромашка", inn="7701234567")
-    second = Client(name="ООО Вектор")
+def clients(db_session: Session) -> list[Counterparty]:
+    first = Counterparty(
+        name="ООО Ромашка", name_key="ооо ромашка", inn="7701234567", is_customer=True
+    )
+    second = Counterparty(name="ООО Вектор", name_key="ооо вектор", is_customer=True)
     db_session.add_all([first, second])
     db_session.commit()
     return [first, second]
 
 
-def _item(product: Product, month: int, quantity: str, client_row: Client) -> dict[str, str | int]:
+def _item(
+    product: Product, month: int, quantity: str, client_row: Counterparty
+) -> dict[str, str | int]:
     return {
         "client_id": str(client_row.id),
         "product_id": str(product.id),
@@ -51,7 +55,7 @@ def _create_plan(client: TestClient, year: int, **extra: object) -> dict[str, An
 
 
 def test_manager_fills_and_commercial_director_approves(
-    client: TestClient, login, products: list[Product], clients: list[Client]
+    client: TestClient, login, products: list[Product], clients: list[Counterparty]
 ) -> None:
     login("sales")
     me = client.get("/api/v1/auth/me").json()
@@ -91,7 +95,7 @@ def test_manager_fills_and_commercial_director_approves(
 
 
 def test_same_product_for_two_clients_is_allowed(
-    client: TestClient, login, products: list[Product], clients: list[Client]
+    client: TestClient, login, products: list[Product], clients: list[Counterparty]
 ) -> None:
     login("sales")
     plan = _create_plan(client, TODAY.year)
@@ -151,7 +155,7 @@ def test_unknown_client_is_rejected(client: TestClient, login, products: list[Pr
 
 
 def test_commercial_director_creates_plan_and_rejects(
-    client: TestClient, login, products: list[Product], clients: list[Client]
+    client: TestClient, login, products: list[Product], clients: list[Counterparty]
 ) -> None:
     login("commercial")
     managers = client.get("/api/v1/users", params={"role": "sales_manager"}).json()
@@ -197,7 +201,7 @@ def test_empty_plan_cannot_be_submitted(client: TestClient, login) -> None:
 
 
 def test_past_year_is_frozen(
-    client: TestClient, login, products: list[Product], clients: list[Client]
+    client: TestClient, login, products: list[Product], clients: list[Counterparty]
 ) -> None:
     login("sales")
     plan = _create_plan(client, TODAY.year - 1)
@@ -210,7 +214,7 @@ def test_past_year_is_frozen(
 
 
 def test_past_month_of_current_year_is_frozen(
-    client: TestClient, login, products: list[Product], clients: list[Client]
+    client: TestClient, login, products: list[Product], clients: list[Counterparty]
 ) -> None:
     if TODAY.month == 1:
         pytest.skip("в январе прошлых месяцев текущего года нет")
@@ -225,7 +229,7 @@ def test_past_month_of_current_year_is_frozen(
 
 
 def test_manager_sees_only_own_plans(
-    client: TestClient, login, clients: list[Client], db_session: Session
+    client: TestClient, login, clients: list[Counterparty], db_session: Session
 ) -> None:
     login("sales")
     own = _create_plan(client, TODAY.year)
@@ -249,7 +253,7 @@ def test_manager_sees_only_own_plans(
 
 
 def test_commercial_director_edit_returns_approved_plan_to_review(
-    client: TestClient, login, products: list[Product], clients: list[Client]
+    client: TestClient, login, products: list[Product], clients: list[Counterparty]
 ) -> None:
     login("sales")
     plan = _create_plan(client, TODAY.year)
@@ -271,7 +275,7 @@ def test_commercial_director_edit_returns_approved_plan_to_review(
 
 
 def test_duplicate_row_is_rejected(
-    client: TestClient, login, products: list[Product], clients: list[Client]
+    client: TestClient, login, products: list[Product], clients: list[Counterparty]
 ) -> None:
     login("sales")
     plan = _create_plan(client, TODAY.year)

@@ -388,3 +388,50 @@ button.primary,
   color: var(--accent);
   font-weight: 600;
 }
+
+/* ── Загрузка данных ───────────────────────────────────────────────────── */
+
+.import-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.import-card {
+  display: grid;
+  gap: 0.5rem;
+  align-content: start;
+  padding: 0.9rem 1rem;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+}
+
+.import-card h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.import-card .hint {
+  margin: 0;
+}
+
+.import-card button {
+  justify-self: start;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.import-result {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #067647;
+}
+
+.section-title {
+  font-size: 1.05rem;
+  margin: 1.5rem 0 0.75rem;
+}
