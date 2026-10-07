@@ -20,6 +20,7 @@ from app.models.auth import (
     ROLE_SALES_MANAGER,
     User,
 )
+from app.models.clients import Client
 from app.models.planning import (
     SALES_PLAN_STATUS_TITLES,
     SalesPlan,
@@ -48,6 +49,7 @@ def _load(db: Session, plan_id: uuid.UUID) -> SalesPlan | None:
             select(SalesPlan)
             .where(SalesPlan.id == plan_id)
             .options(selectinload(SalesPlan.items).selectinload(SalesPlanItem.product))
+            .options(selectinload(SalesPlan.items).selectinload(SalesPlanItem.client))
             .execution_options(populate_existing=True)
         )
         .scalars()
@@ -79,10 +81,22 @@ def _check_commercial_director(user: User) -> None:
         raise PlanError("Действие доступно только коммерческому директору", status_code=403)
 
 
+def _check_clients(db: Session, client_ids: set[uuid.UUID]) -> None:
+    """Все клиенты строк должны существовать и быть активными."""
+    for client_id in client_ids:
+        client = db.get(Client, client_id)
+        if client is None:
+            raise PlanError("Клиент не найден", status_code=404)
+        if not client.is_active:
+            raise PlanError(f"Клиент «{client.name}» отключён — строку по нему не сохранить")
+
+
 def _serialize(plan: SalesPlan) -> SalesPlanOut:
     items = [
         SalesPlanItemOut(
             id=item.id,
+            client_id=item.client_id,
+            client_name=item.client.name,
             product_id=item.product_id,
             product_code=item.product.code,
             product_name=item.product.name,
@@ -94,7 +108,9 @@ def _serialize(plan: SalesPlan) -> SalesPlanOut:
             amount=q2(item.quantity * item.price) if item.price is not None else None,
             notes=item.notes,
         )
-        for item in sorted(plan.items, key=lambda row: (row.product.name, row.month))
+        for item in sorted(
+            plan.items, key=lambda row: (row.client.name, row.product.name, row.month)
+        )
     ]
     total = sum((item.amount for item in items if item.amount is not None), ZERO)
     return SalesPlanOut(
@@ -119,6 +135,7 @@ def list_plans(db: Session, user: User, *, year: int | None = None) -> list[Sale
     statement = (
         select(SalesPlan)
         .options(selectinload(SalesPlan.items).selectinload(SalesPlanItem.product))
+        .options(selectinload(SalesPlan.items).selectinload(SalesPlanItem.client))
         .order_by(SalesPlan.year.desc(), SalesPlan.created_at)
     )
     if user.role == ROLE_SALES_MANAGER:
@@ -193,12 +210,14 @@ def update_items(
 
     check_months_editable(plan.year, {item.month for item in items})
 
-    seen: set[tuple[uuid.UUID, int]] = set()
+    seen: set[tuple[uuid.UUID, uuid.UUID, int]] = set()
     for item in items:
-        key = (item.product_id, item.month)
+        key = (item.client_id, item.product_id, item.month)
         if key in seen:
-            raise PlanError("В плане две строки на один товар и месяц")
+            raise PlanError("В плане две строки на одного клиента, товар и месяц")
         seen.add(key)
+
+    _check_clients(db, {item.client_id for item in items})
 
     allowed = set(editable_months(plan.year))
     for existing in list(plan.items):
@@ -210,6 +229,7 @@ def update_items(
         db.add(
             SalesPlanItem(
                 plan_id=plan.id,
+                client_id=item.client_id,
                 product_id=item.product_id,
                 month=item.month,
                 quantity=item.quantity,

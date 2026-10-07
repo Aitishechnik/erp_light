@@ -11,6 +11,7 @@ from app.models.auth import (
     AuthSession,
     User,
 )
+from app.models.clients import Client
 from app.models.domain import (
     BATCH_TYPES,
     PRODUCT_KINDS,
@@ -46,6 +47,7 @@ __all__ = [
     "Batch",
     "BatchExpense",
     "BatchItem",
+    "Client",
     "ImportSession",
     "Product",
     "SalesPlan",

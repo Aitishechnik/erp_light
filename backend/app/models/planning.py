@@ -1,6 +1,6 @@
 """Планирование: годовой план продаж по менеджерам.
 
-Строка плана — товар × месяц, цена одна на строку и разносится по месяцам.
+Строка плана — клиент × товар × месяц, цена одна на строку и разносится по месяцам.
 Прошедшие месяцы заморожены (см. app/services/plan_freeze.py).
 """
 
@@ -28,6 +28,7 @@ from app.db import Base
 
 if TYPE_CHECKING:
     from app.models.auth import User
+    from app.models.clients import Client
     from app.models.domain import Product
 
 # Статусы плана продаж: черновик → заполняется → на проверке → утверждён.
@@ -76,7 +77,13 @@ class SalesPlanItem(Base):
 
     __tablename__ = "sales_plan_items"
     __table_args__ = (
-        UniqueConstraint("plan_id", "product_id", "month", name="sales_plan_item_product_month"),
+        UniqueConstraint(
+            "plan_id",
+            "client_id",
+            "product_id",
+            "month",
+            name="sales_plan_item_client_product_month",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -85,6 +92,9 @@ class SalesPlanItem(Base):
     )
     product_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("products.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("clients.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     month: Mapped[int] = mapped_column(Integer, nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False, default=Decimal("0"))
@@ -96,3 +106,4 @@ class SalesPlanItem(Base):
 
     plan: Mapped[SalesPlan] = relationship(back_populates="items")
     product: Mapped[Product] = relationship(lazy="joined")
+    client: Mapped[Client] = relationship(lazy="joined")

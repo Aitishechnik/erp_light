@@ -40,6 +40,8 @@ export type Product = {
 
 export type SalesPlanItem = {
   id: string
+  client_id: string
+  client_name: string
   product_id: string
   product_code: string
   product_name: string
@@ -71,10 +73,32 @@ export type SalesPlan = {
 }
 
 export type SalesPlanItemIn = {
+  client_id: string
   product_id: string
   month: number
   quantity: string
   price: string | null
+}
+
+export type Client = {
+  id: string
+  name: string
+  inn: string | null
+  note: string | null
+  is_active: boolean
+}
+
+export type ClientIn = {
+  name: string
+  inn?: string | null
+  note?: string | null
+}
+
+export type ProductIn = {
+  code: string
+  name: string
+  kind: string
+  unit: string
 }
 
 export class ApiError extends Error {
@@ -202,6 +226,45 @@ export function fetchProducts(): Promise<Product[]> {
   return request<Product[]>('/api/v1/products')
 }
 
+export function createProduct(payload: ProductIn): Promise<Product> {
+  return request<Product>('/api/v1/products', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateProduct(
+  productId: string,
+  payload: Partial<ProductIn> & { is_active?: boolean },
+): Promise<Product> {
+  return request<Product>(`/api/v1/products/${productId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function fetchClients(includeInactive = false): Promise<Client[]> {
+  const query = includeInactive ? '?include_inactive=true' : ''
+  return request<Client[]>(`/api/v1/clients${query}`)
+}
+
+export function createClient(payload: ClientIn): Promise<Client> {
+  return request<Client>('/api/v1/clients', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateClient(
+  clientId: string,
+  payload: Partial<ClientIn> & { is_active?: boolean },
+): Promise<Client> {
+  return request<Client>(`/api/v1/clients/${clientId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function fetchSalesPlans(): Promise<SalesPlan[]> {
   return request<SalesPlan[]>('/api/v1/sales-plans')
 }
@@ -236,4 +299,10 @@ export function rejectSalesPlan(planId: string, reason: string): Promise<SalesPl
 
 export function deleteSalesPlan(planId: string): Promise<void> {
   return request<void>(`/api/v1/sales-plans/${planId}`, { method: 'DELETE' })
+}
+
+/** Текст ошибки для показа пользователю. */
+export function errorMessage(err: unknown): string {
+  if (err instanceof ApiError) return err.message
+  return err instanceof Error ? err.message : 'Не удалось выполнить действие'
 }

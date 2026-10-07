@@ -20,6 +20,22 @@ class ProductOut(BaseModel):
     is_active: bool
 
 
+class ProductIn(BaseModel):
+    """Ручное заведение номенклатуры."""
+
+    code: str = Field(min_length=1, max_length=64, description="Код (артикул)")
+    name: str = Field(min_length=1, max_length=255)
+    kind: str = Field(default="goods", description="goods — товар, material — материал")
+    unit: str = Field(default="шт", min_length=1, max_length=16)
+
+
+class ProductUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    kind: str | None = None
+    unit: str | None = Field(default=None, min_length=1, max_length=16)
+    is_active: bool | None = None
+
+
 class BatchExpenseCreate(BaseModel):
     amount_rub: Decimal = Field(description="Сумма расхода в рублях, входит в себестоимость")
     description: str = ""

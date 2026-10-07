@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { SalesPlan, SessionUser } from './api'
+import type { Client, SalesPlan, SessionUser } from './api'
 import { mockApi } from './apiMock'
 import { SalesPlansPage } from './SalesPlansPage'
 
@@ -23,6 +23,16 @@ const MANAGER: SessionUser = {
   role_title: 'Менеджер по продажам',
 }
 
+const CLIENTS: Client[] = [
+  { id: 'client-1', name: 'ООО Ромашка', inn: '7701234567', note: null, is_active: true },
+  { id: 'client-2', name: 'ООО Вектор', inn: null, note: null, is_active: true },
+]
+
+const PRODUCTS = [
+  { id: 'product-1', code: 'SKU-1', name: 'Товар 1', kind: 'goods', unit: 'шт', is_active: true },
+  { id: 'product-2', code: 'SKU-2', name: 'Товар 2', kind: 'goods', unit: 'шт', is_active: true },
+]
+
 function plan(overrides: Partial<SalesPlan> = {}): SalesPlan {
   return {
     id: 'plan-1',
@@ -40,6 +50,8 @@ function plan(overrides: Partial<SalesPlan> = {}): SalesPlan {
     items: [
       {
         id: 'item-1',
+        client_id: 'client-1',
+        client_name: 'ООО Ромашка',
         product_id: 'product-1',
         product_code: 'SKU-1',
         product_name: 'Товар 1',
@@ -56,6 +68,15 @@ function plan(overrides: Partial<SalesPlan> = {}): SalesPlan {
   }
 }
 
+function routes(extra: Record<string, { status?: number; body?: unknown }> = {}) {
+  return {
+    '/api/v1/clients': { body: CLIENTS },
+    '/api/v1/products': { body: PRODUCTS },
+    '/api/v1/users': { body: [MANAGER] },
+    ...extra,
+  }
+}
+
 afterEach(() => {
   vi.unstubAllGlobals()
 })
@@ -65,15 +86,20 @@ function calls(): string[] {
   return mock.mock.calls.map((call) => String(call[0]))
 }
 
+function bodies(): string[] {
+  const mock = fetch as unknown as { mock: { calls: unknown[][] } }
+  return mock.mock.calls.map((call) => JSON.stringify(call[1] ?? {}))
+}
+
 describe('SalesPlansPage', () => {
-  it('показывает план и утверждает его по кнопке', async () => {
+  it('показывает план по клиенту и утверждает его по кнопке', async () => {
     const user = userEvent.setup()
-    mockApi({
-      '/api/v1/sales-plans/plan-1/approve': { body: plan({ status: 'approved' }) },
-      '/api/v1/sales-plans': { body: [plan()] },
-      '/api/v1/users': { body: [MANAGER] },
-      '/api/v1/products': { body: [] },
-    })
+    mockApi(
+      routes({
+        '/api/v1/sales-plans/plan-1/approve': { body: plan() },
+        '/api/v1/sales-plans': { body: [plan()] },
+      }),
+    )
     render(<SalesPlansPage user={COMMERCIAL} />)
 
     expect(await screen.findByText('Менеджер по продажам')).toBeInTheDocument()
@@ -81,7 +107,8 @@ describe('SalesPlansPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('plan-total')).toHaveTextContent('1 000,00')
     })
-    // Строка плана видна в матрице, замороженный январь недоступен для правки.
+    // Строка клиента ООО Ромашка видна, замороженный январь недоступен для правки.
+    expect(screen.getByTestId('current-client')).toHaveTextContent('ООО Ромашка')
     expect(screen.getByLabelText('SKU-1 Декабрь')).toHaveValue('10.000')
     expect(screen.getByLabelText('SKU-1 Январь')).toBeDisabled()
 
@@ -91,24 +118,57 @@ describe('SalesPlansPage', () => {
     })
   })
 
+  it('сохраняет строки с клиентом и товаром', async () => {
+    const user = userEvent.setup()
+    mockApi(
+      routes({
+        '/api/v1/sales-plans/plan-1/items': { body: plan() },
+        '/api/v1/sales-plans': { body: [plan({ status: 'filling', status_title: 'Заполняется' })] },
+      }),
+    )
+    render(<SalesPlansPage user={COMMERCIAL} />)
+
+    await screen.findByText('Заполняется')
+    await screen.findByTestId('plan-table')
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }))
+
+    await waitFor(() => {
+      expect(calls().some((url) => url.includes('/sales-plans/plan-1/items'))).toBe(true)
+    })
+    const sent = bodies().find((body) => body.includes('client_id'))
+    expect(sent).toBeDefined()
+    expect(sent).toContain('client-1')
+    expect(sent).toContain('product-1')
+  })
+
+  it('добавляет к плану второго клиента', async () => {
+    const user = userEvent.setup()
+    mockApi(
+      routes({
+        '/api/v1/sales-plans': { body: [plan({ status: 'filling', status_title: 'Заполняется' })] },
+      }),
+    )
+    render(<SalesPlansPage user={COMMERCIAL} />)
+
+    await screen.findByText('Заполняется')
+    await user.selectOptions(screen.getByLabelText('Добавить клиента'), 'ООО Вектор')
+    await user.click(screen.getByRole('button', { name: 'Добавить' }))
+
+    expect(screen.getByTestId('current-client')).toHaveTextContent('ООО Вектор')
+    expect(screen.getByTestId('plan-empty')).toBeInTheDocument()
+    // Оба клиента видны как вкладки.
+    expect(screen.getByRole('button', { name: 'ООО Ромашка' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'ООО Вектор' })).toBeInTheDocument()
+  })
+
   it('менеджер отправляет свой план на проверку', async () => {
     const user = userEvent.setup()
-    mockApi({
-      '/api/v1/sales-plans/plan-1/submit': { body: plan({ status: 'on_review' }) },
-      '/api/v1/sales-plans': { body: [plan({ status: 'filling', status_title: 'Заполняется' })] },
-      '/api/v1/products': {
-        body: [
-          {
-            id: 'product-2',
-            code: 'SKU-2',
-            name: 'Товар 2',
-            kind: 'goods',
-            unit: 'шт',
-            is_active: true,
-          },
-        ],
-      },
-    })
+    mockApi(
+      routes({
+        '/api/v1/sales-plans/plan-1/submit': { body: plan({ status: 'on_review' }) },
+        '/api/v1/sales-plans': { body: [plan({ status: 'filling', status_title: 'Заполняется' })] },
+      }),
+    )
     render(<SalesPlansPage user={MANAGER} />)
 
     await screen.findByText('Заполняется')
@@ -122,15 +182,15 @@ describe('SalesPlansPage', () => {
 
   it('показывает ошибку, если сохранение отклонено', async () => {
     const user = userEvent.setup()
-    mockApi({
-      '/api/v1/sales-plans/plan-1/items': {
-        status: 409,
-        body: { detail: 'Замороженные месяцы менять нельзя: 1' },
-      },
-      '/api/v1/sales-plans': { body: [plan({ status: 'filling', status_title: 'Заполняется' })] },
-      '/api/v1/users': { body: [MANAGER] },
-      '/api/v1/products': { body: [] },
-    })
+    mockApi(
+      routes({
+        '/api/v1/sales-plans/plan-1/items': {
+          status: 409,
+          body: { detail: 'Замороженные месяцы менять нельзя: 1' },
+        },
+        '/api/v1/sales-plans': { body: [plan({ status: 'filling', status_title: 'Заполняется' })] },
+      }),
+    )
     render(<SalesPlansPage user={COMMERCIAL} />)
 
     await screen.findByText('Заполняется')

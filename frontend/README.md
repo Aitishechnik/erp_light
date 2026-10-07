@@ -34,7 +34,9 @@ pnpm preview        # предпросмотр сборки, 127.0.0.1:4173
 src/App.tsx            каркас: вход, меню разделов, активный экран (список SECTIONS)
 src/LoginPage.tsx      экран входа
 src/StockPage.tsx      экран «Партии и остатки»
-src/SalesPlansPage.tsx экран «Планирование продаж» (матрица товар × месяц)
+src/SalesPlansPage.tsx экран «Планирование продаж» (клиент × товар × месяц)
+src/NomenclaturePage.tsx экран «Номенклатура» (заведение товаров и материалов)
+src/ClientsPage.tsx    экран «Клиенты»
 src/api.ts             запросы к API + форматирование денег/количества/дат
 src/apiMock.ts         помощник тестов: подмена fetch таблицей маршрутов
 src/*.test.tsx         unit-тесты рядом с кодом

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  ApiError,
+  type Client,
   createSalesPlan,
   deleteSalesPlan,
+  errorMessage,
+  fetchClients,
   fetchProducts,
   fetchSalesPlans,
   fetchUsers,
@@ -27,21 +29,20 @@ type DraftRow = {
   months: Record<number, string>
 }
 
-const QTY_PATTERN = /^\d+(?:[.,]\d{1,3})?$/
+/** Черновики строк по клиентам: ключ — id клиента. */
+type Drafts = Record<string, DraftRow[]>
 
-function message(err: unknown): string {
-  if (err instanceof ApiError) return err.message
-  return err instanceof Error ? err.message : 'Не удалось выполнить действие'
-}
+const QTY_PATTERN = /^\d+(?:[.,]\d{1,3})?$/
 
 function normalize(raw: string): string {
   return raw.trim().replace(',', '.')
 }
 
-function draftFromPlan(plan: SalesPlan): DraftRow[] {
-  const rows = new Map<string, DraftRow>()
+function draftsFromPlan(plan: SalesPlan): Drafts {
+  const drafts: Drafts = {}
   for (const item of plan.items) {
-    let row = rows.get(item.product_id)
+    const rows = drafts[item.client_id] ?? []
+    let row = rows.find((candidate) => candidate.productId === item.product_id)
     if (!row) {
       row = {
         productId: item.product_id,
@@ -51,12 +52,16 @@ function draftFromPlan(plan: SalesPlan): DraftRow[] {
         price: item.price ?? '',
         months: {},
       }
-      rows.set(item.product_id, row)
+      rows.push(row)
     }
     if (!row.price && item.price) row.price = item.price
     if (Number(item.quantity) !== 0) row.months[item.month] = item.quantity
+    drafts[item.client_id] = rows
   }
-  return [...rows.values()].sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+  for (const rows of Object.values(drafts)) {
+    rows.sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+  }
+  return drafts
 }
 
 export function SalesPlansPage({ user }: { user: SessionUser }) {
@@ -64,11 +69,14 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
   const [year, setYear] = useState(thisYear)
   const [plans, setPlans] = useState<SalesPlan[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [rows, setRows] = useState<DraftRow[]>([])
+  const [drafts, setDrafts] = useState<Drafts>({})
+  const [clientId, setClientId] = useState<string>('')
   const [products, setProducts] = useState<Product[]>([])
+  const [clients, setClients] = useState<Client[]>([])
   const [managers, setManagers] = useState<SessionUser[]>([])
   const [managerId, setManagerId] = useState('')
   const [productToAdd, setProductToAdd] = useState('')
+  const [clientToAdd, setClientToAdd] = useState('')
   const [rejectReason, setRejectReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -79,6 +87,9 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
   const plan = yearPlans.find((row) => row.id === selectedId) ?? null
   const isOwner = plan !== null && plan.manager_id === user.id
 
+  const clientName = (id: string): string => clients.find((row) => row.id === id)?.name ?? 'Клиент'
+  const activeClients = clients.filter((row) => row.is_active)
+
   const reload = useCallback(async () => {
     try {
       const loaded = await fetchSalesPlans()
@@ -87,15 +98,18 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
         current && loaded.some((row) => row.id === current) ? current : (loaded[0]?.id ?? null),
       )
     } catch (err) {
-      setError(message(err))
+      setError(errorMessage(err))
     }
   }, [])
 
   useEffect(() => {
     void reload()
     fetchProducts()
-      .then(setProducts)
+      .then((rows) => setProducts(rows.filter((product) => product.is_active)))
       .catch(() => setProducts([]))
+    fetchClients(true)
+      .then(setClients)
+      .catch(() => setClients([]))
     if (isCommercialDirector) {
       fetchUsers('sales_manager')
         .then((rows) => {
@@ -107,7 +121,12 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
   }, [reload, isCommercialDirector])
 
   useEffect(() => {
-    setRows(plan ? draftFromPlan(plan) : [])
+    const next = plan ? draftsFromPlan(plan) : {}
+    setDrafts(next)
+    setClientId((current) => {
+      if (current && next[current]) return current
+      return Object.keys(next)[0] ?? ''
+    })
   }, [plan])
 
   const run = async (action: () => Promise<unknown>) => {
@@ -117,31 +136,41 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
       await action()
       await reload()
     } catch (err) {
-      setError(message(err))
+      setError(errorMessage(err))
     } finally {
       setBusy(false)
     }
   }
 
   const editable = plan?.editable_months ?? []
+  const rows = clientId ? (drafts[clientId] ?? []) : []
+
+  const setRows = (updater: (current: DraftRow[]) => DraftRow[]) => {
+    setDrafts((current) => ({ ...current, [clientId]: updater(current[clientId] ?? []) }))
+  }
 
   const collectItems = (): SalesPlanItemIn[] | null => {
     const items: SalesPlanItemIn[] = []
-    for (const row of rows) {
-      for (const month of editable) {
-        const raw = normalize(row.months[month] ?? '')
-        if (raw === '') continue
-        if (!QTY_PATTERN.test(raw)) {
-          setError(`Количество «${row.months[month]}» в строке ${row.name} — не число`)
-          return null
+    for (const [currentClientId, clientRows] of Object.entries(drafts)) {
+      for (const row of clientRows) {
+        for (const month of editable) {
+          const raw = normalize(row.months[month] ?? '')
+          if (raw === '') continue
+          if (!QTY_PATTERN.test(raw)) {
+            setError(
+              `Количество «${row.months[month]}» в строке ${row.name} (${clientName(currentClientId)}) — не число`,
+            )
+            return null
+          }
+          const price = normalize(row.price)
+          items.push({
+            client_id: currentClientId,
+            product_id: row.productId,
+            month,
+            quantity: raw,
+            price: price === '' ? null : price,
+          })
         }
-        const price = normalize(row.price)
-        items.push({
-          product_id: row.productId,
-          month,
-          quantity: raw,
-          price: price === '' ? null : price,
-        })
       }
     }
     return items
@@ -163,7 +192,7 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
 
   const addRow = () => {
     const product = products.find((row) => row.id === productToAdd)
-    if (!product) return
+    if (!product || !clientId) return
     setRows((current) => [
       ...current,
       {
@@ -178,6 +207,13 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
     setProductToAdd('')
   }
 
+  const addClientToPlan = () => {
+    if (!clientToAdd) return
+    setDrafts((current) => ({ ...current, [clientToAdd]: current[clientToAdd] ?? [] }))
+    setClientId(clientToAdd)
+    setClientToAdd('')
+  }
+
   const rowTotal = (row: DraftRow): number => {
     const price = Number(normalize(row.price) || 0)
     return editable.reduce(
@@ -186,7 +222,10 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
     )
   }
 
-  const total = rows.reduce((sum, row) => sum + rowTotal(row), 0)
+  const planClients = Object.keys(drafts)
+  const total = Object.values(drafts)
+    .flat()
+    .reduce((sum, row) => sum + rowTotal(row), 0)
   const canEdit =
     plan !== null &&
     (isCommercialDirector || (isOwner && ['draft', 'filling'].includes(plan.status)))
@@ -200,7 +239,7 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
       <header className="page-head">
         <h1>Планирование продаж</h1>
         <p className="hint">
-          Годовой план на менеджера: товар × месяц. Утверждает коммерческий директор.
+          Годовой план на менеджера: клиент × товар × месяц. Утверждает коммерческий директор.
         </p>
         <div className="toolbar">
           <button type="button" onClick={() => setYear(year - 1)} aria-label="Предыдущий год">
@@ -363,10 +402,50 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
           {plan.notes ? <p className="hint">Примечания: {plan.notes}</p> : null}
 
           <div className="toolbar">
+            <span className="hint">Клиент:</span>
+            {planClients.length === 0 ? (
+              <span className="hint" data-testid="plan-no-clients">
+                в плане пока нет клиентов — добавьте клиента
+              </span>
+            ) : (
+              planClients.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={id === clientId ? 'chip active' : 'chip'}
+                  onClick={() => setClientId(id)}
+                >
+                  {clientName(id)}
+                </button>
+              ))
+            )}
+            <span className="sep" />
+            <select
+              aria-label="Добавить клиента"
+              value={clientToAdd}
+              onChange={(event) => setClientToAdd(event.target.value)}
+              disabled={!canEdit}
+            >
+              <option value="">— добавить клиента —</option>
+              {activeClients
+                .filter((row) => !planClients.includes(row.id) || row.id === clientToAdd)
+                .map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.name}
+                  </option>
+                ))}
+            </select>
+            <button type="button" disabled={!clientToAdd || !canEdit} onClick={addClientToPlan}>
+              Добавить
+            </button>
+          </div>
+
+          <div className="toolbar">
             <select
               aria-label="Добавить товар"
               value={productToAdd}
               onChange={(event) => setProductToAdd(event.target.value)}
+              disabled={!canEdit || !clientId}
             >
               <option value="">— выберите товар —</option>
               {products
@@ -380,6 +459,10 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
             <button type="button" disabled={!productToAdd || !canEdit} onClick={addRow}>
               Добавить строку
             </button>
+            <span className="sep" />
+            <span className="hint" data-testid="current-client">
+              {clientId ? `Строки клиента: ${clientName(clientId)}` : 'клиент не выбран'}
+            </span>
           </div>
 
           <table className="plan-table" data-testid="plan-table">
@@ -403,7 +486,9 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
               {rows.length === 0 ? (
                 <tr>
                   <td colSpan={15} className="hint" data-testid="plan-empty">
-                    Строк пока нет — добавьте товар.
+                    {clientId
+                      ? 'Строк по этому клиенту пока нет — добавьте товар.'
+                      : 'Добавьте клиента в план.'}
                   </td>
                 </tr>
               ) : (

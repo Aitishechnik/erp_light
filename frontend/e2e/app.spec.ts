@@ -37,6 +37,18 @@ const MANAGER = {
   role_title: 'Менеджер по продажам',
 }
 
+const CLIENT = {
+  id: 'client-1',
+  name: 'ООО Ромашка',
+  inn: '7701234567',
+  note: null,
+  is_active: true,
+}
+
+const PRODUCTS = [
+  { id: 'p-1', code: 'SKU-1', name: 'Товар 1', kind: 'goods', unit: 'шт', is_active: true },
+]
+
 const YEAR = new Date().getFullYear()
 const ALL_MONTHS = Array.from({ length: 12 }, (_, index) => index + 1)
 
@@ -74,7 +86,7 @@ test('экран входа показывается без сессии, а в�
   await expect(page.getByLabel('Логин')).toBeVisible()
 
   await page.getByLabel('Логин').fill('sales')
-  await page.getByLabel('Пароль').fill('secret')
+  await page.getByLabel('Пароль').fill('123')
   await page.getByRole('button', { name: 'Войти' }).click()
 
   await expect(page.getByRole('button', { name: 'Планирование продаж' })).toBeVisible()
@@ -111,27 +123,50 @@ test('пустой список показывает подсказку', async 
   await expect(page.getByTestId('empty-state')).toBeVisible()
 })
 
-test('менеджер заполняет план продаж и отправляет его на проверку', async ({ page }) => {
+test('клиент заводится в справочнике', async ({ page }) => {
+  let clients: unknown[] = []
+  await mockSession(page)
+  await page.route('**/api/v1/clients**', (route) => {
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON() as { name: string }
+      clients = [{ ...CLIENT, name: body.name }]
+      return route.fulfill({ status: 201, json: clients[0] })
+    }
+    return route.fulfill({ json: clients })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Клиенты' }).click()
+  await expect(page.getByTestId('clients-table')).toContainText('Клиентов пока нет')
+
+  await page.getByLabel('Наименование клиента').fill('ООО Ромашка')
+  await page.getByLabel('ИНН').fill('7701234567')
+  await page.getByRole('button', { name: 'Добавить' }).click()
+
+  await expect(page.getByTestId('clients-table')).toContainText('ООО Ромашка')
+  await expect(page.getByTestId('clients-count')).toHaveText('1')
+})
+
+test('менеджер заполняет план продаж по клиенту и отправляет его на проверку', async ({ page }) => {
   let submitted = false
   await mockSession(page)
   await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
-  await page.route('**/api/v1/products', (route) =>
-    route.fulfill({
-      json: [
-        { id: 'p-1', code: 'SKU-1', name: 'Товар 1', kind: 'goods', unit: 'шт', is_active: true },
-      ],
-    }),
-  )
+  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/clients**', (route) => route.fulfill({ json: [CLIENT] }))
   await page.route('**/api/v1/sales-plans/*/submit', (route) => {
     submitted = true
     return route.fulfill({ json: plan({ status: 'on_review', status_title: 'На проверке' }) })
   })
   await page.route('**/api/v1/sales-plans/*/items', (route) => {
-    const body = route.request().postDataJSON() as { items: { quantity: string }[] }
+    const body = route.request().postDataJSON() as {
+      items: { quantity: string; client_id: string }[]
+    }
     return route.fulfill({
       json: plan({
         items: body.items.map((item, index) => ({
           id: `item-${index}`,
+          client_id: item.client_id,
+          client_name: CLIENT.name,
           product_id: 'p-1',
           product_code: 'SKU-1',
           product_name: 'Товар 1',
@@ -156,8 +191,11 @@ test('менеджер заполняет план продаж и отправ�
   await page.goto('/')
   await page.getByRole('button', { name: 'Планирование продаж' }).click()
 
-  await expect(page.getByTestId('plan-table')).toBeVisible()
-  await expect(page.getByTestId('plan-empty')).toBeVisible()
+  // Сначала в план добавляется клиент, потом строка товара.
+  await expect(page.getByTestId('plan-no-clients')).toBeVisible()
+  await page.getByLabel('Добавить клиента').selectOption('client-1')
+  await page.getByRole('button', { name: 'Добавить', exact: true }).click()
+  await expect(page.getByTestId('current-client')).toContainText('ООО Ромашка')
 
   await page.getByLabel('Добавить товар').selectOption('p-1')
   await page.getByRole('button', { name: 'Добавить строку' }).click()

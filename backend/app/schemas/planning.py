@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 
 class SalesPlanItemIn(BaseModel):
+    client_id: uuid.UUID = Field(description="Клиент, по которому планируется продажа")
     product_id: uuid.UUID
     month: int = Field(ge=1, le=12)
     quantity: Decimal = Field(ge=0, description="Количество на месяц")
@@ -35,6 +36,8 @@ class SalesPlanRejectIn(BaseModel):
 
 class SalesPlanItemOut(BaseModel):
     id: uuid.UUID
+    client_id: uuid.UUID
+    client_name: str
     product_id: uuid.UUID
     product_code: str
     product_name: str
