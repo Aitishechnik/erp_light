@@ -5,12 +5,15 @@ PIP := $(VENV)/bin/pip
 API_HOST := 127.0.0.1
 API_PORT := 4111
 
-.PHONY: install run format lint typecheck test check db-bootstrap bootstrap
+.PHONY: install run format lint typecheck test check db-bootstrap bootstrap seed-users
 
 install:
 	$(PYTHON) -m venv $(VENV)
 	$(PIP) install --upgrade pip
 	$(PIP) install -r requirements.txt -r requirements-dev.txt
+
+seed-users:
+	$(VENV)/bin/python -m app.seed
 
 run:
 	$(VENV)/bin/uvicorn app.main:app --host $(API_HOST) --port $(API_PORT) --reload

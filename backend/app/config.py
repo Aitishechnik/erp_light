@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     app_port: int = 4110
     api_port: int = 4111
+    session_ttl_days: int = 30
     database_url: str = "postgresql+psycopg://erp_lite:erp_lite@127.0.0.1:5547/erp_lite"
     test_database_url: str = "postgresql+psycopg://erp_lite:erp_lite@127.0.0.1:5547/erp_lite_test"
 

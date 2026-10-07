@@ -1,9 +1,9 @@
-"""Номенклатура."""
+"""Номенклатура. Доступ — любому вошедшему."""
 
 from fastapi import APIRouter, Query
 from sqlalchemy import select
 
-from app.api.deps import DbSession
+from app.api.deps import CurrentUser, DbSession
 from app.models.domain import Product
 from app.schemas.domain import ProductOut
 
@@ -12,6 +12,7 @@ router = APIRouter(tags=["products"])
 
 @router.get("/products", response_model=list[ProductOut])
 def list_products(
+    user: CurrentUser,
     db: DbSession,
     kind: str | None = Query(default=None, description="goods | material"),
 ) -> list[Product]:

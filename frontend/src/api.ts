@@ -14,12 +14,115 @@ export type StockRow = {
   snapshot_date: string | null
 }
 
+export type Role =
+  | 'sales_manager'
+  | 'commercial_director'
+  | 'purchase_director'
+  | 'import_manager'
+  | 'executive_director'
+
+export type SessionUser = {
+  id: string
+  login: string
+  full_name: string
+  role: Role
+  role_title: string
+}
+
+export type Product = {
+  id: string
+  code: string
+  name: string
+  kind: string
+  unit: string
+  is_active: boolean
+}
+
+export type SalesPlanItem = {
+  id: string
+  product_id: string
+  product_code: string
+  product_name: string
+  product_kind: string
+  unit: string
+  month: number
+  quantity: string
+  price: string | null
+  amount: string | null
+  notes: string | null
+}
+
+export type SalesPlanStatus = 'draft' | 'filling' | 'on_review' | 'approved'
+
+export type SalesPlan = {
+  id: string
+  year: number
+  manager_id: string
+  manager_name: string
+  created_by_name: string
+  status: SalesPlanStatus
+  status_title: string
+  notes: string | null
+  created_at: string
+  updated_at: string
+  editable_months: number[]
+  items: SalesPlanItem[]
+  total_amount: string
+}
+
+export type SalesPlanItemIn = {
+  product_id: string
+  month: number
+  quantity: string
+  price: string | null
+}
+
+export class ApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
 const moneyFormat = new Intl.NumberFormat('ru-RU', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 })
 const quantityFormat = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 })
 const dateFormat = new Intl.DateTimeFormat('ru-RU')
+
+export const MONTH_TITLES = [
+  'Январь',
+  'Февраль',
+  'Март',
+  'Апрель',
+  'Май',
+  'Июнь',
+  'Июль',
+  'Август',
+  'Сентябрь',
+  'Октябрь',
+  'Ноябрь',
+  'Декабрь',
+]
+
+export const MONTH_SHORT = [
+  'янв',
+  'фев',
+  'мар',
+  'апр',
+  'май',
+  'июн',
+  'июл',
+  'авг',
+  'сен',
+  'окт',
+  'ноя',
+  'дек',
+]
 
 export function formatMoney(value: string | null | undefined): string {
   if (value === null || value === undefined || value === '') return '—'
@@ -44,10 +147,93 @@ export const PRODUCT_KIND_LABELS: Record<string, string> = {
   material: 'Материал',
 }
 
-export async function fetchStock(signal?: AbortSignal): Promise<StockRow[]> {
-  const response = await fetch('/api/v1/stock', { signal })
+/** Роли, которым виден раздел планирования продаж. */
+export const SALES_PLAN_ROLES: Role[] = [
+  'sales_manager',
+  'commercial_director',
+  'executive_director',
+]
+
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, {
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    ...init,
+  })
   if (!response.ok) {
-    throw new Error(`Не удалось загрузить остатки: HTTP ${response.status}`)
+    let detail = `Ошибка запроса: HTTP ${response.status}`
+    try {
+      const body = (await response.json()) as { detail?: unknown }
+      if (typeof body.detail === 'string') detail = body.detail
+    } catch {
+      // Тело не JSON — оставляем общий текст.
+    }
+    throw new ApiError(detail, response.status)
   }
-  return (await response.json()) as StockRow[]
+  if (response.status === 204) return undefined as T
+  return (await response.json()) as T
+}
+
+export function fetchStock(signal?: AbortSignal): Promise<StockRow[]> {
+  return request<StockRow[]>('/api/v1/stock', { signal })
+}
+
+export function login(loginName: string, password: string): Promise<SessionUser> {
+  return request<SessionUser>('/api/v1/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ login: loginName, password }),
+  })
+}
+
+export function logout(): Promise<void> {
+  return request<void>('/api/v1/auth/logout', { method: 'POST' })
+}
+
+export function fetchMe(): Promise<SessionUser> {
+  return request<SessionUser>('/api/v1/auth/me')
+}
+
+export function fetchUsers(role?: Role): Promise<SessionUser[]> {
+  const query = role ? `?role=${role}` : ''
+  return request<SessionUser[]>(`/api/v1/users${query}`)
+}
+
+export function fetchProducts(): Promise<Product[]> {
+  return request<Product[]>('/api/v1/products')
+}
+
+export function fetchSalesPlans(): Promise<SalesPlan[]> {
+  return request<SalesPlan[]>('/api/v1/sales-plans')
+}
+
+export function createSalesPlan(year: number, managerId?: string): Promise<SalesPlan> {
+  return request<SalesPlan>('/api/v1/sales-plans', {
+    method: 'POST',
+    body: JSON.stringify(managerId ? { year, manager_id: managerId } : { year }),
+  })
+}
+
+export function saveSalesPlanItems(planId: string, items: SalesPlanItemIn[]): Promise<SalesPlan> {
+  return request<SalesPlan>(`/api/v1/sales-plans/${planId}/items`, {
+    method: 'PUT',
+    body: JSON.stringify({ items }),
+  })
+}
+
+export function salesPlanAction(
+  planId: string,
+  action: 'send-to-fill' | 'submit' | 'approve',
+): Promise<SalesPlan> {
+  return request<SalesPlan>(`/api/v1/sales-plans/${planId}/${action}`, { method: 'POST' })
+}
+
+export function rejectSalesPlan(planId: string, reason: string): Promise<SalesPlan> {
+  return request<SalesPlan>(`/api/v1/sales-plans/${planId}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  })
+}
+
+export function deleteSalesPlan(planId: string): Promise<void> {
+  return request<void>(`/api/v1/sales-plans/${planId}`, { method: 'DELETE' })
 }

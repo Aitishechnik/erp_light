@@ -115,7 +115,9 @@ th {
   font-weight: 600;
 }
 
-tbody tr:last-child td {
+/* :where() держит специфичность низкой, чтобы правила .plan-table ниже
+   не оказывались «нисходящими» (biome lint/style/noDescendingSpecificity). */
+:where(tbody tr:last-child) td {
   border-bottom: none;
 }
 
@@ -123,4 +125,225 @@ td.num,
 th.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* ── Формы, кнопки, вход ───────────────────────────────────────────────── */
+
+input,
+select {
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: #fff;
+  color: inherit;
+}
+
+input:disabled,
+select:disabled {
+  background: #f3f4f6;
+  color: var(--muted);
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+button.primary:disabled {
+  opacity: 0.6;
+}
+
+.login-screen {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+}
+
+.login-card {
+  display: grid;
+  gap: 0.4rem;
+  width: min(22rem, 90vw);
+  padding: 1.5rem;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.login-card h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.login-card button {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: #fff;
+  cursor: pointer;
+}
+
+/* ── Планирование ──────────────────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.toolbar button {
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: #fff;
+  cursor: pointer;
+}
+
+.toolbar .sep {
+  flex: 1;
+}
+
+.plan-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.plan-card {
+  display: grid;
+  gap: 0.15rem;
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: #fff;
+  cursor: pointer;
+}
+
+.plan-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.plan-card-title {
+  font-weight: 600;
+}
+
+.plan-card-sum {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  background: #f1f3f5;
+  color: var(--muted);
+}
+
+.status-approved {
+  background: #e7f6ec;
+  color: #067647;
+}
+
+.status-on_review {
+  background: #fff4e5;
+  color: #b25e09;
+}
+
+.status-filling {
+  background: #eaf1fe;
+  color: var(--accent);
+}
+
+input.cell {
+  width: 3.1rem;
+  padding: 0.1rem 0.2rem;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.plan-table .unit {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* Матрица плана: 12 месяцев не влезают в экран — колонки «Товар» и «Сумма»
+   закреплены, остальное прокручивается по горизонтали внутри .content.
+   overflow: visible обязателен, иначе таблица становится своим скролл-контейнером
+   и sticky-колонки «прилипают» к её краям, а не к краям экрана. */
+.plan-table {
+  font-size: 0.85rem;
+  overflow: visible;
+  border-radius: 0;
+}
+
+.plan-table th,
+.plan-table td {
+  padding: 0.25rem 0.35rem;
+}
+
+.plan-table th:first-child,
+.plan-table td:first-child {
+  position: sticky;
+  left: 0;
+  background: #fff;
+  z-index: 1;
+  white-space: normal;
+  min-width: 8.5rem;
+  box-shadow: inset -1px 0 0 var(--border);
+}
+
+.plan-table th:first-child {
+  background: #f9fafb;
+}
+
+.plan-table td:last-child,
+.plan-table th:last-child {
+  position: sticky;
+  right: 0;
+  background: #fff;
+  z-index: 1;
+  font-weight: 600;
+  box-shadow: inset 1px 0 0 var(--border);
+}
+
+.plan-table th:last-child {
+  background: #f9fafb;
+}
+
+.sidebar-footer {
+  margin-top: 1.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.user-name {
+  font-weight: 600;
+  padding: 0 0.75rem;
+}
+
+.sidebar-footer .hint {
+  padding: 0 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Кнопки-действия: правило обязано идти после .toolbar/.login-card button,
+   иначе их белый фон перебивает акцент и белый текст становится невидимым. */
+button.primary,
+.toolbar button.primary,
+.login-card button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
 }

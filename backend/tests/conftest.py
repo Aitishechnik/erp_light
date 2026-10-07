@@ -3,7 +3,7 @@
 Никогда не подставлять сюда базу другого проекта.
 """
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +14,10 @@ import app.models  # noqa: F401 — регистрирует таблицы в B
 from app.config import get_settings
 from app.db import Base, get_db
 from app.main import create_app
+from app.services.auth import seed_demo_users
+
+# Пароль демо-пользователей в тестах; роли — по логину (sales, commercial, ...).
+DEMO_PASSWORD = "test-password"
 
 
 @pytest.fixture(scope="session")
@@ -48,7 +52,14 @@ def db_session(engine: Engine) -> Iterator[Session]:
 
 
 @pytest.fixture
-def client(engine: Engine) -> Iterator[TestClient]:
+def users(engine: Engine) -> None:
+    """Демо-пользователи всех пяти ролей с известным паролем."""
+    factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    with factory() as session:
+        seed_demo_users(session, DEMO_PASSWORD)
+
+
+def _build_client(engine: Engine) -> TestClient:
     factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
     def override_get_db() -> Iterator[Session]:
@@ -60,5 +71,36 @@ def client(engine: Engine) -> Iterator[TestClient]:
 
     application = create_app(verify_db=False)
     application.dependency_overrides[get_db] = override_get_db
-    with TestClient(application) as test_client:
+    return TestClient(application)
+
+
+@pytest.fixture
+def client(engine: Engine, users: None) -> Iterator[TestClient]:
+    """Клиент, вошедший как менеджер по закупкам (импорт)."""
+    with _build_client(engine) as test_client:
+        response = test_client.post(
+            "/api/v1/auth/login", json={"login": "import", "password": DEMO_PASSWORD}
+        )
+        assert response.status_code == 200, response.text
         yield test_client
+
+
+@pytest.fixture
+def login(client: TestClient) -> Callable[[str], None]:
+    """Сменить пользователя: login("commercial") — коммерческий директор."""
+
+    def _login(login_name: str, password: str = DEMO_PASSWORD) -> None:
+        response = client.post(
+            "/api/v1/auth/login", json={"login": login_name, "password": password}
+        )
+        assert response.status_code == 200, response.text
+
+    return _login
+
+
+@pytest.fixture
+def logout(client: TestClient) -> Callable[[], None]:
+    def _logout() -> None:
+        assert client.post("/api/v1/auth/logout").status_code == 204
+
+    return _logout

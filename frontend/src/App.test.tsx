@@ -1,10 +1,19 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
-import type { StockRow } from './api'
+import type { SessionUser, StockRow } from './api'
+import { mockApi } from './apiMock'
 
-const ROWS: StockRow[] = [
+const MANAGER: SessionUser = {
+  id: 'sm-1',
+  login: 'sales',
+  full_name: 'Иван Петров',
+  role: 'sales_manager',
+  role_title: 'Менеджер по продажам',
+}
+
+const STOCK: StockRow[] = [
   {
     batch_item_id: 'item-1',
     batch_number: 'P-001',
@@ -33,59 +42,83 @@ const ROWS: StockRow[] = [
   },
 ]
 
-function mockStock(rows: StockRow[]): void {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => new Response(JSON.stringify(rows), { status: 200 })),
-  )
-}
-
 afterEach(() => {
   vi.unstubAllGlobals()
 })
 
 describe('App', () => {
-  it('показывает разделы и остатки по партиям', async () => {
-    mockStock(ROWS)
+  it('без сессии показывает экран входа', async () => {
+    mockApi({ '/api/v1/auth/me': { status: 401, body: { detail: 'Требуется вход' } } })
     render(<App />)
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Партии и остатки' })).toBeInTheDocument()
+    expect(await screen.findByLabelText('Логин')).toBeInTheDocument()
+    expect(screen.getByLabelText('Пароль')).toBeInTheDocument()
+  })
 
+  it('входит по логину и показывает разделы и остатки', async () => {
+    const user = userEvent.setup()
+    mockApi({
+      '/api/v1/auth/login': { body: MANAGER },
+      '/api/v1/auth/me': { status: 401, body: { detail: 'Требуется вход' } },
+      '/api/v1/stock': { body: STOCK },
+    })
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Логин'), 'sales')
+    await user.type(screen.getByLabelText('Пароль'), 'secret')
+    await user.click(screen.getByRole('button', { name: 'Войти' }))
+
+    expect(await screen.findByText('Иван Петров')).toBeInTheDocument()
     const table = await screen.findByTestId('stock-table')
-    expect(table).toBeInTheDocument()
-    expect(screen.getByText('SKU-1')).toBeInTheDocument()
-    expect(screen.getByText('Материал')).toBeInTheDocument()
-    expect(screen.getByText('120,00')).toBeInTheDocument()
-    // Итоговая стоимость остатка: 900 + 600.
+    expect(table).toHaveTextContent('SKU-1')
     expect(screen.getByTestId('total-value')).toHaveTextContent('1 500,00')
   })
 
-  it('показывает пустое состояние, когда данных нет', async () => {
-    mockStock([])
+  it('менеджеру не показывает закупочные разделы и заглушку модуля', async () => {
+    const user = userEvent.setup()
+    mockApi({
+      '/api/v1/auth/me': { body: MANAGER },
+      '/api/v1/stock': { body: [] },
+      '/api/v1/sales-plans': { body: [] },
+      '/api/v1/products': { body: [] },
+    })
     render(<App />)
+
+    expect(await screen.findByRole('button', { name: 'Планирование продаж' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Планирование закупок' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Матрица цен' }))
+    expect(screen.getByText('Модуль ещё не реализован.')).toBeInTheDocument()
+  })
+
+  it('показывает пустое состояние, когда остатков нет', async () => {
+    mockApi({ '/api/v1/auth/me': { body: MANAGER }, '/api/v1/stock': { body: [] } })
+    render(<App />)
+
     expect(await screen.findByTestId('empty-state')).toBeInTheDocument()
   })
 
-  it('показывает ошибку, если API недоступен', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response('', { status: 500 })),
-    )
+  it('показывает ошибку, если API остатков недоступен', async () => {
+    mockApi({
+      '/api/v1/auth/me': { body: MANAGER },
+      '/api/v1/stock': { status: 500, body: { detail: 'Ошибка сервера' } },
+    })
     render(<App />)
 
     const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent('HTTP 500')
+    expect(alert).toHaveTextContent('Ошибка сервера')
   })
 
-  it('переключает разделы', async () => {
-    mockStock(ROWS)
+  it('выход возвращает на экран входа', async () => {
     const user = userEvent.setup()
+    mockApi({
+      '/api/v1/auth/logout': { status: 204 },
+      '/api/v1/auth/me': { body: MANAGER },
+      '/api/v1/stock': { body: [] },
+    })
     render(<App />)
 
-    await user.click(screen.getByRole('button', { name: 'Матрица цен' }))
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { level: 1, name: 'Матрица цен' })).toBeInTheDocument()
-    })
-    expect(screen.getByText('Модуль ещё не реализован.')).toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: 'Выйти' }))
+    expect(await screen.findByLabelText('Логин')).toBeInTheDocument()
   })
 })
