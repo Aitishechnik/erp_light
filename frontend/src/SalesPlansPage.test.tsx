@@ -106,7 +106,7 @@ describe('SalesPlansPage', () => {
     })
     // Строка клиента ООО Ромашка видна, замороженный январь недоступен для правки.
     expect(screen.getByTestId('current-client')).toHaveTextContent('ООО Ромашка')
-    expect(screen.getByLabelText('SKU-1 Декабрь')).toHaveValue('10.000')
+    expect(screen.getByLabelText('SKU-1 Декабрь')).toHaveValue('10')
     expect(screen.getByLabelText('SKU-1 Январь')).toBeDisabled()
     // Цен в плане продаж нет — только количество.
     expect(screen.queryByLabelText('Цена SKU-1')).not.toBeInTheDocument()

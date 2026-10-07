@@ -37,6 +37,11 @@ function normalize(raw: string): string {
   return raw.trim().replace(',', '.')
 }
 
+/** «10.000» → «10», «15.500» → «15.5»: в поле ввода лишние нули не нужны. */
+function trimQuantity(raw: string): string {
+  return raw.includes('.') ? raw.replace(/\.?0+$/, '') : raw
+}
+
 function draftsFromPlan(plan: SalesPlan): Drafts {
   const drafts: Drafts = {}
   for (const item of plan.items) {
@@ -52,7 +57,7 @@ function draftsFromPlan(plan: SalesPlan): Drafts {
       }
       rows.push(row)
     }
-    if (Number(item.quantity) !== 0) row.months[item.month] = item.quantity
+    if (Number(item.quantity) !== 0) row.months[item.month] = trimQuantity(item.quantity)
     drafts[item.client_id] = rows
   }
   for (const rows of Object.values(drafts)) {
