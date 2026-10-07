@@ -8,6 +8,17 @@ import {
   uploadImport,
 } from './api'
 
+/** Компактная дата: «08.10.26 01:59» — иначе журнал не влезает по ширине. */
+function stamp(value: string): string {
+  return new Date(value).toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 const STATUS_TITLES: Record<string, string> = {
   ok: 'загружено',
   partial: 'загружено с замечаниями',
@@ -114,7 +125,7 @@ export function ImportsPage() {
       </div>
 
       <h2 className="section-title">Журнал загрузок</h2>
-      <table data-testid="imports-journal">
+      <table className="journal-table" data-testid="imports-journal">
         <thead>
           <tr>
             <th scope="col">Когда</th>
@@ -147,7 +158,7 @@ export function ImportsPage() {
           ) : (
             journal.map((row) => (
               <tr key={row.id}>
-                <td>{new Date(row.created_at).toLocaleString('ru-RU')}</td>
+                <td>{stamp(row.created_at)}</td>
                 <td>{row.kind_title}</td>
                 <td>{row.file_name}</td>
                 <td className="num">{row.rows_total}</td>

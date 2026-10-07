@@ -435,3 +435,12 @@ button.primary,
   font-size: 1.05rem;
   margin: 1.5rem 0 0.75rem;
 }
+
+.journal-table {
+  font-size: 0.82rem;
+}
+
+.journal-table th,
+.journal-table td {
+  padding: 0.3rem 0.4rem;
+}
