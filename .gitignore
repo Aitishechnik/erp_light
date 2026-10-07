@@ -6,6 +6,7 @@
 # Локальные доступы (логины и пароли стенда) — в git не попадают
 ACCESS.md
 ACCESS*.local.md
+.~lock.*#
 
 # Python
 __pycache__/
