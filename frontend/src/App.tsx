@@ -4,6 +4,7 @@ import { CounterpartiesPage } from './CounterpartiesPage'
 import { ImportsPage } from './ImportsPage'
 import { LoginPage } from './LoginPage'
 import { NomenclaturePage } from './NomenclaturePage'
+import { ReceiptsPage } from './ReceiptsPage'
 import { SalesPlansPage } from './SalesPlansPage'
 import { StockPage } from './StockPage'
 
@@ -11,6 +12,8 @@ type SectionId =
   | 'sales'
   | 'purchase'
   | 'pricing'
+  | 'receipts'
+  | 'suppliers'
   | 'nomenclature'
   | 'counterparties'
   | 'currencies'
@@ -44,8 +47,16 @@ const GROUPS: Group[] = [
     title: 'Планирование',
     sections: [
       { id: 'sales', title: 'Планирование продаж', ready: true, roles: SALES_PLAN_ROLES },
-      { id: 'purchase', title: 'Планирование закупок', ready: false, roles: PURCHASE_ROLES },
       { id: 'pricing', title: 'Матрица цен', ready: false },
+    ],
+  },
+  {
+    id: 'purchases',
+    title: 'Закупки',
+    sections: [
+      { id: 'receipts', title: 'Поступления', ready: true },
+      { id: 'purchase', title: 'Планирование закупок', ready: false, roles: PURCHASE_ROLES },
+      { id: 'suppliers', title: 'Поставщики', ready: false },
     ],
   },
   {
@@ -185,6 +196,7 @@ export function App() {
         {current.id === 'sales' && current.ready ? <SalesPlansPage user={user} /> : null}
         {current.id === 'nomenclature' && current.ready ? <NomenclaturePage /> : null}
         {current.id === 'counterparties' && current.ready ? <CounterpartiesPage /> : null}
+        {current.id === 'receipts' && current.ready ? <ReceiptsPage /> : null}
         {current.id === 'imports' && current.ready ? <ImportsPage /> : null}
         {!current.ready ? (
           <section>

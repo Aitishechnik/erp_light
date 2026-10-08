@@ -49,6 +49,42 @@ const PRODUCTS = [
   { id: 'p-1', code: 'SKU-1', name: 'Товар 1', kind: 'goods', unit: 'шт', is_active: true },
 ]
 
+const RECEIPT = {
+  id: 'b1',
+  batch_number: 'P-500',
+  batch_type: 'purchase',
+  batch_date: '2026-10-08',
+  currency: 'USD',
+  supplier_id: null,
+  supplier: null,
+  source: 'manual',
+  comment: null,
+  created_at: '2026-10-08T10:00:00Z',
+  finance: {
+    invoice_total_currency: '1000.00',
+    total_paid_currency: '0.00',
+    total_paid_rub: '0.00',
+    additional_expenses_rub: '0.00',
+    remaining_payment_currency: '1000.00',
+    exchange_rate: '90',
+    final_cost_rub: '90000.00',
+  },
+  items: [
+    {
+      id: 'i1',
+      product_code: 'SKU-1',
+      product_name: 'Товар 1',
+      product_kind: 'goods',
+      unit: 'шт',
+      quantity: '10.000',
+      total_invoice_currency: '1000.00',
+      item_total_rub: '90000.00',
+      unit_cost: '9000.00',
+      quantity_on_hand: '10.000',
+    },
+  ],
+}
+
 const YEAR = new Date().getFullYear()
 const ALL_MONTHS = Array.from({ length: 12 }, (_, index) => index + 1)
 
@@ -262,4 +298,34 @@ test('менеджер заполняет план продаж по клиен�
 
   await page.getByRole('button', { name: 'Отправить на проверку' }).click()
   await expect(page.getByText('На проверке')).toBeVisible()
+})
+
+test('поступление заводится в календаре, себестоимость считается сразу', async ({ page }) => {
+  await mockSession(page)
+  await page.route('**/api/v1/batches**', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({ status: 201, json: RECEIPT })
+      : route.fulfill({ json: [] }),
+  )
+  await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+
+  await page.goto('/')
+  await openSection(page, 'Закупки', 'Поступления')
+  await expect(page.getByTestId('receipts-calendar')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Добавить поступление' }).click()
+  await page.getByLabel('Номер поступления').fill('P-500')
+  await page.getByLabel('Валюта').fill('USD')
+  await page.getByLabel('Курс').fill('90')
+  await page.getByLabel('Товар i0').fill('SKU-1')
+  await page.getByLabel('Количество i0').fill('10')
+  await page.getByLabel('Сумма i0').fill('1000')
+
+  // Живой пересчёт: 1000 $ × 90 = 90 000 ₽, за единицу — 9 000 ₽.
+  await expect(page.getByTestId('receipt-total')).toHaveText('90 000,00 ₽')
+  await expect(page.getByTestId('unit-cost-i0')).toHaveText('9 000,00')
+
+  await page.getByRole('button', { name: 'Сохранить' }).click()
+  await expect(page.getByTestId('receipt-form')).toHaveCount(0)
 })

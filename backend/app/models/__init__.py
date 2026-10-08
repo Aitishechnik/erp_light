@@ -30,6 +30,7 @@ from app.models.planning import (
     SalesPlan,
     SalesPlanItem,
 )
+from app.models.rates import CurrencyRate
 
 __all__ = [
     "BATCH_TYPES",
@@ -50,6 +51,7 @@ __all__ = [
     "BatchExpense",
     "BatchItem",
     "Counterparty",
+    "CurrencyRate",
     "ImportSession",
     "Product",
     "SalesPlan",

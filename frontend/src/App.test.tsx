@@ -87,10 +87,16 @@ describe('App', () => {
     // Меню сгруппировано: сначала раскрываем категорию «Планирование».
     await user.click(await screen.findByRole('button', { name: 'Планирование' }))
     expect(screen.getByRole('button', { name: 'Планирование продаж' })).toBeInTheDocument()
+
+    // Закупочные разделы менеджеру продаж недоступны.
+    await user.click(screen.getByRole('button', { name: 'Закупки' }))
+    expect(screen.getByRole('button', { name: 'Поступления' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Планирование закупок' })).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Матрица цен' }))
-    expect(screen.getByText('Модуль ещё не реализован.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Поступления' }))
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Поступления' }),
+    ).toBeInTheDocument()
   })
 
   it('категория меню раскрывается и сворачивается по стрелке', async () => {

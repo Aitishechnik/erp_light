@@ -116,10 +116,14 @@ def batch_invoice_total_currency(batch: Batch) -> Decimal:
     return q2(sum((item.total_invoice_currency for item in batch.items), ZERO))
 
 
-def finance_for_batch(batch: Batch) -> BatchFinance:
-    """Финансовый итог партии по её строкам и реестру расходов."""
+def finance_for_batch(batch: Batch, *, rate: Decimal | None = None) -> BatchFinance:
+    """Финансовый итог партии по её строкам и реестру расходов.
+
+    ``rate`` позволяет посчитать себестоимость по актуальному курсу (например,
+    из кэша курсов ЦБ), не меняя сохранённый в партии.
+    """
     return calculate_batch_finance(
         invoice_total_currency=batch_invoice_total_currency(batch),
         additional_expenses_rub=batch_expenses_rub(batch),
-        exchange_rate=batch.current_exchange_rate,
+        exchange_rate=rate if rate is not None else batch.current_exchange_rate,
     )

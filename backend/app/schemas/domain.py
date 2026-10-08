@@ -52,12 +52,20 @@ class BatchItemCreate(BaseModel):
 
 
 class BatchCreate(BaseModel):
+    """Поступление партии: шапка, строки и доп. расходы."""
+
     batch_number: str = Field(min_length=1, max_length=100)
     batch_date: date
     currency: str = Field(default="RUB", min_length=3, max_length=3)
-    supplier: str | None = None
+    supplier_id: uuid.UUID | None = Field(default=None, description="Поставщик из справочника")
+    supplier: str | None = Field(
+        default=None, description="Наименование, если поставщик не из справочника"
+    )
     total_invoice_value: Decimal | None = Field(default=None, ge=0)
-    current_exchange_rate: Decimal | None = Field(default=None, gt=0)
+    current_exchange_rate: Decimal | None = Field(
+        default=None, gt=0, description="Если не указан, берётся курс ЦБ на дату"
+    )
+    auto_rate: bool = Field(default=True, description="Разрешить запрос курса с сайта ЦБ")
     comment: str | None = None
     items: list[BatchItemCreate] = Field(min_length=1)
     expenses: list[BatchExpenseCreate] = []
@@ -92,6 +100,7 @@ class BatchOut(BaseModel):
     batch_type: str
     batch_date: date
     currency: str
+    supplier_id: uuid.UUID | None
     supplier: str | None
     source: str
     comment: str | None

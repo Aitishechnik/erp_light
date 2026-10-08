@@ -78,7 +78,12 @@ class Batch(Base):
     batch_type: Mapped[str] = mapped_column(String(20), nullable=False, default="purchase")
     batch_date: Mapped[date] = mapped_column(Date, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="RUB")
-    supplier: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    supplier_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    supplier: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, comment="Наименование поставщика на момент поступления"
+    )
     total_invoice_value: Mapped[Decimal] = mapped_column(
         Numeric(15, 2),
         nullable=False,

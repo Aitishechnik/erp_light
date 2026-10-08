@@ -489,3 +489,77 @@ button.primary,
 .journal-table td {
   padding: 0.3rem 0.4rem;
 }
+
+/* ── Поступления: календарь и карточка ─────────────────────────────────── */
+
+.calendar {
+  table-layout: fixed;
+}
+
+.calendar th {
+  text-align: center;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.calendar-day {
+  height: 4.5rem;
+  vertical-align: top;
+  padding: 0;
+}
+
+.calendar-cell {
+  display: grid;
+  gap: 0.2rem;
+  align-content: start;
+  width: 100%;
+  height: 100%;
+  padding: 0.35rem 0.5rem;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.calendar-day.other-month {
+  background: #fafbfc;
+  color: var(--muted);
+}
+
+.calendar-day.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.calendar-date {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.calendar-sum {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.field {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.field input,
+.field select {
+  min-width: 9rem;
+}
+
+.receipt-form {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+}

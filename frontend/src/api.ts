@@ -100,6 +100,78 @@ export type CounterpartyIn = {
   is_import_supplier?: boolean
 }
 
+export type BatchItem = {
+  id: string
+  product_code: string
+  product_name: string
+  product_kind: string
+  unit: string
+  quantity: string
+  total_invoice_currency: string
+  item_total_rub: string
+  unit_cost: string
+  quantity_on_hand: string
+}
+
+export type BatchFinance = {
+  invoice_total_currency: string
+  total_paid_currency: string
+  total_paid_rub: string
+  additional_expenses_rub: string
+  remaining_payment_currency: string
+  exchange_rate: string
+  final_cost_rub: string
+}
+
+export type Batch = {
+  id: string
+  batch_number: string
+  batch_type: string
+  batch_date: string
+  currency: string
+  supplier_id: string | null
+  supplier: string | null
+  source: string
+  comment: string | null
+  created_at: string
+  finance: BatchFinance
+  items: BatchItem[]
+}
+
+export type BatchItemIn = {
+  product_code: string
+  product_name?: string | null
+  quantity: string
+  total_invoice_currency: string
+}
+
+export type BatchExpenseIn = {
+  amount_rub: string
+  description: string
+}
+
+export type BatchIn = {
+  batch_number: string
+  batch_date: string
+  currency: string
+  supplier_id: string | null
+  supplier?: string | null
+  total_invoice_value: string | null
+  current_exchange_rate: string | null
+  auto_rate: boolean
+  comment?: string | null
+  items: BatchItemIn[]
+  expenses: BatchExpenseIn[]
+}
+
+export type CurrencyRate = {
+  code: string
+  rate_date: string
+  rate: string
+  nominal: number
+  source: string
+}
+
 export type ImportKind = {
   kind: string
   title: string
@@ -254,6 +326,34 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export function fetchStock(signal?: AbortSignal): Promise<StockRow[]> {
   return request<StockRow[]>('/api/v1/stock', { signal })
+}
+
+export function fetchBatches(from?: string, to?: string): Promise<Batch[]> {
+  const params = new URLSearchParams()
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  const query = params.toString()
+  return request<Batch[]>(`/api/v1/batches${query ? `?${query}` : ''}`)
+}
+
+export function createBatch(payload: BatchIn): Promise<Batch> {
+  return request<Batch>('/api/v1/batches', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function updateBatch(batchId: string, payload: BatchIn): Promise<Batch> {
+  return request<Batch>(`/api/v1/batches/${batchId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteBatch(batchId: string): Promise<void> {
+  return request<void>(`/api/v1/batches/${batchId}`, { method: 'DELETE' })
+}
+
+/** Курс валюты на дату: сначала кэш, иначе запрос к ЦБ на сервере. */
+export function fetchRate(code: string, day: string): Promise<CurrencyRate> {
+  return request<CurrencyRate>(`/api/v1/rates/${code}?date=${day}`)
 }
 
 export function login(loginName: string, password: string): Promise<SessionUser> {
