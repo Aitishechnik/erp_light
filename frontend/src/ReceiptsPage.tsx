@@ -405,7 +405,7 @@ export function ReceiptsPage() {
                 <td>{batch.supplier ?? '—'}</td>
                 <td>{batch.items.length}</td>
                 <td>{batch.currency}</td>
-                <td className="num">{batch.finance.exchange_rate}</td>
+                <td className="num">{trim(batch.finance.exchange_rate)}</td>
                 <td className="num">{formatMoney(batch.finance.final_cost_rub)}</td>
                 <td>
                   <button type="button" className="mini" onClick={() => startEdit(batch)}>
