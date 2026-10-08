@@ -563,3 +563,47 @@ button.primary,
   border: 1px solid var(--border);
   border-radius: 0.6rem;
 }
+
+/* Таблица строк поступления: фиксированные колонки, чтобы кнопка не уезжала. */
+.receipt-items {
+  table-layout: fixed;
+}
+
+.receipt-items th:nth-child(1),
+.receipt-items td:nth-child(1) {
+  width: 42%;
+}
+
+.receipt-items th:nth-child(2),
+.receipt-items td:nth-child(2) {
+  width: 14%;
+}
+
+.receipt-items th:nth-child(3),
+.receipt-items td:nth-child(3) {
+  width: 14%;
+}
+
+.receipt-items th:nth-child(4),
+.receipt-items td:nth-child(4) {
+  width: 20%;
+}
+
+.receipt-items th:nth-child(5),
+.receipt-items td:nth-child(5) {
+  width: 10%;
+}
+
+.receipt-items td input,
+.receipt-expenses td input {
+  width: 100%;
+}
+
+.receipt-items td:first-child {
+  white-space: normal;
+}
+
+.receipt-items .unit {
+  color: var(--muted);
+  font-size: 0.8rem;
+}

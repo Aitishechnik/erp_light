@@ -69,6 +69,11 @@ function monthDays(month: string): { date: string; inMonth: boolean }[] {
   return days.slice(0, lastInMonth + 1)
 }
 
+/** «5000.00» → «5000», «90.000000» → «90»: в полях ввода лишние нули не нужны. */
+function trim(value: string): string {
+  return value.includes('.') ? value.replace(/\.?0+$/, '') : value
+}
+
 function number(value: string): number {
   const parsed = Number(value.replace(',', '.'))
   return Number.isFinite(parsed) ? parsed : 0
@@ -97,13 +102,13 @@ function draftFrom(batch: Batch): Draft {
     currency: batch.currency,
     supplierId: batch.supplier_id ?? (batch.supplier ? '__manual__' : ''),
     supplierText: batch.supplier_id ? '' : (batch.supplier ?? ''),
-    rate: batch.finance.exchange_rate,
+    rate: trim(batch.finance.exchange_rate),
     comment: batch.comment ?? '',
     items: batch.items.map((item, index) => ({
       key: `i${index}`,
       code: item.product_code,
-      quantity: item.quantity,
-      amount: item.total_invoice_currency,
+      quantity: trim(item.quantity),
+      amount: trim(item.total_invoice_currency),
     })),
     expenses: [],
   }
@@ -494,7 +499,7 @@ export function ReceiptsPage() {
           </div>
           {rateHint ? <p className="hint">{rateHint}</p> : null}
 
-          <table data-testid="receipt-items">
+          <table className="receipt-items" data-testid="receipt-items">
             <thead>
               <tr>
                 <th scope="col">Товар (код)</th>
@@ -610,7 +615,7 @@ export function ReceiptsPage() {
             </button>
           </div>
 
-          <table data-testid="receipt-expenses">
+          <table className="receipt-expenses" data-testid="receipt-expenses">
             <thead>
               <tr>
                 <th scope="col">Доп. расход</th>
