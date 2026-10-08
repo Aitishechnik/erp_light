@@ -168,15 +168,14 @@ export function NomenclaturePage() {
             <th scope="col">Наименование</th>
             <th scope="col">Вид</th>
             <th scope="col">Ед.</th>
-            <th scope="col">Источник</th>
             <th scope="col">Состояние</th>
-            <th scope="col" />
+            <th scope="col" aria-label="Действия" />
           </tr>
         </thead>
         <tbody>
           {visible.length === 0 ? (
             <tr>
-              <td colSpan={7} className="hint">
+              <td colSpan={6} className="hint">
                 Номенклатуры не найдено.
               </td>
             </tr>
@@ -187,7 +186,6 @@ export function NomenclaturePage() {
                 <td>{product.name}</td>
                 <td>{PRODUCT_KIND_LABELS[product.kind] ?? product.kind}</td>
                 <td>{product.unit}</td>
-                <td>{product.source === '1c' ? '1С' : 'вручную'}</td>
                 <td>
                   <span className={product.is_active ? 'badge status-approved' : 'badge'}>
                     {product.is_active ? 'Активна' : 'Отключена'}

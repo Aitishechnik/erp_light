@@ -74,6 +74,15 @@ async function mockSession(page: Page, user: Record<string, unknown> = MANAGER):
   await page.route('**/api/v1/auth/me', (route) => route.fulfill({ json: user }))
 }
 
+/** Меню сгруппировано: сначала раскрываем категорию, потом жмём раздел. */
+async function openSection(page: Page, group: string, section: string): Promise<void> {
+  const item = page.getByRole('button', { name: section, exact: true })
+  if ((await item.count()) === 0) {
+    await page.getByRole('button', { name: group, exact: true }).click()
+  }
+  await item.click()
+}
+
 test('экран входа показывается без сессии, а вход открывает разделы', async ({ page }) => {
   await page.route('**/api/v1/auth/me', (route) =>
     route.fulfill({ status: 401, json: { detail: 'Требуется вход' } }),
@@ -88,6 +97,7 @@ test('экран входа показывается без сессии, а в�
   await page.getByLabel('Пароль').fill('123')
   await page.getByRole('button', { name: 'Войти' }).click()
 
+  await page.getByRole('button', { name: 'Планирование', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Планирование продаж' })).toBeVisible()
   await expect(page.getByText('Иван Петров')).toBeVisible()
 })
@@ -110,7 +120,7 @@ test('разделы переключаются', async ({ page }) => {
   await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
   await page.goto('/')
 
-  await page.getByRole('button', { name: 'PnL / Cashflow' }).click()
+  await openSection(page, 'Отчёты', 'PnL / Cashflow')
   await expect(page.getByRole('heading', { level: 1, name: 'PnL / Cashflow' })).toBeVisible()
   await expect(page.getByText('Модуль ещё не реализован.')).toBeVisible()
 })
@@ -135,7 +145,7 @@ test('контрагент заводится в справочнике с пр�
   })
 
   await page.goto('/')
-  await page.getByRole('button', { name: 'Контрагенты' }).click()
+  await openSection(page, 'Справочники', 'Контрагенты')
   await expect(page.getByTestId('counterparties-table')).toContainText('Контрагентов не найдено')
 
   await page.getByLabel('Наименование контрагента').fill('ООО Ромашка')
@@ -182,7 +192,7 @@ test('файл выгрузки загружается на странице «�
   )
 
   await page.goto('/')
-  await page.getByRole('button', { name: 'Загрузка данных' }).click()
+  await openSection(page, 'Администрирование', 'Загрузка данных')
   await expect(page.getByTestId('import-card-customers')).toContainText('Покупатели')
 
   await page.getByLabel('Файл: Покупатели').setInputFiles({
@@ -235,7 +245,7 @@ test('менеджер заполняет план продаж по клиен�
   )
 
   await page.goto('/')
-  await page.getByRole('button', { name: 'Планирование продаж' }).click()
+  await openSection(page, 'Планирование', 'Планирование продаж')
 
   // Сначала в план добавляется клиент, потом строка товара.
   await expect(page.getByTestId('plan-no-clients')).toBeVisible()

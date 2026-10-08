@@ -84,11 +84,31 @@ describe('App', () => {
     })
     render(<App />)
 
-    expect(await screen.findByRole('button', { name: 'Планирование продаж' })).toBeInTheDocument()
+    // Меню сгруппировано: сначала раскрываем категорию «Планирование».
+    await user.click(await screen.findByRole('button', { name: 'Планирование' }))
+    expect(screen.getByRole('button', { name: 'Планирование продаж' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Планирование закупок' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Матрица цен' }))
     expect(screen.getByText('Модуль ещё не реализован.')).toBeInTheDocument()
+  })
+
+  it('категория меню раскрывается и сворачивается по стрелке', async () => {
+    const user = userEvent.setup()
+    mockApi({ '/api/v1/auth/me': { body: MANAGER }, '/api/v1/stock': { body: [] } })
+    render(<App />)
+
+    const catalogs = await screen.findByRole('button', { name: 'Справочники' })
+    expect(screen.queryByRole('button', { name: 'Номенклатура' })).not.toBeInTheDocument()
+    expect(catalogs).toHaveAttribute('aria-expanded', 'false')
+
+    await user.click(catalogs)
+    expect(screen.getByRole('button', { name: 'Номенклатура' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Контрагенты' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Валюты' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Справочники' }))
+    expect(screen.queryByRole('button', { name: 'Номенклатура' })).not.toBeInTheDocument()
   })
 
   it('показывает пустое состояние, когда остатков нет', async () => {

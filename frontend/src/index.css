@@ -61,6 +61,51 @@ body {
   background: #f1f3f5;
 }
 
+.nav-group {
+  margin-bottom: 0.15rem;
+}
+
+.nav-group-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-weight: 600;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.nav-group-head:hover {
+  background: #f1f3f5;
+}
+
+.nav-group-head.active {
+  color: var(--accent);
+}
+
+.chevron {
+  display: inline-block;
+  width: 0.9rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.nav-sublist {
+  list-style: none;
+  margin: 0.15rem 0 0.35rem;
+  padding: 0 0 0 0.9rem;
+  display: grid;
+  gap: 0.15rem;
+  border-left: 1px solid var(--border);
+  margin-left: 0.75rem;
+}
+
 .nav-item.active {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   border-color: color-mix(in srgb, var(--accent) 35%, transparent);

@@ -198,10 +198,8 @@ export function CounterpartiesPage() {
           <tr>
             <th scope="col">Наименование</th>
             <th scope="col">Роли</th>
-            <th scope="col">ИНН</th>
-            <th scope="col">Источник</th>
             <th scope="col">Состояние</th>
-            <th scope="col" />
+            <th scope="col" aria-label="Действия" />
           </tr>
         </thead>
         <tbody>
@@ -216,8 +214,6 @@ export function CounterpartiesPage() {
               <tr key={row.id}>
                 <td>{row.name}</td>
                 <td>{counterpartyRoles(row).join(', ') || '—'}</td>
-                <td>{row.inn ?? '—'}</td>
-                <td>{row.source === '1c' ? '1С' : 'вручную'}</td>
                 <td>
                   <span className={row.is_active ? 'badge status-approved' : 'badge'}>
                     {row.is_active ? 'Активен' : 'Отключён'}
