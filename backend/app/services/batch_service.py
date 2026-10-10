@@ -11,19 +11,30 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.counterparties import Counterparty
-from app.models.domain import Batch, BatchExpense, BatchItem, Product, StockSnapshot
+from app.models.domain import (
+    Batch,
+    BatchExpense,
+    BatchItem,
+    BatchPayment,
+    Product,
+    StockSnapshot,
+)
+from app.models.rates import CurrencyRate
 from app.schemas.domain import (
     BatchCreate,
     BatchFinanceOut,
     BatchItemOut,
     BatchOut,
+    BatchPaymentOut,
     StockRowOut,
 )
 from app.services import currency_service
 from app.services.cost import (
+    BatchFinance,
     batch_invoice_total_currency,
     calculate_item_cost,
     finance_for_batch,
+    payments_totals,
     q2,
 )
 
@@ -65,6 +76,7 @@ def load_batches(
         select(Batch)
         .options(selectinload(Batch.items).selectinload(BatchItem.product))
         .options(selectinload(Batch.expenses))
+        .options(selectinload(Batch.payments))
         .order_by(Batch.batch_date, Batch.batch_number)
     )
     if date_from is not None:
@@ -75,27 +87,48 @@ def load_batches(
 
 
 def load_batch(db: Session, batch_id: uuid.UUID) -> Batch | None:
+    """Партия со строками, расходами и платежами.
+
+    ``populate_existing`` обязателен: после правки коллекции могли остаться
+    прежними в identity map, а ответ должен показывать актуальные данные.
+    """
     return (
         db.execute(
             select(Batch)
             .where(Batch.id == batch_id)
             .options(selectinload(Batch.items).selectinload(BatchItem.product))
             .options(selectinload(Batch.expenses))
+            .options(selectinload(Batch.payments))
+            .execution_options(populate_existing=True)
         )
         .scalars()
         .one_or_none()
     )
 
 
+def batch_finance(db: Session, batch: Batch) -> tuple[BatchFinance, CurrencyRate | None]:
+    """Себестоимость партии: платежи по своим курсам + незакрытая часть по текущему.
+
+    Курс для незакрытой части — последний доступный (ЦБ); он обновляется раз в час,
+    поэтому оценка остатка меняется, а зафиксированные курсы платежей — нет.
+    """
+    rate, rate_row = currency_service.batch_rate(db, batch.currency, batch.current_exchange_rate)
+    paid_currency, paid_rub = payments_totals(batch.payments)
+    finance = finance_for_batch(batch, rate=rate, paid_currency=paid_currency, paid_rub=paid_rub)
+    return finance, rate_row if isinstance(rate_row, CurrencyRate) else None
+
+
 def serialize_batch(
     batch: Batch,
     snapshots: dict[uuid.UUID, StockSnapshot] | None = None,
     *,
-    rate: Decimal | None = None,
+    finance: BatchFinance | None = None,
+    rate_row: CurrencyRate | None = None,
 ) -> BatchOut:
     """Партия с посчитанной себестоимостью по каждой строке."""
     snaps = snapshots if snapshots is not None else {}
-    finance = finance_for_batch(batch, rate=rate)
+    if finance is None:
+        finance = finance_for_batch(batch)
 
     items: list[BatchItemOut] = []
     for item in batch.items:
@@ -121,6 +154,18 @@ def serialize_batch(
             )
         )
 
+    payments = [
+        BatchPaymentOut(
+            id=payment.id,
+            payment_date=payment.payment_date,
+            amount_currency=payment.amount_currency,
+            exchange_rate=payment.exchange_rate,
+            amount_rub=q2(payment.amount_currency * payment.exchange_rate),
+            comment=payment.comment,
+        )
+        for payment in sorted(batch.payments, key=lambda row: (row.payment_date, row.created_at))
+    ]
+
     return BatchOut(
         id=batch.id,
         batch_number=batch.batch_number,
@@ -132,7 +177,12 @@ def serialize_batch(
         source=batch.source,
         comment=batch.comment,
         created_at=batch.created_at,
-        finance=BatchFinanceOut(**{k: Decimal(v) for k, v in finance.as_dict().items()}),
+        finance=BatchFinanceOut(
+            **{k: Decimal(v) for k, v in finance.as_dict().items()},
+            rate_date=rate_row.rate_date if rate_row is not None else None,
+            rate_updated_at=rate_row.fetched_at if rate_row is not None else None,
+        ),
+        payments=payments,
         items=items,
     )
 
@@ -157,8 +207,8 @@ def _resolve_supplier(db: Session, payload: BatchCreate) -> tuple[uuid.UUID | No
     return supplier.id, supplier.name
 
 
-def _items_and_expenses(db: Session, batch: Batch, payload: BatchCreate) -> None:
-    """Наполнить партию строками и расходами из запроса."""
+def _items_expenses_payments(db: Session, batch: Batch, payload: BatchCreate) -> None:
+    """Наполнить партию строками, рублёвыми и валютными платежами из запроса."""
     for item in payload.items:
         product = _resolve_product(
             db, item.product_code, item.product_name, item.product_kind, item.unit
@@ -178,6 +228,16 @@ def _items_and_expenses(db: Session, batch: Batch, payload: BatchCreate) -> None
                 amount_rub=expense.amount_rub,
                 description=expense.description,
                 source="manual",
+            )
+        )
+    for payment in payload.payments:
+        db.add(
+            BatchPayment(
+                batch_id=batch.id,
+                payment_date=payment.payment_date,
+                amount_currency=payment.amount_currency,
+                exchange_rate=payment.exchange_rate,
+                comment=payment.comment,
             )
         )
 
@@ -208,7 +268,7 @@ def create_batch(db: Session, payload: BatchCreate) -> Batch:
     )
     db.add(batch)
     db.flush()
-    _items_and_expenses(db, batch, payload)
+    _items_expenses_payments(db, batch, payload)
     db.commit()
     loaded = load_batch(db, batch.id)
     assert loaded is not None
@@ -245,8 +305,10 @@ def update_batch(db: Session, batch_id: uuid.UUID, payload: BatchCreate) -> Batc
         db.delete(item)
     for expense in list(batch.expenses):
         db.delete(expense)
+    for payment in list(batch.payments):
+        db.delete(payment)
     db.flush()
-    _items_and_expenses(db, batch, payload)
+    _items_expenses_payments(db, batch, payload)
     db.commit()
     return load_batch(db, batch_id)
 
@@ -269,7 +331,7 @@ def stock_rows(db: Session) -> list[StockRowOut]:
 
     rows: list[StockRowOut] = []
     for batch in batches:
-        finance = finance_for_batch(batch)
+        finance, _ = batch_finance(db, batch)
         invoice_total = batch_invoice_total_currency(batch)
         if invoice_total == 0:
             continue

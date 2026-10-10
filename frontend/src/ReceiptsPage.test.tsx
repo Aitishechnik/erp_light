@@ -31,12 +31,20 @@ const PRODUCTS: Product[] = [
   },
 ]
 
+/** Сегодняшняя дата по локальному календарю — на неё открывается страница. */
+const TODAY = (() => {
+  const now = new Date()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const date = String(now.getDate()).padStart(2, '0')
+  return `${now.getFullYear()}-${month}-${date}`
+})()
+
 function batch(overrides: Partial<Batch> = {}): Batch {
   return {
     id: 'b1',
     batch_number: 'P-100',
     batch_type: 'purchase',
-    batch_date: '2026-10-08',
+    batch_date: TODAY,
     currency: 'USD',
     supplier_id: 's1',
     supplier: 'Импорт Трейд',
@@ -45,13 +53,25 @@ function batch(overrides: Partial<Batch> = {}): Batch {
     created_at: '2026-10-08T10:00:00Z',
     finance: {
       invoice_total_currency: '1000.00',
-      total_paid_currency: '0.00',
-      total_paid_rub: '0.00',
+      total_paid_currency: '600.00',
+      total_paid_rub: '48000.00',
       additional_expenses_rub: '0.00',
-      remaining_payment_currency: '1000.00',
+      remaining_payment_currency: '400.00',
       exchange_rate: '90',
-      final_cost_rub: '90000.00',
+      rate_date: '2026-10-08',
+      rate_updated_at: '2026-10-08T10:00:00Z',
+      final_cost_rub: '84000.00',
     },
+    payments: [
+      {
+        id: 'pay1',
+        payment_date: TODAY,
+        amount_currency: '600.00',
+        exchange_rate: '80',
+        amount_rub: '48000.00',
+        comment: null,
+      },
+    ],
     items: [
       {
         id: 'i1',
@@ -61,8 +81,8 @@ function batch(overrides: Partial<Batch> = {}): Batch {
         unit: 'кг',
         quantity: '10.000',
         total_invoice_currency: '1000.00',
-        item_total_rub: '90000.00',
-        unit_cost: '9000.00',
+        item_total_rub: '84000.00',
+        unit_cost: '8400.00',
         quantity_on_hand: '10.000',
       },
     ],
@@ -97,33 +117,39 @@ describe('ReceiptsPage', () => {
 
     expect(await screen.findByTestId('receipts-calendar')).toBeInTheDocument()
     await waitFor(() => {
-      expect(screen.getByTestId('day-2026-10-08')).toHaveTextContent('поступлений: 1')
+      expect(screen.getByTestId(`day-${TODAY}`)).toHaveTextContent('поступлений: 1')
     })
-    expect(screen.getByTestId('day-2026-10-08')).toHaveTextContent('90 000,00 ₽')
+    expect(screen.getByTestId(`day-${TODAY}`)).toHaveTextContent('84 000,00 ₽')
     const list = await screen.findByTestId('day-receipts')
     expect(list).toHaveTextContent('P-100')
     expect(list).toHaveTextContent('Импорт Трейд')
   })
 
-  it('пересчитывает себестоимость при смене курса без запроса к серверу', async () => {
+  it('пересчитывает остаток по курсу, но не трогает зафиксированный платёж', async () => {
     const user = userEvent.setup()
     mockApi(routes())
     render(<ReceiptsPage />)
 
     await waitFor(() => {
-      expect(screen.getByTestId('day-2026-10-08')).toBeInTheDocument()
+      expect(screen.getByTestId(`day-${TODAY}`)).toBeInTheDocument()
     })
     await user.click(screen.getByRole('button', { name: 'Открыть' }))
 
-    expect(screen.getByTestId('receipt-total')).toHaveTextContent('90 000,00')
-    expect(screen.getByTestId('unit-cost-i0')).toHaveTextContent('9 000,00')
+    // 600 $ закрыты по курсу платежа 80 (48 000 ₽), остаток 400 $ по 90 = 36 000 ₽.
+    expect(screen.getByTestId('receipt-paid')).toHaveTextContent('600,00')
+    expect(screen.getByTestId('receipt-remaining')).toHaveTextContent('400,00')
+    expect(screen.getByTestId('payment-rub-p0')).toHaveTextContent('48 000,00')
+    expect(screen.getByTestId('receipt-total')).toHaveTextContent('84 000,00')
+    expect(screen.getByTestId('unit-cost-i0')).toHaveTextContent('8 400,00')
 
     const rate = screen.getByLabelText('Курс')
     await user.clear(rate)
     await user.type(rate, '100')
 
-    expect(screen.getByTestId('receipt-total')).toHaveTextContent('100 000,00')
-    expect(screen.getByTestId('unit-cost-i0')).toHaveTextContent('10 000,00')
+    // Переоценилась только незакрытая часть: 48 000 + 400 × 100 = 88 000 ₽.
+    expect(screen.getByTestId('receipt-total')).toHaveTextContent('88 000,00')
+    expect(screen.getByTestId('unit-cost-i0')).toHaveTextContent('8 800,00')
+    expect(screen.getByTestId('payment-rub-p0')).toHaveTextContent('48 000,00')
   })
 
   it('создаёт поступление и отправляет строки с товаром', async () => {
@@ -195,11 +221,11 @@ describe('ReceiptsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Добавить поступление' }))
     await user.clear(screen.getByLabelText('Валюта'))
     await user.type(screen.getByLabelText('Валюта'), 'USD')
-    await user.click(screen.getByRole('button', { name: 'Курс ЦБ' }))
+    await user.click(screen.getByRole('button', { name: 'Обновить курс ЦБ' }))
 
     await waitFor(() => {
       expect(screen.getByLabelText('Курс')).toHaveValue('91.2500')
     })
-    expect(screen.getByText(/Курс ЦБ на/)).toBeInTheDocument()
+    expect(screen.getByText(/Курс ЦБ/)).toBeInTheDocument()
   })
 })

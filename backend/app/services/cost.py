@@ -13,18 +13,19 @@
 Что НЕ перенесено (осознанно): бухгалтерский слой — счета, проводки, курсовые
 разницы по ПБУ. Это зона 1С.
 
-Источника оплат в erp_lite пока нет (банковские выписки не загружаются), поэтому
-по умолчанию ``total_paid_currency = total_paid_rub = 0``: неоплаченная часть
-оценивается по текущему курсу. Когда появится источник оплат, формула уже готова
-их принять.
+Оплаты приходят из валютных платежей партии (``batch_payments``): каждый платёж
+хранит свой курс, поэтому ``total_paid_rub`` — сумма платежей по их курсам. Курс для
+незакрытой части — текущий (последний доступный курс ЦБ), поэтому она переоценивается,
+а сделанные платежи — нет.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
-from app.models.domain import Batch
+from app.models.domain import Batch, BatchPayment
 
 ZERO = Decimal("0.00")
 ONE = Decimal("1")
@@ -116,14 +117,35 @@ def batch_invoice_total_currency(batch: Batch) -> Decimal:
     return q2(sum((item.total_invoice_currency for item in batch.items), ZERO))
 
 
-def finance_for_batch(batch: Batch, *, rate: Decimal | None = None) -> BatchFinance:
-    """Финансовый итог партии по её строкам и реестру расходов.
+def payments_totals(payments: Sequence[BatchPayment]) -> tuple[Decimal, Decimal]:
+    """``(оплачено в валюте, оплачено рублей)`` по зафиксированным курсам платежей."""
+    paid_currency = q2(sum((payment.amount_currency for payment in payments), ZERO))
+    paid_rub = q2(
+        sum((payment.amount_currency * payment.exchange_rate for payment in payments), ZERO)
+    )
+    return paid_currency, paid_rub
 
-    ``rate`` позволяет посчитать себестоимость по актуальному курсу (например,
-    из кэша курсов ЦБ), не меняя сохранённый в партии.
+
+def finance_for_batch(
+    batch: Batch,
+    *,
+    rate: Decimal | None = None,
+    paid_currency: Decimal | None = None,
+    paid_rub: Decimal | None = None,
+) -> BatchFinance:
+    """Финансовый итог партии по строкам, расходам и валютным платежам.
+
+    ``rate`` — курс для незакрытой части (последний доступный, обновляется сам).
+    Если оплаты не переданы, берутся из платежей партии.
     """
+    if paid_currency is None or paid_rub is None:
+        from_payments_currency, from_payments_rub = payments_totals(batch.payments)
+        paid_currency = from_payments_currency if paid_currency is None else paid_currency
+        paid_rub = from_payments_rub if paid_rub is None else paid_rub
     return calculate_batch_finance(
         invoice_total_currency=batch_invoice_total_currency(batch),
         additional_expenses_rub=batch_expenses_rub(batch),
+        total_paid_currency=paid_currency,
+        total_paid_rub=paid_rub,
         exchange_rate=rate if rate is not None else batch.current_exchange_rate,
     )

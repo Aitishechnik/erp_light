@@ -107,6 +107,9 @@ class Batch(Base):
     expenses: Mapped[list[BatchExpense]] = relationship(
         back_populates="batch", cascade="all, delete-orphan"
     )
+    payments: Mapped[list[BatchPayment]] = relationship(
+        back_populates="batch", cascade="all, delete-orphan"
+    )
 
 
 class BatchItem(Base):
@@ -156,6 +159,32 @@ class BatchExpense(Base):
     )
 
     batch: Mapped[Batch] = relationship(back_populates="expenses")
+
+
+class BatchPayment(Base):
+    """Валютный платёж по партии: закрывает инвойсную стоимость.
+
+    Курс фиксируется в момент платежа (вручную) и больше никогда не меняется —
+    поэтому уже сделанные платежи не пересчитываются при движении валюты.
+    """
+
+    __tablename__ = "batch_payments"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    batch_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("batches.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    payment_date: Mapped[date] = mapped_column(Date, nullable=False)
+    amount_currency: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    exchange_rate: Mapped[Decimal] = mapped_column(
+        Numeric(15, 6), nullable=False, comment="Курс платежа, зафиксирован вручную"
+    )
+    comment: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    batch: Mapped[Batch] = relationship(back_populates="payments")
 
 
 class StockSnapshot(Base):

@@ -5,10 +5,23 @@ from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models.counterparties import Counterparty
 from app.services import currency_service
+
+
+def cbr_xml(usd: str = "90,5000") -> bytes:
+    return f"""<?xml version="1.0" encoding="windows-1251"?>
+<ValCurs Date="08.10.2026" name="Foreign Currency Market">
+  <Valute ID="R01235"><NumCode>840</NumCode><CharCode>USD</CharCode><Nominal>1</Nominal>
+    <Name>Доллар США</Name><Value>{usd}</Value><VunitRate>{usd}</VunitRate></Valute>
+  <Valute ID="R01820"><NumCode>392</NumCode><CharCode>JPY</CharCode><Nominal>100</Nominal>
+    <Name>Иена</Name><Value>60,0000</Value><VunitRate>0,6</VunitRate></Valute>
+</ValCurs>
+""".encode()
+
 
 CBR_XML = """<?xml version="1.0" encoding="windows-1251"?>
 <ValCurs Date="08.10.2026" name="Foreign Currency Market">
@@ -38,16 +51,20 @@ def supplier(db_session: Session) -> Counterparty:
 
 
 def _no_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fail(day: date) -> dict[str, tuple[int, Decimal]]:
+    def fail(day: date) -> currency_service.CbrRates:
         raise currency_service.RateError("ЦБ РФ недоступен в тесте")
 
     monkeypatch.setattr(currency_service, "fetch_cbr_rates", fail)
 
 
-def _with_cbr(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        currency_service, "fetch_cbr_rates", lambda day: currency_service.parse_cbr_xml(CBR_XML)
+def _cbr_answer(day: date) -> currency_service.CbrRates:
+    return currency_service.CbrRates(
+        rate_date=date.fromisoformat(DAY), rates=currency_service.parse_cbr_xml(CBR_XML)
     )
+
+
+def _with_cbr(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(currency_service, "fetch_cbr_rates", _cbr_answer)
 
 
 def _payload(**overrides: object) -> dict[str, object]:
@@ -82,9 +99,9 @@ def test_rate_is_cached_and_reused(
 ) -> None:
     calls: list[date] = []
 
-    def fake_fetch(day: date) -> dict[str, tuple[int, Decimal]]:
+    def fake_fetch(day: date) -> currency_service.CbrRates:
         calls.append(day)
-        return currency_service.parse_cbr_xml(CBR_XML)
+        return _cbr_answer(day)
 
     monkeypatch.setattr(currency_service, "fetch_cbr_rates", fake_fetch)
     first = client.get("/api/v1/rates/USD", params={"date": DAY})
@@ -213,3 +230,167 @@ def test_unknown_supplier_is_rejected(
     )
     assert response.status_code == 400
     assert "не найден" in response.json()["detail"]
+
+
+def _payment(amount: str, rate: str) -> dict[str, str]:
+    return {"payment_date": DAY, "amount_currency": amount, "exchange_rate": rate}
+
+
+def test_currency_payment_closes_invoice_and_fixes_rate(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Оплаченное считается по курсу платежа, остаток — по текущему курсу."""
+    login("purchase")
+    _with_cbr(monkeypatch)
+    created = client.post(
+        "/api/v1/batches",
+        json=_payload(current_exchange_rate=None, payments=[_payment("600", "80")]),
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    finance = body["finance"]
+    # 600 $ оплачено по 80 = 48 000 ₽; остаток 400 $ по курсу ЦБ 90,5 = 36 200 ₽.
+    assert Decimal(finance["total_paid_currency"]) == Decimal("600.00")
+    assert Decimal(finance["total_paid_rub"]) == Decimal("48000.00")
+    assert Decimal(finance["remaining_payment_currency"]) == Decimal("400.00")
+    # 48 000 + 500 ₽ доставки + 36 200 = 84 700 ₽
+    assert Decimal(finance["final_cost_rub"]) == Decimal("84700.00")
+    assert Decimal(body["payments"][0]["amount_rub"]) == Decimal("48000.00")
+    assert body["finance"]["rate_date"] == DAY
+
+
+def test_fixed_payment_is_not_revalued_when_rate_grows(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch, db_session: Session
+) -> None:
+    """Курс вырос — переоценивается только незакрытая часть, платёж зафиксирован."""
+    login("purchase")
+    _with_cbr(monkeypatch)
+    created = client.post(
+        "/api/v1/batches",
+        json=_payload(current_exchange_rate=None, payments=[_payment("600", "80")]),
+    ).json()
+
+    # Старим кэш курса на два часа — сервис сходит за новым курсом.
+    db_session.execute(text("update currency_rates set fetched_at = now() - interval '2 hours'"))
+    db_session.commit()
+    monkeypatch.setattr(
+        currency_service,
+        "fetch_cbr_rates",
+        lambda day: currency_service.CbrRates(
+            rate_date=date.fromisoformat(DAY),
+            rates=currency_service.parse_cbr_xml(cbr_xml("100,0000")),
+        ),
+    )
+
+    updated = client.get(f"/api/v1/batches/{created['id']}")
+    assert updated.status_code == 200, updated.text
+    finance = updated.json()["finance"]
+    assert Decimal(finance["total_paid_rub"]) == Decimal("48000.00")  # платёж не изменился
+    assert Decimal(finance["exchange_rate"]) == Decimal("100")
+    # 48 000 (платёж) + 500 ₽ доставки + 400 × 100 = 88 500 ₽
+    assert Decimal(finance["final_cost_rub"]) == Decimal("88500.00")
+
+
+def test_fresh_rate_is_taken_from_cache(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    login("purchase")
+    calls: list[date] = []
+
+    def fake_fetch(day: date) -> currency_service.CbrRates:
+        calls.append(day)
+        return currency_service.CbrRates(
+            rate_date=date.fromisoformat(DAY), rates=currency_service.parse_cbr_xml(CBR_XML)
+        )
+
+    monkeypatch.setattr(currency_service, "fetch_cbr_rates", fake_fetch)
+    client.post("/api/v1/batches", json=_payload(current_exchange_rate=None, batch_number="P-1"))
+    client.post("/api/v1/batches", json=_payload(current_exchange_rate=None, batch_number="P-2"))
+    # Второй запрос берёт свежий курс из кэша, в сеть не ходит.
+    assert len(calls) == 1
+
+
+def test_payments_are_split_between_items_proportionally(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    login("purchase")
+    _no_network(monkeypatch)
+    payload = _payload(
+        current_exchange_rate="90",
+        payments=[_payment("1000", "80")],
+        items=[
+            {
+                "product_code": "ТОВ1",
+                "product_name": "Первый",
+                "quantity": "10",
+                "total_invoice_currency": "600.00",
+            },
+            {
+                "product_code": "ТОВ2",
+                "product_name": "Второй",
+                "quantity": "10",
+                "total_invoice_currency": "400.00",
+            },
+        ],
+        total_invoice_value="1000.00",
+    )
+    created = client.post("/api/v1/batches", json=payload)
+    assert created.status_code == 201, created.text
+    body = created.json()
+    # Инвойс закрыт платежом 1000 $ по 80 → 80 000 ₽ + 500 ₽ доставки = 80 500 ₽.
+    assert Decimal(body["finance"]["remaining_payment_currency"]) == Decimal("0.00")
+    assert Decimal(body["finance"]["final_cost_rub"]) == Decimal("80500.00")
+    costs = {item["product_code"]: item for item in body["items"]}
+    # 80 500 ₽ делим пропорционально: 60% и 40%, по 10 шт в строке.
+    assert Decimal(costs["ТОВ1"]["item_total_rub"]) == Decimal("48300.00")
+    assert Decimal(costs["ТОВ1"]["unit_cost"]) == Decimal("4830.00")
+    assert Decimal(costs["ТОВ2"]["item_total_rub"]) == Decimal("32200.00")
+    assert Decimal(costs["ТОВ2"]["unit_cost"]) == Decimal("3220.00")
+
+
+def test_payments_can_be_edited(client: TestClient, login, monkeypatch: pytest.MonkeyPatch) -> None:
+    login("purchase")
+    _no_network(monkeypatch)
+    created = client.post(
+        "/api/v1/batches",
+        json=_payload(current_exchange_rate="90", payments=[_payment("500", "80")]),
+    ).json()
+    assert Decimal(created["finance"]["total_paid_currency"]) == Decimal("500.00")
+
+    updated = client.put(
+        f"/api/v1/batches/{created['id']}",
+        json=_payload(
+            current_exchange_rate="90",
+            payments=[_payment("500", "80"), _payment("500", "85")],
+        ),
+    )
+    assert updated.status_code == 200, updated.text
+    finance = updated.json()["finance"]
+    assert Decimal(finance["total_paid_currency"]) == Decimal("1000.00")
+    assert Decimal(finance["total_paid_rub"]) == Decimal("82500.00")
+    assert Decimal(finance["remaining_payment_currency"]) == Decimal("0.00")
+    assert Decimal(finance["final_cost_rub"]) == Decimal("83000.00")
+    assert len(updated.json()["payments"]) == 2
+
+
+def test_hourly_refresh_touches_only_used_currencies(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch, db_session: Session
+) -> None:
+    login("purchase")
+    _with_cbr(monkeypatch)
+    client.post("/api/v1/batches", json=_payload(current_exchange_rate=None))
+    db_session.execute(text("update currency_rates set fetched_at = now() - interval '3 hours'"))
+    db_session.commit()
+
+    fetched: list[str] = []
+
+    def fake_fetch(day: date) -> currency_service.CbrRates:
+        fetched.append("call")
+        return currency_service.CbrRates(
+            rate_date=date.fromisoformat(DAY), rates=currency_service.parse_cbr_xml(CBR_XML)
+        )
+
+    monkeypatch.setattr(currency_service, "fetch_cbr_rates", fake_fetch)
+    refreshed = currency_service.refresh_used_rates(db_session)
+    assert refreshed == 1  # только USD из поступлений
+    assert fetched  # курс действительно перезапрошен

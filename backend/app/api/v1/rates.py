@@ -26,19 +26,24 @@ def get_rate(
     db: DbSession,
     day: Annotated[date | None, Query(alias="date", description="Дата курса")] = None,
 ) -> RateOut:
-    """Курс валюты на дату (рублей за единицу). Берётся из кэша или с сайта ЦБ."""
+    """Курс валюты: на дату или последний доступный. Берётся из кэша или с сайта ЦБ."""
     target = day or date.today()
     currency = code.strip().upper()
     if currency == currency_service.BASE_CURRENCY:
         return RateOut(code=currency, rate_date=target, rate=Decimal("1"), nominal=1, source="base")
     try:
-        row = currency_service.get_rate_row(db, currency, target)
+        # Без даты — последний доступный курс (по нему оценивается незакрытая часть).
+        row = (
+            currency_service.get_rate_row(db, currency, target)
+            if day is not None
+            else currency_service.latest_rate_row(db, currency)
+        )
     except RateError as exc:
         raise HTTPException(exc.status_code, exc.message) from exc
     if row is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
-            f"Курс {currency} на {target.strftime('%d.%m.%Y')} не найден — введите вручную",
+            f"Курс {currency} не найден — введите вручную или обновите курсы ЦБ",
         )
     return RateOut(
         code=row.code,

@@ -1,5 +1,7 @@
 """Точка входа FastAPI."""
 
+import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -9,7 +11,25 @@ from sqlalchemy import text
 
 from app.api.v1.router import api_router
 from app.config import get_settings
-from app.db import engine
+from app.db import SessionLocal, engine
+from app.services import currency_service
+
+logger = logging.getLogger("erp_lite")
+
+# Незакрытая часть валютных инвойсов оценивается по последнему курсу, поэтому
+# курсы обновляем сами — раз в час (и при каждом открытии страницы).
+RATES_REFRESH_SECONDS = 3600
+
+
+async def _rates_refresh_loop() -> None:
+    while True:
+        await asyncio.sleep(RATES_REFRESH_SECONDS)
+        try:
+            with SessionLocal() as session:
+                refreshed = currency_service.refresh_used_rates(session)
+            logger.info("Курсы валют обновлены: %s", refreshed)
+        except Exception:  # noqa: BLE001 — фоновая задача не должна ронять приложение
+            logger.warning("Не удалось обновить курсы валют", exc_info=True)
 
 
 def check_db() -> None:
@@ -29,9 +49,13 @@ def create_app(*, verify_db: bool = True) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        task: asyncio.Task[None] | None = None
         if verify_db:
             check_db()
+            task = asyncio.create_task(_rates_refresh_loop())
         yield
+        if task is not None:
+            task.cancel()
 
     app = FastAPI(title="erp_lite API", version="0.1.0", lifespan=lifespan)
     app.add_middleware(

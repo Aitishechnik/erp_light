@@ -51,6 +51,15 @@ class BatchItemCreate(BaseModel):
     total_invoice_currency: Decimal = Field(ge=0)
 
 
+class BatchPaymentCreate(BaseModel):
+    """Валютный платёж: закрывает инвойсную стоимость, курс фиксируется вручную."""
+
+    payment_date: date
+    amount_currency: Decimal = Field(gt=0)
+    exchange_rate: Decimal = Field(gt=0, description="Курс платежа, фиксируется навсегда")
+    comment: str | None = Field(default=None, max_length=255)
+
+
 class BatchCreate(BaseModel):
     """Поступление партии: шапка, строки и доп. расходы."""
 
@@ -68,7 +77,21 @@ class BatchCreate(BaseModel):
     auto_rate: bool = Field(default=True, description="Разрешить запрос курса с сайта ЦБ")
     comment: str | None = None
     items: list[BatchItemCreate] = Field(min_length=1)
-    expenses: list[BatchExpenseCreate] = []
+    payments: list[BatchPaymentCreate] = Field(
+        default=[], description="Валютные платежи по инвойсу"
+    )
+    expenses: list[BatchExpenseCreate] = Field(
+        default=[], description="Рублёвые платежи (доп. расходы)"
+    )
+
+
+class BatchPaymentOut(BaseModel):
+    id: uuid.UUID
+    payment_date: date
+    amount_currency: Decimal
+    exchange_rate: Decimal
+    amount_rub: Decimal
+    comment: str | None
 
 
 class BatchFinanceOut(BaseModel):
@@ -77,7 +100,9 @@ class BatchFinanceOut(BaseModel):
     total_paid_rub: Decimal
     additional_expenses_rub: Decimal
     remaining_payment_currency: Decimal
-    exchange_rate: Decimal
+    exchange_rate: Decimal = Field(description="Курс, по которому оценена незакрытая часть")
+    rate_date: date | None = Field(default=None, description="Дата курса ЦБ")
+    rate_updated_at: datetime | None = Field(default=None, description="Когда курс обновлялся")
     final_cost_rub: Decimal
 
 
@@ -106,6 +131,7 @@ class BatchOut(BaseModel):
     comment: str | None
     created_at: datetime
     finance: BatchFinanceOut
+    payments: list[BatchPaymentOut]
     items: list[BatchItemOut]
 
 

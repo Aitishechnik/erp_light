@@ -571,30 +571,71 @@ button.primary,
 
 .receipt-items th:nth-child(1),
 .receipt-items td:nth-child(1) {
-  width: 42%;
+  width: 30%;
 }
 
 .receipt-items th:nth-child(2),
 .receipt-items td:nth-child(2) {
-  width: 14%;
+  width: 12%;
 }
 
 .receipt-items th:nth-child(3),
 .receipt-items td:nth-child(3) {
-  width: 14%;
+  width: 13%;
 }
 
 .receipt-items th:nth-child(4),
 .receipt-items td:nth-child(4) {
-  width: 20%;
+  width: 17%;
 }
 
 .receipt-items th:nth-child(5),
 .receipt-items td:nth-child(5) {
+  width: 17%;
+}
+
+.receipt-items th:nth-child(6),
+.receipt-items td:nth-child(6) {
+  width: 11%;
+}
+
+.receipt-payments {
+  table-layout: fixed;
+  margin-bottom: 0.75rem;
+}
+
+.receipt-payments th:nth-child(1),
+.receipt-payments td:nth-child(1) {
+  width: 18%;
+}
+
+.receipt-payments th:nth-child(2),
+.receipt-payments td:nth-child(2) {
+  width: 15%;
+}
+
+.receipt-payments th:nth-child(3),
+.receipt-payments td:nth-child(3) {
+  width: 15%;
+}
+
+.receipt-payments th:nth-child(4),
+.receipt-payments td:nth-child(4) {
+  width: 18%;
+}
+
+.receipt-payments th:nth-child(5),
+.receipt-payments td:nth-child(5) {
+  width: 24%;
+}
+
+.receipt-payments th:nth-child(6),
+.receipt-payments td:nth-child(6) {
   width: 10%;
 }
 
 .receipt-items td input,
+.receipt-payments td input,
 .receipt-expenses td input {
   width: 100%;
 }

@@ -120,7 +120,25 @@ export type BatchFinance = {
   additional_expenses_rub: string
   remaining_payment_currency: string
   exchange_rate: string
+  rate_date: string | null
+  rate_updated_at: string | null
   final_cost_rub: string
+}
+
+export type BatchPayment = {
+  id: string
+  payment_date: string
+  amount_currency: string
+  exchange_rate: string
+  amount_rub: string
+  comment: string | null
+}
+
+export type BatchPaymentIn = {
+  payment_date: string
+  amount_currency: string
+  exchange_rate: string
+  comment?: string | null
 }
 
 export type Batch = {
@@ -135,6 +153,7 @@ export type Batch = {
   comment: string | null
   created_at: string
   finance: BatchFinance
+  payments: BatchPayment[]
   items: BatchItem[]
 }
 
@@ -161,6 +180,7 @@ export type BatchIn = {
   auto_rate: boolean
   comment?: string | null
   items: BatchItemIn[]
+  payments: BatchPaymentIn[]
   expenses: BatchExpenseIn[]
 }
 
@@ -351,9 +371,10 @@ export function deleteBatch(batchId: string): Promise<void> {
   return request<void>(`/api/v1/batches/${batchId}`, { method: 'DELETE' })
 }
 
-/** Курс валюты на дату: сначала кэш, иначе запрос к ЦБ на сервере. */
-export function fetchRate(code: string, day: string): Promise<CurrencyRate> {
-  return request<CurrencyRate>(`/api/v1/rates/${code}?date=${day}`)
+/** Курс валюты: без даты — последний доступный (он же для незакрытой части). */
+export function fetchRate(code: string, day?: string): Promise<CurrencyRate> {
+  const query = day ? `?date=${day}` : ''
+  return request<CurrencyRate>(`/api/v1/rates/${code}${query}`)
 }
 
 export function login(loginName: string, password: string): Promise<SessionUser> {

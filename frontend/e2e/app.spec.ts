@@ -67,8 +67,11 @@ const RECEIPT = {
     additional_expenses_rub: '0.00',
     remaining_payment_currency: '1000.00',
     exchange_rate: '90',
+    rate_date: '2026-10-08',
+    rate_updated_at: '2026-10-08T10:00:00Z',
     final_cost_rub: '90000.00',
   },
+  payments: [],
   items: [
     {
       id: 'i1',
@@ -325,6 +328,17 @@ test('поступление заводится в календаре, себе�
   // Живой пересчёт: 1000 $ × 90 = 90 000 ₽, за единицу — 9 000 ₽.
   await expect(page.getByTestId('receipt-total')).toHaveText('90 000,00 ₽')
   await expect(page.getByTestId('unit-cost-i0')).toHaveText('9 000,00')
+
+  // Валютный платёж закрывает часть инвойса по своему курсу и не переоценивается.
+  await page.getByRole('button', { name: 'Добавить валютный платёж' }).click()
+  await page.getByLabel('Сумма платежа p1').fill('600')
+  await page.getByLabel('Курс платежа p1').fill('80')
+  await expect(page.getByTestId('payment-rub-p1')).toHaveText('48 000,00')
+  await expect(page.getByTestId('receipt-remaining')).toContainText('400,00')
+  await expect(page.getByTestId('receipt-total')).toHaveText('84 000,00 ₽')
+  await page.getByLabel('Курс', { exact: true }).fill('100')
+  await expect(page.getByTestId('receipt-total')).toHaveText('88 000,00 ₽')
+  await expect(page.getByTestId('payment-rub-p1')).toHaveText('48 000,00')
 
   await page.getByRole('button', { name: 'Сохранить' }).click()
   await expect(page.getByTestId('receipt-form')).toHaveCount(0)
