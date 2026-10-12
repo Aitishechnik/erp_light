@@ -599,9 +599,31 @@ button.primary,
   width: 11%;
 }
 
-.receipt-payments {
+.receipt-payments,
+.receipt-expenses {
   table-layout: fixed;
   margin-bottom: 0.75rem;
+}
+
+.receipt-expenses th:nth-child(1),
+.receipt-expenses td:nth-child(1) {
+  width: 44%;
+}
+
+.receipt-expenses th:nth-child(2),
+.receipt-expenses td:nth-child(2) {
+  width: 20%;
+}
+
+.receipt-expenses th:nth-child(3),
+.receipt-expenses td:nth-child(3) {
+  width: 24%;
+  text-align: left;
+}
+
+.receipt-expenses th:nth-child(4),
+.receipt-expenses td:nth-child(4) {
+  width: 12%;
 }
 
 .receipt-payments th:nth-child(1),

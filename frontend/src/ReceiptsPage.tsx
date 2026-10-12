@@ -919,6 +919,7 @@ export function ReceiptsPage() {
                           })
                         }
                       />
+                      {row.date > iso(new Date()) ? <span className="badge"> план</span> : null}
                     </td>
                     <td>
                       <input
@@ -953,7 +954,6 @@ export function ReceiptsPage() {
                           })
                         }
                       />
-                      {row.date > iso(new Date()) ? <span className="badge"> план</span> : null}
                     </td>
                     <td>
                       <button
