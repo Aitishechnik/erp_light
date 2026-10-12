@@ -22,6 +22,7 @@ from app.models.domain import (
 from app.models.rates import CurrencyRate
 from app.schemas.domain import (
     BatchCreate,
+    BatchExpenseOut,
     BatchFinanceOut,
     BatchItemOut,
     BatchOut,
@@ -34,7 +35,6 @@ from app.services.cost import (
     batch_invoice_total_currency,
     calculate_item_cost,
     finance_for_batch,
-    payments_totals,
     q2,
 )
 
@@ -113,8 +113,7 @@ def batch_finance(db: Session, batch: Batch) -> tuple[BatchFinance, CurrencyRate
     поэтому оценка остатка меняется, а зафиксированные курсы платежей — нет.
     """
     rate, rate_row = currency_service.batch_rate(db, batch.currency, batch.current_exchange_rate)
-    paid_currency, paid_rub = payments_totals(batch.payments)
-    finance = finance_for_batch(batch, rate=rate, paid_currency=paid_currency, paid_rub=paid_rub)
+    finance = finance_for_batch(batch, rate=rate)
     return finance, rate_row if isinstance(rate_row, CurrencyRate) else None
 
 
@@ -154,6 +153,18 @@ def serialize_batch(
             )
         )
 
+    today = date.today()
+    expenses = [
+        BatchExpenseOut(
+            id=expense.id,
+            expense_date=expense.expense_date,
+            amount_rub=expense.amount_rub,
+            description=expense.description,
+            is_planned=expense.expense_date > today,
+        )
+        for expense in sorted(batch.expenses, key=lambda row: (row.expense_date, row.created_at))
+    ]
+
     payments = [
         BatchPaymentOut(
             id=payment.id,
@@ -183,6 +194,7 @@ def serialize_batch(
             rate_updated_at=rate_row.fetched_at if rate_row is not None else None,
         ),
         payments=payments,
+        expenses=expenses,
         items=items,
     )
 
@@ -207,6 +219,22 @@ def _resolve_supplier(db: Session, payload: BatchCreate) -> tuple[uuid.UUID | No
     return supplier.id, supplier.name
 
 
+def check_payments_limit(payload: BatchCreate) -> None:
+    """Сумма валютных платежей не может превышать стоимость товаров партии."""
+    invoice_total = (
+        payload.total_invoice_value
+        if payload.total_invoice_value is not None
+        else sum((item.total_invoice_currency for item in payload.items), ZERO)
+    )
+    payments_total = sum((payment.amount_currency for payment in payload.payments), ZERO)
+    if payments_total > invoice_total:
+        raise ValueError(
+            "Сумма валютных платежей "
+            f"({payments_total}) больше стоимости товаров партии ({invoice_total}). "
+            "Уменьшите платёж или добавьте товары."
+        )
+
+
 def _items_expenses_payments(db: Session, batch: Batch, payload: BatchCreate) -> None:
     """Наполнить партию строками, рублёвыми и валютными платежами из запроса."""
     for item in payload.items:
@@ -225,6 +253,7 @@ def _items_expenses_payments(db: Session, batch: Batch, payload: BatchCreate) ->
         db.add(
             BatchExpense(
                 batch_id=batch.id,
+                expense_date=expense.expense_date or date.today(),
                 amount_rub=expense.amount_rub,
                 description=expense.description,
                 source="manual",
@@ -244,6 +273,7 @@ def _items_expenses_payments(db: Session, batch: Batch, payload: BatchCreate) ->
 
 def create_batch(db: Session, payload: BatchCreate) -> Batch:
     """Новое поступление: курс берём из запроса, иначе из ЦБ на дату."""
+    check_payments_limit(payload)
     supplier_id, supplier_name = _resolve_supplier(db, payload)
     rate = currency_service.resolve_rate(
         db,
@@ -280,6 +310,7 @@ def update_batch(db: Session, batch_id: uuid.UUID, payload: BatchCreate) -> Batc
     batch = load_batch(db, batch_id)
     if batch is None:
         return None
+    check_payments_limit(payload)
     supplier_id, supplier_name = _resolve_supplier(db, payload)
     rate = currency_service.resolve_rate(
         db,

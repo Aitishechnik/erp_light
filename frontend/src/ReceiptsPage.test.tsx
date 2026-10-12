@@ -60,6 +60,10 @@ function batch(overrides: Partial<Batch> = {}): Batch {
       exchange_rate: '90',
       rate_date: '2026-10-08',
       rate_updated_at: '2026-10-08T10:00:00Z',
+      planned_payments_currency: '0.00',
+      planned_payments_rub: '0.00',
+      planned_expenses_rub: '0.00',
+      effective_rate: '84.000000',
       final_cost_rub: '84000.00',
     },
     payments: [
@@ -72,6 +76,7 @@ function batch(overrides: Partial<Batch> = {}): Batch {
         comment: null,
       },
     ],
+    expenses: [],
     items: [
       {
         id: 'i1',
@@ -227,5 +232,81 @@ describe('ReceiptsPage', () => {
       expect(screen.getByLabelText('Курс')).toHaveValue('91.2500')
     })
     expect(screen.getByText(/Курс ЦБ/)).toBeInTheDocument()
+  })
+})
+
+describe('ReceiptsPage — план и лимит', () => {
+  const FUTURE = '2099-01-01'
+
+  it('будущий платёж — план: в себестоимость не входит', async () => {
+    const user = userEvent.setup()
+    mockApi(routes())
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(screen.getByRole('button', { name: 'Добавить поступление' }))
+    await user.clear(screen.getByLabelText('Валюта'))
+    await user.type(screen.getByLabelText('Валюта'), 'USD')
+    await user.type(screen.getByLabelText('Товар i0'), 'ТОВ1')
+    await user.type(screen.getByLabelText('Количество i0'), '10')
+    await user.type(screen.getByLabelText('Сумма i0'), '1000')
+    await user.clear(screen.getByLabelText('Курс'))
+    await user.type(screen.getByLabelText('Курс'), '90')
+
+    await user.click(screen.getByRole('button', { name: 'Добавить валютный платёж' }))
+    const pay = screen.getByTestId('receipt-payments').querySelector('tbody tr')
+    expect(pay).not.toBeNull()
+    await user.clear(screen.getByLabelText('Дата платежа pnew1'))
+    await user.type(screen.getByLabelText('Дата платежа pnew1'), FUTURE)
+    await user.type(screen.getByLabelText('Сумма платежа pnew1'), '400')
+    await user.type(screen.getByLabelText('Курс платежа pnew1'), '80')
+
+    // Платёж виден как план, но факт и себестоимость считаются без него.
+    expect(screen.getByTestId('receipt-planned')).toHaveTextContent('400,00')
+    expect(screen.getByTestId('receipt-paid')).toHaveTextContent('0,00')
+    expect(screen.getByTestId('receipt-remaining')).toHaveTextContent('1 000,00')
+    expect(screen.getByTestId('receipt-total')).toHaveTextContent('90 000,00 ₽')
+  })
+
+  it('платёж больше стоимости товаров — предупреждение и блокировка сохранения', async () => {
+    const user = userEvent.setup()
+    mockApi(routes())
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(screen.getByRole('button', { name: 'Добавить поступление' }))
+    await user.type(screen.getByLabelText('Товар i0'), 'ТОВ1')
+    await user.type(screen.getByLabelText('Количество i0'), '10')
+    await user.type(screen.getByLabelText('Сумма i0'), '1000')
+    await user.click(screen.getByRole('button', { name: 'Добавить валютный платёж' }))
+    await user.type(screen.getByLabelText('Сумма платежа pnew1'), '1500')
+    await user.type(screen.getByLabelText('Курс платежа pnew1'), '80')
+
+    expect(screen.getByTestId('receipt-limit-error')).toHaveTextContent('больше')
+    expect(screen.getByTestId('receipt-limit')).toHaveTextContent('0,00')
+    expect(screen.getByRole('button', { name: 'Сохранить' })).toBeDisabled()
+  })
+
+  it('в списке за день показывается фактический курс партии', async () => {
+    mockApi(
+      routes({
+        '/api/v1/batches': {
+          body: [
+            batch({
+              finance: {
+                ...batch().finance,
+                exchange_rate: '85',
+                effective_rate: '100.500000',
+              },
+            }),
+          ],
+        },
+      }),
+    )
+    render(<ReceiptsPage />)
+
+    const list = await screen.findByTestId('day-receipts')
+    expect(list).toHaveTextContent('100.5')
+    expect(list).not.toHaveTextContent('85')
   })
 })

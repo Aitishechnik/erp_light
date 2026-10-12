@@ -69,9 +69,14 @@ const RECEIPT = {
     exchange_rate: '90',
     rate_date: '2026-10-08',
     rate_updated_at: '2026-10-08T10:00:00Z',
+    planned_payments_currency: '0.00',
+    planned_payments_rub: '0.00',
+    planned_expenses_rub: '0.00',
+    effective_rate: '90.000000',
     final_cost_rub: '90000.00',
   },
   payments: [],
+  expenses: [],
   items: [
     {
       id: 'i1',
@@ -331,14 +336,46 @@ test('поступление заводится в календаре, себе�
 
   // Валютный платёж закрывает часть инвойса по своему курсу и не переоценивается.
   await page.getByRole('button', { name: 'Добавить валютный платёж' }).click()
-  await page.getByLabel('Сумма платежа p1').fill('600')
-  await page.getByLabel('Курс платежа p1').fill('80')
-  await expect(page.getByTestId('payment-rub-p1')).toHaveText('48 000,00')
+  await page.getByLabel('Сумма платежа pnew1').fill('600')
+  await page.getByLabel('Курс платежа pnew1').fill('80')
+  await expect(page.getByTestId('payment-rub-pnew1')).toHaveText('48 000,00')
   await expect(page.getByTestId('receipt-remaining')).toContainText('400,00')
   await expect(page.getByTestId('receipt-total')).toHaveText('84 000,00 ₽')
   await page.getByLabel('Курс', { exact: true }).fill('100')
   await expect(page.getByTestId('receipt-total')).toHaveText('88 000,00 ₽')
-  await expect(page.getByTestId('payment-rub-p1')).toHaveText('48 000,00')
+  await expect(page.getByTestId('payment-rub-pnew1')).toHaveText('48 000,00')
+
+  // Платёж с будущей датой — только план, в себестоимость не входит.
+  await page
+    .locator('[data-testid="receipt-payments"] tbody tr')
+    .first()
+    .getByLabel(/Дата платежа/)
+    .fill('2099-01-01')
+  await expect(page.getByTestId('receipt-planned')).toContainText('600,00')
+  await expect(page.getByTestId('receipt-paid')).toContainText('0,00')
+  await expect(page.getByTestId('receipt-total')).toHaveText('100 000,00 ₽')
+
+  // Платёж больше стоимости товаров — сохранение заблокировано.
+  await page
+    .locator('[data-testid="receipt-payments"] tbody tr')
+    .first()
+    .getByLabel(/Сумма платежа/)
+    .fill('2000')
+  await expect(page.getByTestId('receipt-limit-error')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Сохранить' })).toBeDisabled()
+
+  // Возвращаем платёж в сегодняшнюю дату и сумму 600 — сохраняем.
+  await page
+    .locator('[data-testid="receipt-payments"] tbody tr')
+    .first()
+    .getByLabel(/Сумма платежа/)
+    .fill('600')
+  await page
+    .locator('[data-testid="receipt-payments"] tbody tr')
+    .first()
+    .getByLabel(/Дата платежа/)
+    .fill(new Date().toISOString().slice(0, 10))
+  await expect(page.getByTestId('receipt-total')).toHaveText('88 000,00 ₽')
 
   await page.getByRole('button', { name: 'Сохранить' }).click()
   await expect(page.getByTestId('receipt-form')).toHaveCount(0)

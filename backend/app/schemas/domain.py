@@ -38,6 +38,9 @@ class ProductUpdate(BaseModel):
 
 
 class BatchExpenseCreate(BaseModel):
+    expense_date: date | None = Field(
+        default=None, description="Дата платежа; будущая дата — это план, в расчёт пока не идёт"
+    )
     amount_rub: Decimal = Field(description="Сумма расхода в рублях, входит в себестоимость")
     description: str = ""
 
@@ -94,6 +97,14 @@ class BatchPaymentOut(BaseModel):
     comment: str | None
 
 
+class BatchExpenseOut(BaseModel):
+    id: uuid.UUID
+    expense_date: date
+    amount_rub: Decimal
+    description: str
+    is_planned: bool = Field(description="Дата ещё не наступила — пока только план")
+
+
 class BatchFinanceOut(BaseModel):
     invoice_total_currency: Decimal
     total_paid_currency: Decimal
@@ -103,6 +114,18 @@ class BatchFinanceOut(BaseModel):
     exchange_rate: Decimal = Field(description="Курс, по которому оценена незакрытая часть")
     rate_date: date | None = Field(default=None, description="Дата курса ЦБ")
     rate_updated_at: datetime | None = Field(default=None, description="Когда курс обновлялся")
+    planned_payments_currency: Decimal = Field(
+        default=Decimal("0"), description="Валюта платежей с будущей датой (план)"
+    )
+    planned_payments_rub: Decimal = Field(
+        default=Decimal("0"), description="Рубли по будущим валютным платежам (план)"
+    )
+    planned_expenses_rub: Decimal = Field(
+        default=Decimal("0"), description="Рублёвые платежи с будущей датой (план)"
+    )
+    effective_rate: Decimal = Field(
+        default=Decimal("0"), description="Фактический курс партии: себестоимость / инвойс"
+    )
     final_cost_rub: Decimal
 
 
@@ -132,6 +155,7 @@ class BatchOut(BaseModel):
     created_at: datetime
     finance: BatchFinanceOut
     payments: list[BatchPaymentOut]
+    expenses: list[BatchExpenseOut]
     items: list[BatchItemOut]
 
 

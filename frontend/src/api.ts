@@ -122,6 +122,10 @@ export type BatchFinance = {
   exchange_rate: string
   rate_date: string | null
   rate_updated_at: string | null
+  planned_payments_currency: string
+  planned_payments_rub: string
+  planned_expenses_rub: string
+  effective_rate: string
   final_cost_rub: string
 }
 
@@ -154,6 +158,7 @@ export type Batch = {
   created_at: string
   finance: BatchFinance
   payments: BatchPayment[]
+  expenses: BatchExpense[]
   items: BatchItem[]
 }
 
@@ -165,8 +170,17 @@ export type BatchItemIn = {
 }
 
 export type BatchExpenseIn = {
+  expense_date: string | null
   amount_rub: string
   description: string
+}
+
+export type BatchExpense = {
+  id: string
+  expense_date: string
+  amount_rub: string
+  description: string
+  is_planned: boolean
 }
 
 export type BatchIn = {

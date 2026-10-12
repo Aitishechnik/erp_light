@@ -143,13 +143,20 @@ class BatchItem(Base):
 
 
 class BatchExpense(Base):
-    """Доп. расход по партии в рублях (входит в себестоимость)."""
+    """Рублёвый платёж по партии (доставка, пошлина и т.п.).
+
+    Как и валютный платёж, вступает в силу своей датой: будущий расход виден
+    как план, но в себестоимость пока не входит.
+    """
 
     __tablename__ = "batch_expenses"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     batch_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("batches.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    expense_date: Mapped[date] = mapped_column(
+        Date, nullable=False, server_default=func.current_date(), index=True
     )
     amount_rub: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     description: Mapped[str] = mapped_column(String(255), nullable=False, default="")

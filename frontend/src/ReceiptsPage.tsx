@@ -24,6 +24,7 @@ type ItemDraft = {
 
 type ExpenseDraft = {
   key: string
+  date: string
   amount: string
   description: string
 }
@@ -81,6 +82,11 @@ function monthDays(month: string): { date: string; inMonth: boolean }[] {
   return days.slice(0, lastInMonth + 1)
 }
 
+/** Курс показываем с четырьмя знаками: 100.4619 вместо 100.46191999999999. */
+function formatRate(value: number): string {
+  return trim(value.toFixed(4))
+}
+
 /** «5000.00» → «5000», «90.000000» → «90»: в полях ввода лишние нули не нужны. */
 function trim(value: string): string {
   return value.includes('.') ? value.replace(/\.?0+$/, '') : value
@@ -101,6 +107,12 @@ type LiveCost = {
   paidRub: number
   rubPayments: number
   remaining: number
+  plannedCurrency: number
+  plannedRub: number
+  plannedRubPayments: number
+  paymentsTotal: number
+  limitExceeded: boolean
+  effectiveRate: number
 }
 
 /**
@@ -110,13 +122,36 @@ type LiveCost = {
  * Позиции делят сумму пропорционально своей доле в инвойсе.
  */
 function liveCost(draft: Draft): LiveCost {
+  const today = iso(new Date())
   const invoiceTotal = draft.items.reduce((sum, item) => sum + number(item.amount), 0)
-  const paidCurrency = draft.payments.reduce((sum, row) => sum + number(row.amount), 0)
-  const paidRub = draft.payments.reduce(
-    (sum, row) => sum + number(row.amount) * number(row.rate),
-    0,
-  )
-  const rubPayments = draft.expenses.reduce((sum, row) => sum + number(row.amount), 0)
+
+  // Платежи и расходы с будущей датой — план: показываем, но в расчёт не берём.
+  let paidCurrency = 0
+  let paidRub = 0
+  let plannedCurrency = 0
+  let plannedRub = 0
+  let paymentsTotal = 0
+  for (const row of draft.payments) {
+    const amount = number(row.amount)
+    const rub = amount * number(row.rate)
+    paymentsTotal += amount
+    if (row.date && row.date <= today) {
+      paidCurrency += amount
+      paidRub += rub
+    } else {
+      plannedCurrency += amount
+      plannedRub += rub
+    }
+  }
+
+  let rubPayments = 0
+  let plannedRubPayments = 0
+  for (const row of draft.expenses) {
+    const amount = number(row.amount)
+    if (row.date && row.date <= today) rubPayments += amount
+    else plannedRubPayments += amount
+  }
+
   const rate = draft.currency === 'RUB' ? 1 : number(draft.rate) || 1
   const remaining = Math.max(0, invoiceTotal - paidCurrency)
   const total = paidRub + rubPayments + remaining * rate
@@ -130,7 +165,23 @@ function liveCost(draft: Draft): LiveCost {
     const rowTotal = itemTotal[item.key] ?? 0
     unit[item.key] = quantity > 0 && invoiceTotal > 0 ? rowTotal / quantity : 0
   }
-  return { total, unit, itemTotal, invoiceTotal, paidCurrency, paidRub, rubPayments, remaining }
+
+  return {
+    total,
+    unit,
+    itemTotal,
+    invoiceTotal,
+    paidCurrency,
+    paidRub,
+    rubPayments,
+    remaining,
+    plannedCurrency,
+    plannedRub,
+    plannedRubPayments,
+    paymentsTotal,
+    limitExceeded: paymentsTotal > invoiceTotal,
+    effectiveRate: invoiceTotal > 0 ? total / invoiceTotal : 0,
+  }
 }
 
 function draftFrom(batch: Batch): Draft {
@@ -156,7 +207,12 @@ function draftFrom(batch: Batch): Draft {
       rate: trim(payment.exchange_rate),
       comment: payment.comment ?? '',
     })),
-    expenses: [],
+    expenses: batch.expenses.map((expense, index) => ({
+      key: `e${index}`,
+      date: expense.expense_date,
+      amount: trim(expense.amount_rub),
+      description: expense.description,
+    })),
   }
 }
 
@@ -187,9 +243,10 @@ export function ReceiptsPage() {
   const [rateHint, setRateHint] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  // Счётчик ключей строк: предсказуемые ключи вместо случайных, чтобы строки не «прыгали».
+  // Ключи новых строк: у загруженных строк ключи вида i0/p0/e0, поэтому у новых
+  // префикс другой — иначе React получает два элемента с одинаковым ключом.
   const keyCounter = useRef(1)
-  const nextKey = (prefix: string) => `${prefix}${keyCounter.current++}`
+  const nextKey = (prefix: string) => `${prefix}new${keyCounter.current++}`
 
   const reload = useCallback(async () => {
     const first = `${month}-01`
@@ -282,6 +339,10 @@ export function ReceiptsPage() {
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!draft) return
+    if (liveCost(draft).limitExceeded) {
+      setError('Сумма валютных платежей больше стоимости товаров партии')
+      return
+    }
     const items = draft.items
       .filter((item) => item.code.trim() !== '' && number(item.quantity) > 0)
       .map((item) => ({
@@ -318,6 +379,7 @@ export function ReceiptsPage() {
       expenses: draft.expenses
         .filter((row) => number(row.amount) > 0)
         .map((row) => ({
+          expense_date: row.date || null,
           amount_rub: row.amount.replace(',', '.'),
           description: row.description,
         })),
@@ -463,7 +525,7 @@ export function ReceiptsPage() {
                 <td>{batch.supplier ?? '—'}</td>
                 <td>{batch.items.length}</td>
                 <td>{batch.currency}</td>
-                <td className="num">{trim(batch.finance.exchange_rate)}</td>
+                <td className="num">{trim(batch.finance.effective_rate)}</td>
                 <td className="num">{formatMoney(batch.finance.final_cost_rub)}</td>
                 <td>
                   <button type="button" className="mini" onClick={() => startEdit(batch)}>
@@ -761,6 +823,7 @@ export function ReceiptsPage() {
                     </td>
                     <td className="num" data-testid={`payment-rub-${row.key}`}>
                       {formatMoney(String(number(row.amount) * number(row.rate)))}
+                      {row.date > iso(new Date()) ? <span className="badge"> план</span> : null}
                     </td>
                     <td>
                       <input
@@ -824,6 +887,7 @@ export function ReceiptsPage() {
             <thead>
               <tr>
                 <th scope="col">Руб. платёж</th>
+                <th scope="col">Дата</th>
                 <th scope="col" className="num">
                   Сумма, ₽
                 </th>
@@ -833,7 +897,7 @@ export function ReceiptsPage() {
             <tbody>
               {draft.expenses.length === 0 ? (
                 <tr>
-                  <td colSpan={3} className="hint">
+                  <td colSpan={4} className="hint">
                     Рублёвых платежей нет.
                   </td>
                 </tr>
@@ -856,6 +920,23 @@ export function ReceiptsPage() {
                         }
                       />
                     </td>
+                    <td>
+                      <input
+                        type="date"
+                        aria-label={`Дата расхода ${row.key}`}
+                        value={row.date}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            expenses: draft.expenses.map((expense) =>
+                              expense.key === row.key
+                                ? { ...expense, date: event.target.value }
+                                : expense,
+                            ),
+                          })
+                        }
+                      />
+                    </td>
                     <td className="num">
                       <input
                         className="cell"
@@ -872,6 +953,7 @@ export function ReceiptsPage() {
                           })
                         }
                       />
+                      {row.date > iso(new Date()) ? <span className="badge"> план</span> : null}
                     </td>
                     <td>
                       <button
@@ -900,7 +982,7 @@ export function ReceiptsPage() {
                   ...draft,
                   expenses: [
                     ...draft.expenses,
-                    { key: nextKey('e'), amount: '', description: 'Доставка' },
+                    { key: nextKey('e'), date: draft.date, amount: '', description: 'Доставка' },
                   ],
                 })
               }
@@ -925,6 +1007,37 @@ export function ReceiptsPage() {
           </div>
           <div className="toolbar">
             <span className="hint">
+              План (ещё не наступило):{' '}
+              <strong data-testid="receipt-planned">
+                {formatMoney(String(cost?.plannedCurrency ?? 0))} {draft.currency}
+              </strong>{' '}
+              = <strong>{formatMoney(String(cost?.plannedRub ?? 0))}</strong> ₽ по валютным платежам
+              ·{' '}
+              <strong data-testid="receipt-planned-rub">
+                {formatMoney(String(cost?.plannedRubPayments ?? 0))}
+              </strong>{' '}
+              ₽ рублёвых
+            </span>
+            <span className="sep" />
+            <span className="hint">
+              Лимит платежей:{' '}
+              <strong data-testid="receipt-limit">
+                {formatMoney(
+                  String(Math.max(0, (cost?.invoiceTotal ?? 0) - (cost?.paymentsTotal ?? 0))),
+                )}{' '}
+                {draft.currency}
+              </strong>
+            </span>
+          </div>
+          {cost?.limitExceeded ? (
+            <p className="error" role="alert" data-testid="receipt-limit-error">
+              Сумма валютных платежей ({formatMoney(String(cost.paymentsTotal))} {draft.currency})
+              больше стоимости товаров партии ({formatMoney(String(cost.invoiceTotal))}{' '}
+              {draft.currency}). Уменьшите платёж или добавьте товары.
+            </p>
+          ) : null}
+          <div className="toolbar">
+            <span className="hint">
               Незакрытая часть:{' '}
               <strong data-testid="receipt-remaining">
                 {formatMoney(String(cost?.remaining ?? 0))} {draft.currency}
@@ -937,13 +1050,21 @@ export function ReceiptsPage() {
             </span>
             <span className="sep" />
             <span className="hint">
-              Себестоимость партии:{' '}
+              Средний курс партии:{' '}
+              <strong data-testid="receipt-effective">
+                {formatRate(cost?.effectiveRate ?? 0)}
+              </strong>{' '}
+              · себестоимость:{' '}
               <strong data-testid="receipt-total">{formatMoney(String(cost?.total ?? 0))} ₽</strong>
             </span>
           </div>
 
           <div className="toolbar">
-            <button type="submit" className="primary" disabled={busy}>
+            <button
+              type="submit"
+              className="primary"
+              disabled={busy || (cost?.limitExceeded ?? false)}
+            >
               Сохранить
             </button>
             <button type="button" disabled={busy} onClick={() => setDraft(null)}>
