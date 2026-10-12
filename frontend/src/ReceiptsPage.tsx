@@ -905,21 +905,23 @@ export function ReceiptsPage() {
                 draft.expenses.map((row) => (
                   <tr key={row.key}>
                     <td>
-                      <input
-                        aria-label={`Расход ${row.key}`}
-                        value={row.description}
-                        onChange={(event) =>
-                          setDraft({
-                            ...draft,
-                            expenses: draft.expenses.map((expense) =>
-                              expense.key === row.key
-                                ? { ...expense, description: event.target.value }
-                                : expense,
-                            ),
-                          })
-                        }
-                      />
-                      {row.date > iso(new Date()) ? <span className="badge"> план</span> : null}
+                      <div className="cell-with-badge">
+                        <input
+                          aria-label={`Расход ${row.key}`}
+                          value={row.description}
+                          onChange={(event) =>
+                            setDraft({
+                              ...draft,
+                              expenses: draft.expenses.map((expense) =>
+                                expense.key === row.key
+                                  ? { ...expense, description: event.target.value }
+                                  : expense,
+                              ),
+                            })
+                          }
+                        />
+                        {row.date > iso(new Date()) ? <span className="badge"> план</span> : null}
+                      </div>
                     </td>
                     <td>
                       <input

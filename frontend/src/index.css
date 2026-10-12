@@ -656,6 +656,23 @@ button.primary,
   width: 10%;
 }
 
+/* Ячейка с пометкой «план»: поле тянется, бейдж занимает своё место и не режется. */
+.cell-with-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.cell-with-badge input {
+  flex: 1;
+  min-width: 0;
+}
+
+.cell-with-badge .badge {
+  flex: none;
+  white-space: nowrap;
+}
+
 .receipt-items td input,
 .receipt-payments td input,
 .receipt-expenses td input {
