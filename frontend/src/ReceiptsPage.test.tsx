@@ -293,7 +293,7 @@ describe('ReceiptsPage — план и лимит', () => {
       id: 'd1',
       batch_number: 'ИТ-00000388',
       source: '1c',
-      currency: 'RUB',
+      currency: 'USD',
       comment: 'Фундук 145600 + сбор 32980',
       items: [],
       payments: [],
@@ -320,6 +320,12 @@ describe('ReceiptsPage — план и лимит', () => {
 
     await user.click(within(row).getByRole('button', { name: 'Открыть' }))
     expect(screen.getByTestId('draft-hint')).toHaveTextContent('Черновик из выгрузки 1С')
+    // Валюту берём из партии (импорт — USD), а курс у черновика пустой:
+    // пока нет позиций, считать нечего.
+    expect(screen.getByLabelText('Валюта')).toHaveValue('USD')
+    expect(screen.getByLabelText('Курс')).toHaveValue('')
+    // Выдуманного «курса 1» в итоге быть не должно.
+    expect(screen.getByText(/курс не задан/)).toBeInTheDocument()
     // Сохраняем черновик, не добавляя ни одной позиции.
     await user.click(screen.getByRole('button', { name: 'Сохранить' }))
 

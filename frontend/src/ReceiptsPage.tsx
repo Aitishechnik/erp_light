@@ -187,6 +187,7 @@ function liveCost(draft: Draft): LiveCost {
 }
 
 function draftFrom(batch: Batch): Draft {
+  const isDraft = batch.source === '1c' && batch.items.length === 0
   return {
     id: batch.id,
     number: batch.batch_number,
@@ -194,7 +195,9 @@ function draftFrom(batch: Batch): Draft {
     currency: batch.currency,
     supplierId: batch.supplier_id ?? (batch.supplier ? '__manual__' : ''),
     supplierText: batch.supplier_id ? '' : (batch.supplier ?? ''),
-    rate: trim(batch.finance.exchange_rate),
+    // У черновика из 1С позиций нет — курс брать неоткуда. Оставляем пустым,
+    // чтобы случайный курс не попал в себестоимость, когда добавят товар.
+    rate: isDraft ? '' : trim(batch.finance.exchange_rate),
     comment: batch.comment ?? '',
     items: batch.items.map((item, index) => ({
       key: `i${index}`,
@@ -215,7 +218,7 @@ function draftFrom(batch: Batch): Draft {
       amount: trim(expense.amount_rub),
       description: expense.description,
     })),
-    isDraft: batch.source === '1c' && batch.items.length === 0,
+    isDraft,
   }
 }
 
@@ -1075,11 +1078,18 @@ export function ReceiptsPage() {
               <strong data-testid="receipt-remaining">
                 {formatMoney(String(cost?.remaining ?? 0))} {draft.currency}
               </strong>{' '}
-              по курсу <strong>{trim(draft.rate) || '1'}</strong> ={' '}
-              <strong>
-                {formatMoney(String((cost?.remaining ?? 0) * (number(draft.rate) || 1)))}
-              </strong>{' '}
-              ₽
+              {trim(draft.rate) ? (
+                <>
+                  по курсу <strong>{trim(draft.rate)}</strong> ={' '}
+                  <strong>
+                    {formatMoney(String((cost?.remaining ?? 0) * (number(draft.rate) || 1)))}
+                  </strong>{' '}
+                  ₽
+                </>
+              ) : (
+                // У черновика из 1С курса ещё нет — не показываем выдуманный «курс 1».
+                <>— курс не задан</>
+              )}
             </span>
             <span className="sep" />
             <span className="hint">
