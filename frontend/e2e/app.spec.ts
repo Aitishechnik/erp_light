@@ -37,6 +37,14 @@ const MANAGER = {
   role_title: 'Менеджер по продажам',
 }
 
+const IMPORTER = {
+  id: 'im-1',
+  login: 'import',
+  full_name: 'Шахидул Ислам',
+  role: 'import_manager',
+  role_title: 'Менеджер по закупкам (импорт)',
+}
+
 const CLIENT = {
   id: 'client-1',
   name: 'ООО Ромашка',
@@ -201,6 +209,69 @@ test('контрагент заводится в справочнике с пр�
   await expect(page.getByTestId('counterparties-count')).toHaveText('1')
 })
 
+test('закупщик видит на «Загрузке данных» только импортные поступления', async ({ page }) => {
+  await mockSession(page, IMPORTER)
+  await page.route('**/api/v1/imports/kinds', (route) =>
+    route.fulfill({
+      json: [
+        {
+          kind: 'customers',
+          title: 'Покупатели',
+          entity: 'counterparties',
+          columns: ['Наименование'],
+          roles: ['sales_manager', 'commercial_director', 'purchase_director'],
+          note: null,
+        },
+        {
+          kind: 'import_receipts',
+          title: 'Импортные поступления',
+          entity: 'batches',
+          columns: ['Номер', 'Дата', 'Контрагент', 'Комментарий'],
+          roles: ['purchase_director', 'import_manager'],
+          note: 'Создаёт черновики поступлений для календаря',
+        },
+      ],
+    }),
+  )
+  await page.route('**/api/v1/imports?limit=20', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/imports/import_receipts', (route) =>
+    route.fulfill({
+      json: {
+        id: 's2',
+        kind: 'import_receipts',
+        kind_title: 'Импортные поступления',
+        file_name: 'ИмпортныеПоступления.xlsx',
+        status: 'ok',
+        rows_total: 15,
+        rows_created: 15,
+        rows_updated: 0,
+        rows_skipped: 0,
+        rows_failed: 0,
+        message: null,
+        created_at: '2026-10-13T12:00:00Z',
+      },
+    }),
+  )
+
+  await page.goto('/')
+  await openSection(page, 'Администрирование', 'Загрузка данных')
+  await expect(page.getByTestId('import-card-import_receipts')).toContainText(
+    'Номер, Дата, Контрагент, Комментарий',
+  )
+  await expect(page.getByTestId('import-card-customers')).toHaveCount(0)
+
+  await page.getByLabel('Файл: Импортные поступления').setInputFiles({
+    name: 'ИмпортныеПоступления.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    buffer: Buffer.from('xlsx'),
+  })
+  await page
+    .getByTestId('import-card-import_receipts')
+    .getByRole('button', { name: 'Загрузить' })
+    .click()
+  await expect(page.getByTestId('import-result-import_receipts')).toContainText('Создано: 15')
+})
+
 test('файл выгрузки загружается на странице «Загрузка данных»', async ({ page }) => {
   await mockSession(page)
   await page.route('**/api/v1/imports/kinds', (route) =>
@@ -211,6 +282,8 @@ test('файл выгрузки загружается на странице «�
           title: 'Покупатели',
           entity: 'counterparties',
           columns: ['Наименование'],
+          roles: ['sales_manager', 'commercial_director', 'purchase_director'],
+          note: null,
         },
       ],
     }),

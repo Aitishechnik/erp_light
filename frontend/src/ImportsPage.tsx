@@ -5,6 +5,7 @@ import {
   fetchImports,
   type ImportKind,
   type ImportSession,
+  type SessionUser,
   uploadImport,
 } from './api'
 
@@ -25,7 +26,7 @@ const STATUS_TITLES: Record<string, string> = {
   failed: 'ошибка',
 }
 
-export function ImportsPage() {
+export function ImportsPage({ user }: { user?: SessionUser }) {
   const [kinds, setKinds] = useState<ImportKind[]>([])
   const [journal, setJournal] = useState<ImportSession[]>([])
   const [files, setFiles] = useState<Record<string, File | null>>({})
@@ -86,42 +87,45 @@ export function ImportsPage() {
       ) : null}
 
       <div className="import-cards">
-        {kinds.map((kind) => {
-          const result = results[kind.kind]
-          return (
-            <article
-              className="import-card"
-              key={kind.kind}
-              data-testid={`import-card-${kind.kind}`}
-            >
-              <h2>{kind.title}</h2>
-              <p className="hint">Колонки: {kind.columns.join(', ')}</p>
-              <input
-                type="file"
-                accept=".xlsx"
-                aria-label={`Файл: ${kind.title}`}
-                onChange={(event) => pick(kind.kind, event)}
-              />
-              <button
-                type="button"
-                className="primary"
-                disabled={!files[kind.kind] || busyKind !== null}
-                onClick={() => void send(kind.kind)}
+        {kinds
+          .filter((kind) => !user || kind.roles.includes(user.role))
+          .map((kind) => {
+            const result = results[kind.kind]
+            return (
+              <article
+                className="import-card"
+                key={kind.kind}
+                data-testid={`import-card-${kind.kind}`}
               >
-                {busyKind === kind.kind ? 'Загрузка…' : 'Загрузить'}
-              </button>
-              {result ? (
-                <p className="import-result" data-testid={`import-result-${kind.kind}`}>
-                  Создано: <strong>{result.rows_created}</strong>, обновлено:{' '}
-                  <strong>{result.rows_updated}</strong>, пропущено дублей:{' '}
-                  <strong>{result.rows_skipped}</strong>, ошибок:{' '}
-                  <strong>{result.rows_failed}</strong> (
-                  {STATUS_TITLES[result.status] ?? result.status})
-                </p>
-              ) : null}
-            </article>
-          )
-        })}
+                <h2>{kind.title}</h2>
+                <p className="hint">Колонки: {kind.columns.join(', ')}</p>
+                {kind.note ? <p className="hint">{kind.note}</p> : null}
+                <input
+                  type="file"
+                  accept=".xlsx"
+                  aria-label={`Файл: ${kind.title}`}
+                  onChange={(event) => pick(kind.kind, event)}
+                />
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={!files[kind.kind] || busyKind !== null}
+                  onClick={() => void send(kind.kind)}
+                >
+                  {busyKind === kind.kind ? 'Загрузка…' : 'Загрузить'}
+                </button>
+                {result ? (
+                  <p className="import-result" data-testid={`import-result-${kind.kind}`}>
+                    Создано: <strong>{result.rows_created}</strong>, обновлено:{' '}
+                    <strong>{result.rows_updated}</strong>, пропущено дублей:{' '}
+                    <strong>{result.rows_skipped}</strong>, ошибок:{' '}
+                    <strong>{result.rows_failed}</strong> (
+                    {STATUS_TITLES[result.status] ?? result.status})
+                  </p>
+                ) : null}
+              </article>
+            )
+          })}
       </div>
 
       <h2 className="section-title">Журнал загрузок</h2>

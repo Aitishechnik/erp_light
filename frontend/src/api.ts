@@ -211,6 +211,8 @@ export type ImportKind = {
   title: string
   entity: string
   columns: string[]
+  roles: Role[]
+  note: string | null
 }
 
 export type ImportSession = {

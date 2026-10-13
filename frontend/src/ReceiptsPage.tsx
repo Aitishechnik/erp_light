@@ -49,6 +49,8 @@ type Draft = {
   items: ItemDraft[]
   payments: PaymentDraft[]
   expenses: ExpenseDraft[]
+  /** Черновик из выгрузки 1С: позиций ещё нет, сохранять без них можно. */
+  isDraft: boolean
 }
 
 const WEEKDAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс']
@@ -213,6 +215,7 @@ function draftFrom(batch: Batch): Draft {
       amount: trim(expense.amount_rub),
       description: expense.description,
     })),
+    isDraft: batch.source === '1c' && batch.items.length === 0,
   }
 }
 
@@ -229,6 +232,7 @@ function emptyDraft(day: string): Draft {
     items: [{ key: 'i0', code: '', quantity: '', amount: '' }],
     payments: [],
     expenses: [],
+    isDraft: false,
   }
 }
 
@@ -350,7 +354,7 @@ export function ReceiptsPage() {
         quantity: item.quantity.replace(',', '.'),
         total_invoice_currency: (item.amount || '0').replace(',', '.'),
       }))
-    if (items.length === 0) {
+    if (items.length === 0 && !draft.isDraft) {
       setError('Добавьте хотя бы одну строку: товар и количество')
       return
     }
@@ -484,7 +488,14 @@ export function ReceiptsPage() {
                       {rows.length > 0 ? (
                         <>
                           <span className="badge status-filling">поступлений: {rows.length}</span>
-                          <span className="calendar-sum">{formatMoney(String(total))} ₽</span>
+                          {/* У черновиков из 1С позиций ещё нет: нулевая себестоимость — не итог дня. */}
+                          {total > 0 ? (
+                            <span className="calendar-sum">{formatMoney(String(total))} ₽</span>
+                          ) : (
+                            <span className="calendar-sum" data-testid={`day-drafts-${cell.date}`}>
+                              черновики
+                            </span>
+                          )}
                         </>
                       ) : null}
                     </button>
@@ -519,21 +530,34 @@ export function ReceiptsPage() {
             </tr>
           </thead>
           <tbody>
-            {dayBatches.map((batch) => (
-              <tr key={batch.id}>
-                <td>{batch.batch_number}</td>
-                <td>{batch.supplier ?? '—'}</td>
-                <td>{batch.items.length}</td>
-                <td>{batch.currency}</td>
-                <td className="num">{trim(batch.finance.effective_rate)}</td>
-                <td className="num">{formatMoney(batch.finance.final_cost_rub)}</td>
-                <td>
-                  <button type="button" className="mini" onClick={() => startEdit(batch)}>
-                    Открыть
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {dayBatches.map((batch) => {
+              const isDraft = batch.source === '1c' && batch.items.length === 0
+              return (
+                <tr key={batch.id} data-testid={`day-receipt-${batch.id}`}>
+                  <td>
+                    {batch.batch_number}
+                    {isDraft ? (
+                      <span className="badge status-draft" data-testid="draft-badge">
+                        {' '}
+                        черновик
+                      </span>
+                    ) : null}
+                  </td>
+                  <td>{batch.supplier ?? '—'}</td>
+                  <td>{batch.items.length}</td>
+                  <td>{batch.currency}</td>
+                  <td className="num">{isDraft ? '—' : trim(batch.finance.effective_rate)}</td>
+                  <td className="num">
+                    {isDraft ? '—' : formatMoney(batch.finance.final_cost_rub)}
+                  </td>
+                  <td>
+                    <button type="button" className="mini" onClick={() => startEdit(batch)}>
+                      Открыть
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       )}
@@ -543,6 +567,12 @@ export function ReceiptsPage() {
           <h2 className="section-title">
             {draft.id ? `Поступление ${draft.number}` : 'Новое поступление'}
           </h2>
+          {draft.isDraft ? (
+            <p className="hint" data-testid="draft-hint">
+              Черновик из выгрузки 1С: заполнены номер, дата, поставщик и комментарий. Добавьте
+              позиции — и поступление станет обычным.
+            </p>
+          ) : null}
           <div className="toolbar">
             <label className="field">
               Номер
@@ -610,8 +640,9 @@ export function ReceiptsPage() {
             </button>
             <label className="field">
               Комментарий
-              <input
+              <textarea
                 aria-label="Комментарий"
+                rows={2}
                 value={draft.comment}
                 onChange={(event) => setDraft({ ...draft, comment: event.target.value })}
               />

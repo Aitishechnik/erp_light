@@ -197,7 +197,7 @@ export function App() {
         {current.id === 'nomenclature' && current.ready ? <NomenclaturePage /> : null}
         {current.id === 'counterparties' && current.ready ? <CounterpartiesPage /> : null}
         {current.id === 'receipts' && current.ready ? <ReceiptsPage /> : null}
-        {current.id === 'imports' && current.ready ? <ImportsPage /> : null}
+        {current.id === 'imports' && current.ready ? <ImportsPage user={user} /> : null}
         {!current.ready ? (
           <section>
             <h1>{current.title}</h1>

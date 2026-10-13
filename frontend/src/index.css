@@ -556,6 +556,22 @@ button.primary,
   min-width: 9rem;
 }
 
+/* Комментарий из выгрузки 1С длинный — показываем его в несколько строк. */
+.field textarea {
+  min-width: 22rem;
+  padding: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  font: inherit;
+  color: var(--text);
+  resize: vertical;
+}
+
+.status-draft {
+  background: #fff4e5;
+  color: #8a4b08;
+}
+
 .receipt-form {
   margin-top: 1.5rem;
   padding: 1rem;

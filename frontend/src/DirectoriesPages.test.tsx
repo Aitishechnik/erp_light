@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Counterparty, ImportKind, ImportSession, Product } from './api'
+import type { Counterparty, ImportKind, ImportSession, Product, Role, SessionUser } from './api'
 import { mockApi } from './apiMock'
 import { CounterpartiesPage } from './CounterpartiesPage'
 import { ImportsPage } from './ImportsPage'
@@ -53,13 +53,32 @@ const PRODUCTS: Product[] = [
   },
 ]
 
+const DIRECTORY_ROLES: Role[] = ['sales_manager', 'commercial_director', 'purchase_director']
+
 const KINDS: ImportKind[] = [
-  { kind: 'customers', title: 'Покупатели', entity: 'counterparties', columns: ['Наименование'] },
+  {
+    kind: 'customers',
+    title: 'Покупатели',
+    entity: 'counterparties',
+    columns: ['Наименование'],
+    roles: DIRECTORY_ROLES,
+    note: null,
+  },
   {
     kind: 'materials',
     title: 'Материалы',
     entity: 'products',
     columns: ['Код', 'Наименование', 'Базовая единица измерения'],
+    roles: DIRECTORY_ROLES,
+    note: null,
+  },
+  {
+    kind: 'import_receipts',
+    title: 'Импортные поступления',
+    entity: 'batches',
+    columns: ['Номер', 'Дата', 'Контрагент', 'Комментарий'],
+    roles: ['purchase_director', 'import_manager'],
+    note: 'Создаёт черновики поступлений для календаря',
   },
 ]
 
@@ -189,20 +208,53 @@ describe('NomenclaturePage', () => {
   })
 })
 
+const SALES: SessionUser = {
+  id: 'u1',
+  login: 'sales',
+  full_name: 'Иван Петров',
+  role: 'sales_manager',
+  role_title: 'Менеджер по продажам',
+}
+
+const IMPORTER: SessionUser = {
+  id: 'u2',
+  login: 'import',
+  full_name: 'Шахидул Ислам',
+  role: 'import_manager',
+  role_title: 'Менеджер по закупкам (импорт)',
+}
+
 describe('ImportsPage', () => {
   it('показывает карточки типов и журнал загрузок', async () => {
     mockApi({
       '/api/v1/imports/kinds': { body: KINDS },
       '/api/v1/imports?limit=20': { body: [SESSION] },
     })
-    render(<ImportsPage />)
+    render(<ImportsPage user={SALES} />)
 
     expect(await screen.findByTestId('import-card-customers')).toHaveTextContent('Покупатели')
     expect(screen.getByTestId('import-card-materials')).toHaveTextContent(
       'Код, Наименование, Базовая единица измерения',
     )
+    // Менеджеру по продажам импортные поступления недоступны.
+    expect(screen.queryByTestId('import-card-import_receipts')).toBeNull()
     expect(screen.getByTestId('imports-journal')).toHaveTextContent('Покупатели.xlsx')
     expect(screen.getByTestId('imports-journal')).toHaveTextContent('775')
+  })
+
+  it('показывает закупщику только импортные поступления', async () => {
+    mockApi({
+      '/api/v1/imports/kinds': { body: KINDS },
+      '/api/v1/imports?limit=20': { body: [] },
+    })
+    render(<ImportsPage user={IMPORTER} />)
+
+    const card = await screen.findByTestId('import-card-import_receipts')
+    expect(card).toHaveTextContent('Импортные поступления')
+    expect(card).toHaveTextContent('Номер, Дата, Контрагент, Комментарий')
+    expect(card).toHaveTextContent('черновики поступлений')
+    expect(screen.queryByTestId('import-card-customers')).toBeNull()
+    expect(screen.queryByTestId('import-card-materials')).toBeNull()
   })
 
   it('загружает файл и показывает итог', async () => {
@@ -212,7 +264,7 @@ describe('ImportsPage', () => {
       '/api/v1/imports?limit=20': { body: [] },
       '/api/v1/imports/customers': { body: SESSION },
     })
-    render(<ImportsPage />)
+    render(<ImportsPage user={SALES} />)
 
     await screen.findByTestId('import-card-customers')
     const file = new File(['xlsx'], 'Покупатели.xlsx', { type: 'text/plain' })

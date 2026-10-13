@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Batch, Counterparty, Product } from './api'
@@ -285,6 +285,50 @@ describe('ReceiptsPage — план и лимит', () => {
     expect(screen.getByTestId('receipt-limit-error')).toHaveTextContent('больше')
     expect(screen.getByTestId('receipt-limit')).toHaveTextContent('0,00')
     expect(screen.getByRole('button', { name: 'Сохранить' })).toBeDisabled()
+  })
+
+  it('черновик из 1С помечен в календаре и сохраняется без позиций', async () => {
+    const user = userEvent.setup()
+    const draft = batch({
+      id: 'd1',
+      batch_number: 'ИТ-00000388',
+      source: '1c',
+      currency: 'RUB',
+      comment: 'Фундук 145600 + сбор 32980',
+      items: [],
+      payments: [],
+      finance: {
+        ...batch().finance,
+        invoice_total_currency: '0.00',
+        total_paid_currency: '0.00',
+        total_paid_rub: '0.00',
+        remaining_payment_currency: '0.00',
+        exchange_rate: '1',
+        effective_rate: '0.000000',
+        final_cost_rub: '0.00',
+      },
+    })
+    mockApi(routes({ '/api/v1/batches': { body: [draft] } }))
+    render(<ReceiptsPage />)
+
+    const badge = await screen.findByTestId('draft-badge')
+    expect(badge).toHaveTextContent('черновик')
+    const row = screen.getByTestId('day-receipt-d1')
+    // У черновика нет ни курса, ни себестоимости — вместо нулей прочерк.
+    expect(row).toHaveTextContent('—')
+    expect(row).not.toHaveTextContent('0,00')
+
+    await user.click(within(row).getByRole('button', { name: 'Открыть' }))
+    expect(screen.getByTestId('draft-hint')).toHaveTextContent('Черновик из выгрузки 1С')
+    // Сохраняем черновик, не добавляя ни одной позиции.
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('receipt-form')).toBeNull()
+    })
+    const sent = bodies().find((body) => body.includes('ИТ-00000388')) ?? ''
+    expect(sent).toContain('"items":[]')
+    expect(sent).toContain('Фундук 145600')
   })
 
   it('в списке за день показывается фактический курс партии', async () => {
