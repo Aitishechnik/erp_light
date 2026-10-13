@@ -4,19 +4,15 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 
-from app.api.deps import CurrentUser, DbSession, require_roles
-from app.models.auth import User
+from app.api.deps import CurrentUser, DbSession
 from app.models.domain import ImportSession
 from app.schemas.imports import ImportKindOut, ImportSessionOut
-from app.services import directory_service
 from app.services import import_service as service
 from app.services.import_service import KINDS, ImportDataError
 
 router = APIRouter(tags=["imports"])
-
-Loader = Annotated[User, Depends(require_roles(*directory_service.DIRECTORY_WRITE_ROLES))]
 
 
 def _session_out(row: ImportSession) -> ImportSessionOut:
@@ -38,10 +34,15 @@ def _session_out(row: ImportSession) -> ImportSessionOut:
 
 @router.get("/imports/kinds", response_model=list[ImportKindOut])
 def list_kinds(user: CurrentUser) -> list[ImportKindOut]:
-    """Шесть типов данных, которые можно загружать."""
+    """Типы данных, которые можно загружать. Роли — чтобы экран показал доступное."""
     return [
         ImportKindOut(
-            kind=kind.kind, title=kind.title, entity=kind.entity, columns=list(kind.columns)
+            kind=kind.kind,
+            title=kind.title,
+            entity=kind.entity,
+            columns=list(kind.columns),
+            roles=list(kind.roles),
+            note=kind.note,
         )
         for kind in KINDS.values()
     ]
@@ -60,11 +61,20 @@ def list_imports(
 @router.post("/imports/{kind}", response_model=ImportSessionOut)
 def upload(
     kind: str,
-    user: Loader,
+    user: CurrentUser,
     db: DbSession,
     file: Annotated[UploadFile, File(description="Выгрузка из 1С в формате .xlsx")],
 ) -> ImportSessionOut:
-    """Загрузить файл выгрузки. Повторная загрузка не создаёт дублей."""
+    """Загрузить файл выгрузки. Повторная загрузка не создаёт дублей.
+
+    Права зависят от типа: справочники грузят продажи/коммерция/закупки, импортные
+    поступления — только закупки.
+    """
+    spec = KINDS.get(kind)
+    if spec is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Неизвестный тип загрузки: {kind}")
+    if user.role not in spec.roles:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Недостаточно прав для этого действия")
     content = file.file.read()
     try:
         result = service.import_file(db, kind, file.filename or "без имени.xlsx", content)

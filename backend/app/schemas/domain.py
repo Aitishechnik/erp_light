@@ -64,7 +64,11 @@ class BatchPaymentCreate(BaseModel):
 
 
 class BatchCreate(BaseModel):
-    """Поступление партии: шапка, строки и доп. расходы."""
+    """Поступление партии: шапка, строки и доп. расходы.
+
+    Строки может не быть только у черновика из выгрузки 1С — правила проверяет API
+    (`batches.post_batch` / `batches.put_batch`), а не схема.
+    """
 
     batch_number: str = Field(min_length=1, max_length=100)
     batch_date: date
@@ -79,7 +83,7 @@ class BatchCreate(BaseModel):
     )
     auto_rate: bool = Field(default=True, description="Разрешить запрос курса с сайта ЦБ")
     comment: str | None = None
-    items: list[BatchItemCreate] = Field(min_length=1)
+    items: list[BatchItemCreate] = Field(default_factory=list)
     payments: list[BatchPaymentCreate] = Field(
         default=[], description="Валютные платежи по инвойсу"
     )

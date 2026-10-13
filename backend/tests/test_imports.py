@@ -33,9 +33,14 @@ def test_kinds_are_listed(client: TestClient) -> None:
         "materials",
         "raw",
         "finished",
+        "import_receipts",
     ]
     materials = next(row for row in kinds if row["kind"] == "materials")
     assert materials["columns"] == list(PRODUCT_HEADER)
+    receipts = next(row for row in kinds if row["kind"] == "import_receipts")
+    assert receipts["title"] == "Импортные поступления"
+    assert receipts["columns"] == ["Номер", "Дата", "Контрагент", "Комментарий"]
+    assert receipts["roles"] == ["purchase_director", "import_manager"]
 
 
 def test_customers_are_loaded_without_duplicates(client: TestClient, login) -> None:

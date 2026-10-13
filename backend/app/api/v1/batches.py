@@ -38,6 +38,17 @@ def _out(db: DbSession, batch: Batch) -> BatchOut:
     return serialize_batch(batch, snaps, finance=finance, rate_row=rate_row)
 
 
+def _require_items(payload: BatchCreate, batch: Batch | None = None) -> None:
+    """Партия без позиций допустима только как черновик из выгрузки 1С."""
+    if payload.items:
+        return
+    if batch is not None and batch.source == "1c" and not batch.items:
+        return
+    raise HTTPException(
+        status.HTTP_400_BAD_REQUEST, "Добавьте хотя бы одну строку: товар и количество"
+    )
+
+
 @router.get("/batches", response_model=list[BatchOut])
 def list_batches(
     user: CurrentUser,
@@ -61,6 +72,7 @@ def get_batch(batch_id: uuid.UUID, user: CurrentUser, db: DbSession) -> BatchOut
 @router.post("/batches", response_model=BatchOut, status_code=status.HTTP_201_CREATED)
 def post_batch(payload: BatchCreate, user: Writer, db: DbSession) -> BatchOut:
     """Новое поступление. Курс берём из запроса, иначе с сайта ЦБ."""
+    _require_items(payload)
     exists = (
         db.execute(select(Batch).where(Batch.batch_number == payload.batch_number))
         .scalars()
@@ -83,6 +95,10 @@ def post_batch(payload: BatchCreate, user: Writer, db: DbSession) -> BatchOut:
 @router.put("/batches/{batch_id}", response_model=BatchOut)
 def put_batch(batch_id: uuid.UUID, payload: BatchCreate, user: Writer, db: DbSession) -> BatchOut:
     """Правка поступления: строки и расходы заменяются целиком."""
+    batch = load_batch(db, batch_id)
+    if batch is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Поступление не найдено")
+    _require_items(payload, batch)
     twin = (
         db.execute(
             select(Batch).where(Batch.batch_number == payload.batch_number, Batch.id != batch_id)

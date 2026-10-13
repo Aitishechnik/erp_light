@@ -271,17 +271,24 @@ def _items_expenses_payments(db: Session, batch: Batch, payload: BatchCreate) ->
         )
 
 
-def create_batch(db: Session, payload: BatchCreate) -> Batch:
-    """Новое поступление: курс берём из запроса, иначе из ЦБ на дату."""
-    check_payments_limit(payload)
-    supplier_id, supplier_name = _resolve_supplier(db, payload)
-    rate = currency_service.resolve_rate(
+def _resolve_batch_rate(db: Session, payload: BatchCreate) -> Decimal | None:
+    """Курс партии. У черновика без позиций и платежей считать нечего — курс не нужен."""
+    if not payload.items and not payload.payments:
+        return payload.current_exchange_rate
+    return currency_service.resolve_rate(
         db,
         currency=payload.currency,
         day=payload.batch_date,
         provided=payload.current_exchange_rate,
         allow_fetch=payload.auto_rate,
     )
+
+
+def create_batch(db: Session, payload: BatchCreate) -> Batch:
+    """Новое поступление: курс берём из запроса, иначе из ЦБ на дату."""
+    check_payments_limit(payload)
+    supplier_id, supplier_name = _resolve_supplier(db, payload)
+    rate = _resolve_batch_rate(db, payload)
     batch = Batch(
         batch_number=payload.batch_number,
         batch_type="purchase",
@@ -312,13 +319,7 @@ def update_batch(db: Session, batch_id: uuid.UUID, payload: BatchCreate) -> Batc
         return None
     check_payments_limit(payload)
     supplier_id, supplier_name = _resolve_supplier(db, payload)
-    rate = currency_service.resolve_rate(
-        db,
-        currency=payload.currency,
-        day=payload.batch_date,
-        provided=payload.current_exchange_rate,
-        allow_fetch=payload.auto_rate,
-    )
+    rate = _resolve_batch_rate(db, payload)
     batch.batch_number = payload.batch_number
     batch.batch_date = payload.batch_date
     batch.currency = payload.currency

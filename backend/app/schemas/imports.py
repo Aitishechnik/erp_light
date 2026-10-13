@@ -13,6 +13,8 @@ class ImportKindOut(BaseModel):
     title: str
     entity: str
     columns: list[str]
+    roles: list[str]
+    note: str | None = None
 
 
 class ImportSessionOut(BaseModel):
