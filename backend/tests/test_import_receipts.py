@@ -90,6 +90,8 @@ def test_import_manager_creates_drafts(client: TestClient, db_session: Session) 
     assert draft["batch_number"] == "ИТ-00000388"
     assert draft["batch_date"] == "2026-10-06"
     assert draft["source"] == "1c"
+    # Импорт идёт в валюте: у черновика по умолчанию USD, курс не запрашиваем.
+    assert draft["currency"] == "USD"
     # Страна в скобках поиску не мешает: поставщик взят из справочника, а не создан.
     assert draft["supplier"] == "AZHAZELNUT LLC"
     assert draft["comment"] == "Фундук 145600 + сбор 32980 + 550 свх +6%"
@@ -132,6 +134,7 @@ def test_repeat_upload_updates_draft(client: TestClient) -> None:
     assert len(rows) == 1  # дубля нет
     assert rows[0]["batch_date"] == "2026-10-18"
     assert rows[0]["comment"] == "новый"
+    assert rows[0]["currency"] == "USD"
 
 
 def test_filled_receipt_is_not_touched(client: TestClient, login) -> None:
@@ -197,7 +200,7 @@ def test_draft_can_be_saved_without_items_but_manual_receipt_cannot(
     assert empty.status_code == 400
     assert "хотя бы одну строку" in empty.json()["detail"]
 
-    # Черновик из 1С можно поправить, не добавляя позиций.
+    # Черновик из 1С (USD) можно поправить без позиций и без курса.
     upload(client, row("ИТ-11", comment="было"))
     draft = batches(client)[0]
     fixed = client.put(
@@ -205,7 +208,8 @@ def test_draft_can_be_saved_without_items_but_manual_receipt_cannot(
         json={
             "batch_number": "ИТ-11",
             "batch_date": "2026-10-14",
-            "currency": "RUB",
+            "currency": "USD",
+            "auto_rate": False,
             "comment": "стало",
             "items": [],
         },
@@ -213,6 +217,8 @@ def test_draft_can_be_saved_without_items_but_manual_receipt_cannot(
     assert fixed.status_code == 200, fixed.text
     assert fixed.json()["comment"] == "стало"
     assert fixed.json()["batch_date"] == "2026-10-14"
+    assert fixed.json()["currency"] == "USD"
+    assert fixed.json()["finance"]["final_cost_rub"] == "0.00"
 
     # Заполненное поступление очистить нельзя.
     login("purchase")
@@ -299,6 +305,7 @@ def test_drafts_are_kept_in_database_with_source_1c(
 ) -> None:
     upload(client, row("ИТ-40"))
     stored = db_session.execute(select(Batch)).scalars().one()
+    assert stored.currency == "USD"
     assert stored.source == "1c"
     assert stored.batch_type == "purchase"
     assert stored.supplier == "Фирма"
