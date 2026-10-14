@@ -453,3 +453,85 @@ test('поступление заводится в календаре, себе�
   await page.getByRole('button', { name: 'Сохранить' }).click()
   await expect(page.getByTestId('receipt-form')).toHaveCount(0)
 })
+
+test('закупщик грузит позиции партии из файла 1С в черновик', async ({ page }) => {
+  const today = new Date().toISOString().slice(0, 10)
+  const draft = {
+    ...RECEIPT,
+    batch_date: today,
+    source: '1c',
+    comment: 'Грецкий орех 104 340 + сбор 30 065',
+    items: [],
+    payments: [],
+    finance: {
+      ...RECEIPT.finance,
+      invoice_total_currency: '0.00',
+      remaining_payment_currency: '0.00',
+      effective_rate: '0.000000',
+      final_cost_rub: '0.00',
+    },
+  }
+  const loaded = {
+    ...draft,
+    items: [
+      {
+        id: 'i1',
+        product_code: 'ТОВ395561',
+        product_name: 'Грецкий орех сушеный, вес',
+        product_kind: 'raw',
+        unit: 'кг',
+        quantity: '20000.000',
+        total_invoice_currency: '0.00',
+        item_total_rub: '0.00',
+        unit_cost: '0.00',
+        quantity_on_hand: '20000.000',
+      },
+    ],
+  }
+  const report = {
+    id: 'r1',
+    kind: 'batch_items',
+    kind_title: 'Позиции партии',
+    file_name: 'Партия.xlsx',
+    status: 'ok',
+    rows_total: 1,
+    rows_created: 1,
+    rows_updated: 0,
+    rows_skipped: 0,
+    rows_failed: 0,
+    message: 'поступление P-500: загружено строк 1',
+    created_at: '2026-10-14T10:00:00Z',
+  }
+
+  await mockSession(page, IMPORTER)
+  await page.route('**/api/v1/batches**', (route) =>
+    route.request().url().includes('/import-items')
+      ? route.fulfill({ json: { batch: loaded, report } })
+      : route.fulfill({ json: [draft] }),
+  )
+  await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+
+  await page.goto('/')
+  await openSection(page, 'Закупки', 'Поступления')
+  await expect(page.getByTestId('receipts-calendar')).toBeVisible()
+
+  await page.getByTestId(`day-receipt-b1`).getByRole('button', { name: 'Открыть' }).click()
+  await expect(page.getByTestId('draft-hint')).toContainText('файл «Партия» из 1С')
+
+  await page.getByLabel('Файл партии из 1С').setInputFiles({
+    name: 'Партия.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    buffer: Buffer.from('xlsx'),
+  })
+  const request = page.waitForRequest(
+    (item) => item.url().includes('/import-items') && item.method() === 'POST',
+  )
+  await page.getByRole('button', { name: 'Загрузить позиции из 1С' }).click()
+  expect((await request).url()).toContain('/api/v1/batches/b1/import-items')
+
+  await expect(page.getByTestId('batch-items-hint')).toContainText('загружено строк: 1')
+  await expect(page.getByLabel('Товар i0')).toHaveValue('ТОВ395561')
+  await expect(page.getByLabel('Количество i0')).toHaveValue('20000')
+  await expect(page.getByTestId('draft-hint')).toHaveCount(0)
+})

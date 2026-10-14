@@ -12,8 +12,14 @@ import {
   fetchRate,
   formatMoney,
   type Product,
+  type Role,
+  type SessionUser,
   updateBatch,
+  uploadBatchItems,
 } from './api'
+
+/** Позиции из файла «Партия» грузят те же роли, что правят поступления. */
+const ITEM_IMPORT_ROLES: Role[] = ['purchase_director', 'import_manager']
 
 type ItemDraft = {
   key: string
@@ -239,7 +245,7 @@ function emptyDraft(day: string): Draft {
   }
 }
 
-export function ReceiptsPage() {
+export function ReceiptsPage({ user }: { user?: SessionUser }) {
   const today = iso(new Date())
   const [month, setMonth] = useState(today.slice(0, 7))
   const [batches, setBatches] = useState<Batch[]>([])
@@ -248,12 +254,16 @@ export function ReceiptsPage() {
   const [suppliers, setSuppliers] = useState<Counterparty[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [rateHint, setRateHint] = useState<string | null>(null)
+  const [itemsFile, setItemsFile] = useState<File | null>(null)
+  const [itemsHint, setItemsHint] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const itemsInput = useRef<HTMLInputElement>(null)
   // Ключи новых строк: у загруженных строк ключи вида i0/p0/e0, поэтому у новых
   // префикс другой — иначе React получает два элемента с одинаковым ключом.
   const keyCounter = useRef(1)
   const nextKey = (prefix: string) => `${prefix}new${keyCounter.current++}`
+  const mayLoadItems = !user || ITEM_IMPORT_ROLES.includes(user.role)
 
   const reload = useCallback(async () => {
     const first = `${month}-01`
@@ -318,13 +328,43 @@ export function ReceiptsPage() {
   const startCreate = (target = day) => {
     setRateHint(null)
     setError(null)
+    setItemsFile(null)
+    setItemsHint(null)
     setDraft(emptyDraft(target))
   }
 
   const startEdit = (batch: Batch) => {
     setRateHint(null)
     setError(null)
+    setItemsFile(null)
+    setItemsHint(null)
     setDraft(draftFrom(batch))
+  }
+
+  /**
+   * Позиции из файла «Партия» (1С): в партию попадают товар и количество.
+   * Суммы и себестоимость файл не несёт — их считает финансовая часть карточки.
+   */
+  const loadItems = async () => {
+    if (!draft?.id || !itemsFile) return
+    setBusy(true)
+    setError(null)
+    setItemsHint(null)
+    try {
+      const result = await uploadBatchItems(draft.id, itemsFile)
+      setDraft(draftFrom(result.batch))
+      setItemsFile(null)
+      if (itemsInput.current) itemsInput.current.value = ''
+      const replaced = result.report.rows_updated
+      setItemsHint(
+        `Из файла загружено строк: ${result.report.rows_created}` +
+          (replaced ? `, заменено прежних: ${replaced}` : ''),
+      )
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
   }
 
   const fillRate = async () => {
@@ -572,8 +612,8 @@ export function ReceiptsPage() {
           </h2>
           {draft.isDraft ? (
             <p className="hint" data-testid="draft-hint">
-              Черновик из выгрузки 1С: заполнены номер, дата, поставщик и комментарий. Добавьте
-              позиции — и поступление станет обычным.
+              Черновик из выгрузки 1С: заполнены номер, дата, поставщик и комментарий. Загрузите
+              файл «Партия» из 1С или добавьте позиции вручную — и поступление станет обычным.
             </p>
           ) : null}
           <div className="toolbar">
@@ -652,6 +692,36 @@ export function ReceiptsPage() {
             </label>
           </div>
           {rateHint ? <p className="hint">{rateHint}</p> : null}
+
+          {draft.id && mayLoadItems ? (
+            <div className="toolbar" data-testid="batch-items-import">
+              <label className="field">
+                Позиции из 1С (файл «Партия»)
+                <input
+                  ref={itemsInput}
+                  type="file"
+                  accept=".xlsx"
+                  aria-label="Файл партии из 1С"
+                  disabled={busy}
+                  onChange={(event) => {
+                    setItemsFile(event.target.files?.[0] ?? null)
+                    setItemsHint(null)
+                  }}
+                />
+              </label>
+              <button type="button" disabled={busy || !itemsFile} onClick={() => void loadItems()}>
+                {busy ? 'Загрузка…' : 'Загрузить позиции из 1С'}
+              </button>
+              <span className="hint">
+                Из файла берутся товар и количество: суммы и себестоимость считает карточка.
+              </span>
+            </div>
+          ) : null}
+          {itemsHint ? (
+            <p className="hint" data-testid="batch-items-hint">
+              {itemsHint}
+            </p>
+          ) : null}
 
           <table className="receipt-items" data-testid="receipt-items">
             <thead>

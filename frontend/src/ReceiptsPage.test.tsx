@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Batch, Counterparty, Product } from './api'
+import type { Batch, Counterparty, Product, SessionUser } from './api'
 import { mockApi } from './apiMock'
 import { ReceiptsPage } from './ReceiptsPage'
 
@@ -358,5 +358,138 @@ describe('ReceiptsPage — план и лимит', () => {
     const list = await screen.findByTestId('day-receipts')
     expect(list).toHaveTextContent('100.5')
     expect(list).not.toHaveTextContent('85')
+  })
+})
+
+const IMPORT_USER: SessionUser = {
+  id: 'u1',
+  login: 'import',
+  full_name: 'Импортёр',
+  role: 'import_manager',
+  role_title: 'Менеджер по закупкам (импорт)',
+}
+
+function draftBatch(overrides: Partial<Batch> = {}): Batch {
+  return batch({
+    id: 'd1',
+    batch_number: 'ИТ-00000388',
+    source: '1c',
+    currency: 'USD',
+    items: [],
+    payments: [],
+    finance: {
+      ...batch().finance,
+      invoice_total_currency: '0.00',
+      total_paid_currency: '0.00',
+      total_paid_rub: '0.00',
+      remaining_payment_currency: '0.00',
+      effective_rate: '0.000000',
+      final_cost_rub: '0.00',
+    },
+    ...overrides,
+  })
+}
+
+/** Файл без содержимого: важно только имя, его и отправляет форма. */
+function file(name = 'Партия.xlsx'): File {
+  return new File(['xlsx'], name, {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+}
+
+describe('ReceiptsPage — позиции из файла «Партия»', () => {
+  it('менеджер по закупкам грузит позиции и видит итог', async () => {
+    const user = userEvent.setup()
+    const loaded = draftBatch({
+      items: [
+        {
+          id: 'i1',
+          product_code: 'ТОВ395561',
+          product_name: 'Грецкий орех сушеный, вес',
+          product_kind: 'raw',
+          unit: 'кг',
+          quantity: '20000.000',
+          total_invoice_currency: '0.00',
+          item_total_rub: '0.00',
+          unit_cost: '0.00',
+          quantity_on_hand: '20000.000',
+        },
+      ],
+    })
+    mockApi({
+      '/api/v1/batches/d1/import-items': {
+        body: {
+          batch: loaded,
+          report: {
+            id: 'r1',
+            kind: 'batch_items',
+            kind_title: 'Позиции партии',
+            file_name: 'Партия.xlsx',
+            status: 'ok',
+            rows_total: 1,
+            rows_created: 1,
+            rows_updated: 0,
+            rows_skipped: 0,
+            rows_failed: 0,
+            message: 'поступление ИТ-00000388: загружено строк 1',
+            created_at: '2026-10-14T10:00:00Z',
+          },
+        },
+      },
+      ...routes({ '/api/v1/batches': { body: [draftBatch()] } }),
+    })
+    render(<ReceiptsPage user={IMPORT_USER} />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(
+      within(screen.getByTestId('day-receipt-d1')).getByRole('button', { name: 'Открыть' }),
+    )
+
+    await user.upload(screen.getByLabelText('Файл партии из 1С'), file())
+    await user.click(screen.getByRole('button', { name: 'Загрузить позиции из 1С' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('batch-items-hint')).toHaveTextContent('загружено строк: 1')
+    })
+    // Строка из файла появилась в карточке: товар и количество.
+    expect(screen.getByLabelText('Товар i0')).toHaveValue('ТОВ395561')
+    expect(screen.getByLabelText('Количество i0')).toHaveValue('20000')
+  })
+
+  it('менеджер по продажам не видит загрузку позиций из 1С', async () => {
+    const user = userEvent.setup()
+    const sales: SessionUser = { ...IMPORT_USER, role: 'sales_manager' }
+    mockApi(routes({ '/api/v1/batches': { body: [draftBatch()] } }))
+    render(<ReceiptsPage user={sales} />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(
+      within(screen.getByTestId('day-receipt-d1')).getByRole('button', { name: 'Открыть' }),
+    )
+
+    expect(screen.getByTestId('receipt-form')).toBeInTheDocument()
+    expect(screen.queryByTestId('batch-items-import')).toBeNull()
+  })
+
+  it('показывает причину отказа сервера', async () => {
+    const user = userEvent.setup()
+    mockApi({
+      '/api/v1/batches/d1/import-items': {
+        status: 400,
+        body: { detail: 'Файл не загружен. строка 2: номенклатура «Неизвестный» не найдена' },
+      },
+      ...routes({ '/api/v1/batches': { body: [draftBatch()] } }),
+    })
+    render(<ReceiptsPage user={IMPORT_USER} />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(
+      within(screen.getByTestId('day-receipt-d1')).getByRole('button', { name: 'Открыть' }),
+    )
+
+    await user.upload(screen.getByLabelText('Файл партии из 1С'), file())
+    await user.click(screen.getByRole('button', { name: 'Загрузить позиции из 1С' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('не найдена')
   })
 })

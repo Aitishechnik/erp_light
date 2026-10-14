@@ -476,6 +476,21 @@ export function uploadImport(kind: string, file: File): Promise<ImportSession> {
   return request<ImportSession>(`/api/v1/imports/${kind}`, { method: 'POST', body: form })
 }
 
+/** Загрузка файла «Партия» из 1С в конкретное поступление (из его карточки). */
+export type BatchImportResult = {
+  batch: Batch
+  report: ImportSession
+}
+
+export function uploadBatchItems(batchId: string, file: File): Promise<BatchImportResult> {
+  const form = new FormData()
+  form.append('file', file)
+  return request<BatchImportResult>(`/api/v1/batches/${batchId}/import-items`, {
+    method: 'POST',
+    body: form,
+  })
+}
+
 export function fetchSalesPlans(): Promise<SalesPlan[]> {
   return request<SalesPlan[]>('/api/v1/sales-plans')
 }
