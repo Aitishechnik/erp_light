@@ -703,3 +703,12 @@ button.primary,
   color: var(--muted);
   font-size: 0.8rem;
 }
+
+/* Строка «Товар»: в поле — название, под полем — код из 1С (или предупреждение). */
+.receipt-items td:first-child .unit {
+  display: block;
+}
+
+.receipt-items .product-missing {
+  color: #b42318;
+}

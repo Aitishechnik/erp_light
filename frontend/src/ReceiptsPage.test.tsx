@@ -451,9 +451,39 @@ describe('ReceiptsPage — позиции из файла «Партия»', () 
     await waitFor(() => {
       expect(screen.getByTestId('batch-items-hint')).toHaveTextContent('загружено строк: 1')
     })
-    // Строка из файла появилась в карточке: товар и количество.
-    expect(screen.getByLabelText('Товар i0')).toHaveValue('ТОВ395561')
+    // Строка из файла появилась в карточке: в поле — название, код — под ним.
+    expect(screen.getByLabelText('Товар i0')).toHaveValue('Грецкий орех сушеный, вес')
+    expect(screen.getByTestId('product-code-i0')).toHaveTextContent('код ТОВ395561')
     expect(screen.getByLabelText('Количество i0')).toHaveValue('20000')
+  })
+
+  it('колонка называется «Товар», название в поле и код под ним', async () => {
+    const user = userEvent.setup()
+    mockApi(routes({ '/api/v1/batches': { body: [batch()] } }))
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(
+      within(screen.getByTestId(`day-receipt-b1`)).getByRole('button', { name: 'Открыть' }),
+    )
+
+    const items = screen.getByTestId('receipt-items')
+    expect(within(items).getByRole('columnheader', { name: 'Товар' })).toBeInTheDocument()
+    expect(within(items).queryByRole('columnheader', { name: 'Товар (код)' })).toBeNull()
+
+    // В строке партии — название товара, код из 1С показан под полем.
+    expect(screen.getByLabelText('Товар i0')).toHaveValue('Арахис в глазури')
+    expect(screen.getByTestId('product-code-i0')).toHaveTextContent('код ТОВ1')
+
+    // Товара нет в справочнике — предупреждаем, что строка не сохранится.
+    await user.clear(screen.getByLabelText('Товар i0'))
+    await user.type(screen.getByLabelText('Товар i0'), 'Неизвестный товар')
+    expect(screen.getByTestId('product-missing-i0')).toHaveTextContent('нет в справочнике')
+
+    // Снова выбираем товар по названию — код возвращается.
+    await user.clear(screen.getByLabelText('Товар i0'))
+    await user.type(screen.getByLabelText('Товар i0'), 'Арахис в глазури')
+    expect(screen.getByTestId('product-code-i0')).toHaveTextContent('код ТОВ1')
   })
 
   it('менеджер по продажам не видит загрузку позиций из 1С', async () => {

@@ -531,7 +531,10 @@ test('закупщик грузит позиции партии из файла 
   expect((await request).url()).toContain('/api/v1/batches/b1/import-items')
 
   await expect(page.getByTestId('batch-items-hint')).toContainText('загружено строк: 1')
-  await expect(page.getByLabel('Товар i0')).toHaveValue('ТОВ395561')
+  // Колонка «Товар»: в поле — название позиции, код из 1С — под полем.
+  await expect(page.getByRole('columnheader', { name: 'Товар', exact: true })).toBeVisible()
+  await expect(page.getByLabel('Товар i0')).toHaveValue('Грецкий орех сушеный, вес')
+  await expect(page.getByTestId('product-code-i0')).toHaveText('код ТОВ395561')
   await expect(page.getByLabel('Количество i0')).toHaveValue('20000')
   await expect(page.getByTestId('draft-hint')).toHaveCount(0)
 })

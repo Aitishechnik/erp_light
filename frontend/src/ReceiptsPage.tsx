@@ -23,9 +23,28 @@ const ITEM_IMPORT_ROLES: Role[] = ['purchase_director', 'import_manager']
 
 type ItemDraft = {
   key: string
+  /** Что видно в поле «Товар»: название позиции. */
+  title: string
+  /** Код из 1С — то, что уходит на сервер; пустой, если название не нашлось. */
   code: string
   quantity: string
   amount: string
+}
+
+/** Ключ сравнения: регистр, «ё» и лишние пробелы не важны. */
+function productKey(value: string): string {
+  return value.split(/\s+/).join(' ').trim().toLowerCase().replace(/ё/g, 'е')
+}
+
+/** Товар по введённому тексту: сначала по названию, потом по коду (как привыкли раньше). */
+function findProduct(products: Product[], value: string): Product | undefined {
+  const text = value.trim()
+  if (!text) return undefined
+  const key = productKey(text)
+  return (
+    products.find((row) => productKey(row.name) === key) ??
+    products.find((row) => row.code.toLowerCase() === text.toLowerCase())
+  )
 }
 
 type ExpenseDraft = {
@@ -207,6 +226,7 @@ function draftFrom(batch: Batch): Draft {
     comment: batch.comment ?? '',
     items: batch.items.map((item, index) => ({
       key: `i${index}`,
+      title: item.product_name,
       code: item.product_code,
       quantity: trim(item.quantity),
       amount: trim(item.total_invoice_currency),
@@ -238,7 +258,7 @@ function emptyDraft(day: string): Draft {
     supplierText: '',
     rate: '1',
     comment: '',
-    items: [{ key: 'i0', code: '', quantity: '', amount: '' }],
+    items: [{ key: 'i0', title: '', code: '', quantity: '', amount: '' }],
     payments: [],
     expenses: [],
     isDraft: false,
@@ -726,7 +746,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
           <table className="receipt-items" data-testid="receipt-items">
             <thead>
               <tr>
-                <th scope="col">Товар (код)</th>
+                <th scope="col">Товар</th>
                 <th scope="col" className="num">
                   Количество
                 </th>
@@ -743,88 +763,97 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
               </tr>
             </thead>
             <tbody>
-              {draft.items.map((item) => {
-                const product = products.find(
-                  (row) => row.code.toLowerCase() === item.code.trim().toLowerCase(),
-                )
-                return (
-                  <tr key={item.key}>
-                    <td>
-                      <input
-                        aria-label={`Товар ${item.key}`}
-                        list="receipt-products"
-                        placeholder="код из 1С"
-                        value={item.code}
-                        onChange={(event) =>
-                          setDraft({
-                            ...draft,
-                            items: draft.items.map((row) =>
-                              row.key === item.key ? { ...row, code: event.target.value } : row,
-                            ),
-                          })
-                        }
-                      />
-                      {product ? <span className="unit"> {product.name}</span> : null}
-                    </td>
-                    <td className="num">
-                      <input
-                        className="cell"
-                        aria-label={`Количество ${item.key}`}
-                        value={item.quantity}
-                        onChange={(event) =>
-                          setDraft({
-                            ...draft,
-                            items: draft.items.map((row) =>
-                              row.key === item.key ? { ...row, quantity: event.target.value } : row,
-                            ),
-                          })
-                        }
-                      />
-                    </td>
-                    <td className="num">
-                      <input
-                        className="cell"
-                        aria-label={`Сумма ${item.key}`}
-                        value={item.amount}
-                        onChange={(event) =>
-                          setDraft({
-                            ...draft,
-                            items: draft.items.map((row) =>
-                              row.key === item.key ? { ...row, amount: event.target.value } : row,
-                            ),
-                          })
-                        }
-                      />
-                    </td>
-                    <td className="num" data-testid={`item-total-${item.key}`}>
-                      {formatMoney(String(cost?.itemTotal[item.key] ?? 0))}
-                    </td>
-                    <td className="num" data-testid={`unit-cost-${item.key}`}>
-                      {formatMoney(String(cost?.unit[item.key] ?? 0))}
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="mini"
-                        onClick={() =>
-                          setDraft({
-                            ...draft,
-                            items: draft.items.filter((row) => row.key !== item.key),
-                          })
-                        }
+              {draft.items.map((item) => (
+                <tr key={item.key}>
+                  <td>
+                    <input
+                      aria-label={`Товар ${item.key}`}
+                      list="receipt-products"
+                      placeholder="название товара"
+                      value={item.title}
+                      onChange={(event) => {
+                        // В поле — название; код под полем всегда тот, что уйдёт на сервер.
+                        const title = event.target.value
+                        const found = findProduct(products, title)
+                        setDraft({
+                          ...draft,
+                          items: draft.items.map((row) =>
+                            row.key === item.key ? { ...row, title, code: found?.code ?? '' } : row,
+                          ),
+                        })
+                      }}
+                    />
+                    {item.code ? (
+                      <span className="unit" data-testid={`product-code-${item.key}`}>
+                        код {item.code}
+                      </span>
+                    ) : item.title.trim() ? (
+                      <span
+                        className="unit product-missing"
+                        data-testid={`product-missing-${item.key}`}
                       >
-                        Убрать
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
+                        нет в справочнике — строка не сохранится
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="num">
+                    <input
+                      className="cell"
+                      aria-label={`Количество ${item.key}`}
+                      value={item.quantity}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          items: draft.items.map((row) =>
+                            row.key === item.key ? { ...row, quantity: event.target.value } : row,
+                          ),
+                        })
+                      }
+                    />
+                  </td>
+                  <td className="num">
+                    <input
+                      className="cell"
+                      aria-label={`Сумма ${item.key}`}
+                      value={item.amount}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          items: draft.items.map((row) =>
+                            row.key === item.key ? { ...row, amount: event.target.value } : row,
+                          ),
+                        })
+                      }
+                    />
+                  </td>
+                  <td className="num" data-testid={`item-total-${item.key}`}>
+                    {formatMoney(String(cost?.itemTotal[item.key] ?? 0))}
+                  </td>
+                  <td className="num" data-testid={`unit-cost-${item.key}`}>
+                    {formatMoney(String(cost?.unit[item.key] ?? 0))}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="mini"
+                      onClick={() =>
+                        setDraft({
+                          ...draft,
+                          items: draft.items.filter((row) => row.key !== item.key),
+                        })
+                      }
+                    >
+                      Убрать
+                    </button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
           <datalist id="receipt-products">
             {products.map((product) => (
-              <option key={product.id} value={product.code}>
-                {product.name}
+              <option key={product.id} value={product.name}>
+                {product.code}
               </option>
             ))}
           </datalist>
@@ -836,7 +865,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                   ...draft,
                   items: [
                     ...draft.items,
-                    { key: nextKey('i'), code: '', quantity: '', amount: '' },
+                    { key: nextKey('i'), title: '', code: '', quantity: '', amount: '' },
                   ],
                 })
               }
