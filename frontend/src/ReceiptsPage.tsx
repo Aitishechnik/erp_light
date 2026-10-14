@@ -174,6 +174,11 @@ type LiveCost = {
   limitRiskExceeded: boolean
 }
 
+/** Округление денег до копейки (HALF_UP, как на сервере). */
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
+}
+
 /** Сумма одного общего расхода в рублях: рубли как есть, usd — по курсу ЦБ на сегодня. */
 function expenseRub(row: ExpenseDraft, usdRate: number | null): number {
   const amount = number(row.amount)
@@ -205,7 +210,10 @@ function categoryTotals(
     }
   }
   const remaining = Math.max(0, total - paidCurrency)
-  const rate = total > 0 ? (paidRub + remaining * cbrRate) / total : 0
+  // Курс на сервере хранится с шестью знаками — повторяем то же округление,
+  // иначе живой расчёт разойдётся с сохранённым на копейку.
+  const exact = total > 0 ? (paidRub + remaining * cbrRate) / total : 0
+  const rate = Math.round(exact * 1_000_000) / 1_000_000
   return { total, paidCurrency, paidRub, remaining, rate, plannedCurrency, plannedRub }
 }
 
@@ -254,11 +262,14 @@ function liveCost(draft: Draft, usdRate: number | null): LiveCost {
     const vatUnit = ((price + dutyUnit) * number(item.vat)) / 100
     const baseUnit = (price + dutyUnit + vatUnit) * invoice.rate + riskUnit * risk.rate
     const share = fullTotal > 0 ? ((row?.invoice ?? 0) + (row?.risk ?? 0)) / fullTotal : 0
-    const rowTotal = baseUnit * quantity + expensesRub * share
+    // Сервер округляет долю расходов и сумму строки до копейки — повторяем,
+    // чтобы живой расчёт совпадал с сохранённым.
+    const expensesItem = round2(expensesRub * share)
+    const rowTotal = round2(baseUnit * quantity + expensesItem)
     dutyRub += dutyUnit * quantity * invoice.rate
     vatRub += vatUnit * quantity * invoice.rate
     itemTotal[item.key] = rowTotal
-    unit[item.key] = quantity > 0 ? rowTotal / quantity : 0
+    unit[item.key] = quantity > 0 ? round2(rowTotal / quantity) : 0
   }
 
   let total = 0

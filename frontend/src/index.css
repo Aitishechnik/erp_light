@@ -578,125 +578,29 @@ button.primary,
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 0.6rem;
+  /* Карточка широкая: её таблицы прокручиваются внутри, страница не «уезжает». */
+  overflow-x: auto;
 }
 
-/* Таблица строк поступления: фиксированные колонки, чтобы кнопка не уезжала. */
-.receipt-items {
-  table-layout: fixed;
-}
-
-.receipt-items th:nth-child(1),
-.receipt-items td:nth-child(1) {
-  width: 30%;
-}
-
-.receipt-items th:nth-child(2),
-.receipt-items td:nth-child(2) {
-  width: 12%;
-}
-
-.receipt-items th:nth-child(3),
-.receipt-items td:nth-child(3) {
-  width: 13%;
-}
-
-.receipt-items th:nth-child(4),
-.receipt-items td:nth-child(4) {
-  width: 17%;
-}
-
-.receipt-items th:nth-child(5),
-.receipt-items td:nth-child(5) {
-  width: 17%;
-}
-
-.receipt-items th:nth-child(6),
-.receipt-items td:nth-child(6) {
-  width: 11%;
-}
-
-.receipt-payments,
-.receipt-expenses {
-  table-layout: fixed;
-  margin-bottom: 0.75rem;
-}
-
-.receipt-expenses th:nth-child(1),
-.receipt-expenses td:nth-child(1) {
-  width: 44%;
-}
-
-.receipt-expenses th:nth-child(2),
-.receipt-expenses td:nth-child(2) {
-  width: 20%;
-}
-
-.receipt-expenses th:nth-child(3),
-.receipt-expenses td:nth-child(3) {
-  width: 24%;
-  text-align: left;
-}
-
-.receipt-expenses th:nth-child(4),
-.receipt-expenses td:nth-child(4) {
-  width: 12%;
-}
-
-.receipt-payments th:nth-child(1),
-.receipt-payments td:nth-child(1) {
-  width: 18%;
-}
-
-.receipt-payments th:nth-child(2),
-.receipt-payments td:nth-child(2) {
-  width: 15%;
-}
-
-.receipt-payments th:nth-child(3),
-.receipt-payments td:nth-child(3) {
-  width: 15%;
-}
-
-.receipt-payments th:nth-child(4),
-.receipt-payments td:nth-child(4) {
-  width: 18%;
-}
-
-.receipt-payments th:nth-child(5),
-.receipt-payments td:nth-child(5) {
-  width: 24%;
-}
-
-.receipt-payments th:nth-child(6),
-.receipt-payments td:nth-child(6) {
-  width: 10%;
-}
-
-/* Ячейка с пометкой «план»: поле тянется, бейдж занимает своё место и не режется. */
-.cell-with-badge {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.cell-with-badge input {
-  flex: 1;
-  min-width: 0;
-}
-
-.cell-with-badge .badge {
-  flex: none;
-  white-space: nowrap;
-}
-
+/* Колонки карточки — по содержимому, но поля не сжимаются в нечитаемое. */
 .receipt-items td input,
 .receipt-payments td input,
 .receipt-expenses td input {
   width: 100%;
+  min-width: 5.5rem;
+}
+
+.receipt-expenses td:first-child input {
+  min-width: 13rem;
+}
+
+.receipt-payments td:nth-child(6) input {
+  min-width: 8rem;
 }
 
 .receipt-items td:first-child {
   white-space: normal;
+  min-width: 14rem;
 }
 
 .receipt-items .unit {
