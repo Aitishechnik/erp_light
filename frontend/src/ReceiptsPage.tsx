@@ -5,12 +5,14 @@ import {
   type Counterparty,
   createBatch,
   deleteBatch,
+  type ExpenseCurrency,
   errorMessage,
   fetchBatches,
   fetchCounterparties,
   fetchProducts,
   fetchRate,
   formatMoney,
+  type PaymentCategory,
   type Product,
   type Role,
   type SessionUser,
@@ -21,6 +23,11 @@ import {
 /** Позиции из файла «Партия» грузят те же роли, что правят поступления. */
 const ITEM_IMPORT_ROLES: Role[] = ['purchase_director', 'import_manager']
 
+/** Подпись валюты партии: для рубля — знак, для остальных — код. */
+function currencyLabel(currency: string): string {
+  return currency.trim().toUpperCase() === 'RUB' ? '₽' : currency.trim().toUpperCase()
+}
+
 type ItemDraft = {
   key: string
   /** Что видно в поле «Товар»: название позиции. */
@@ -28,7 +35,14 @@ type ItemDraft = {
   /** Код из 1С — то, что уходит на сервер; пустой, если название не нашлось. */
   code: string
   quantity: string
-  amount: string
+  /** Стоимость за единицу в валюте партии. */
+  price: string
+  /** Пошлина, % от валютной стоимости единицы. */
+  duty: string
+  /** НДС, % от стоимости единицы с пошлиной. */
+  vat: string
+  /** Risk за единицу в валюте партии. */
+  risk: string
 }
 
 /** Ключ сравнения: регистр, «ё» и лишние пробелы не важны. */
@@ -49,9 +63,10 @@ function findProduct(products: Product[], value: string): Product | undefined {
 
 type ExpenseDraft = {
   key: string
-  date: string
-  amount: string
   description: string
+  /** Валюта расхода: только руб. или usd. */
+  currency: ExpenseCurrency
+  amount: string
 }
 
 type PaymentDraft = {
@@ -59,6 +74,8 @@ type PaymentDraft = {
   date: string
   amount: string
   rate: string
+  /** Какой валютный долг закрывает платёж: инвойс или Risk. */
+  category: PaymentCategory
   comment: string
 }
 
@@ -124,90 +141,141 @@ function number(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-/** Живой расчёт себестоимости: та же формула, что на сервере (оплаты пока нет). */
-type LiveCost = {
+/** Итог по одной категории валютного долга: инвойс или Risk. */
+type CategoryTotals = {
   total: number
-  unit: Record<string, number>
-  itemTotal: Record<string, number>
-  invoiceTotal: number
   paidCurrency: number
   paidRub: number
-  rubPayments: number
   remaining: number
+  rate: number
   plannedCurrency: number
   plannedRub: number
-  plannedRubPayments: number
-  paymentsTotal: number
-  limitExceeded: boolean
-  effectiveRate: number
 }
 
 /**
  * Живой расчёт себестоимости — та же формула, что на сервере:
- *   остаток = max(0, инвойс − валютные платежи)
- *   себестоимость = Σ(платёж × курс платежа) + руб. платежи + остаток × текущий курс
- * Позиции делят сумму пропорционально своей доле в инвойсе.
+ *   пошлина$ = цена × %пошлины;  НДС$ = (цена + пошлина$) × %НДС
+ *   курс кат. = (Σ платёж × курс платежа + остаток × курс ЦБ) ÷ сумма категории$
+ *   цена за ед.₽ = (цена + пошлина$ + НДС$) × курс инвойса + Risk$ × курс Risk
+ *                  + доля общих расходов на единицу
+ * Общие расходы делятся по полной валютной стоимости строки (инвойс + Risk).
  */
-function liveCost(draft: Draft): LiveCost {
-  const today = iso(new Date())
-  const invoiceTotal = draft.items.reduce((sum, item) => sum + number(item.amount), 0)
+type LiveCost = {
+  invoice: CategoryTotals
+  risk: CategoryTotals
+  cbrRate: number
+  expensesRub: number
+  dutyRub: number
+  vatRub: number
+  unit: Record<string, number>
+  itemTotal: Record<string, number>
+  total: number
+  limitInvoiceExceeded: boolean
+  limitRiskExceeded: boolean
+}
 
-  // Платежи и расходы с будущей датой — план: показываем, но в расчёт не берём.
+/** Сумма одного общего расхода в рублях: рубли как есть, usd — по курсу ЦБ на сегодня. */
+function expenseRub(row: ExpenseDraft, usdRate: number | null): number {
+  const amount = number(row.amount)
+  if (row.currency === 'USD') return amount * (usdRate ?? 0)
+  return amount
+}
+
+function categoryTotals(
+  total: number,
+  rows: { amount: number; rate: number; category: PaymentCategory; date: string }[],
+  category: PaymentCategory,
+  today: string,
+  cbrRate: number,
+): CategoryTotals {
   let paidCurrency = 0
   let paidRub = 0
   let plannedCurrency = 0
   let plannedRub = 0
-  let paymentsTotal = 0
-  for (const row of draft.payments) {
-    const amount = number(row.amount)
-    const rub = amount * number(row.rate)
-    paymentsTotal += amount
+  for (const row of rows) {
+    if (row.category !== category) continue
+    const rub = row.amount * row.rate
+    // Платёж с будущей датой — план: показываем, но в расчёт не берём.
     if (row.date && row.date <= today) {
-      paidCurrency += amount
+      paidCurrency += row.amount
       paidRub += rub
     } else {
-      plannedCurrency += amount
+      plannedCurrency += row.amount
       plannedRub += rub
     }
   }
+  const remaining = Math.max(0, total - paidCurrency)
+  const rate = total > 0 ? (paidRub + remaining * cbrRate) / total : 0
+  return { total, paidCurrency, paidRub, remaining, rate, plannedCurrency, plannedRub }
+}
 
-  let rubPayments = 0
-  let plannedRubPayments = 0
-  for (const row of draft.expenses) {
-    const amount = number(row.amount)
-    if (row.date && row.date <= today) rubPayments += amount
-    else plannedRubPayments += amount
-  }
+function liveCost(draft: Draft, usdRate: number | null): LiveCost {
+  const today = iso(new Date())
+  const cbrRate = draft.currency.trim().toUpperCase() === 'RUB' ? 1 : number(draft.rate) || 1
 
-  const rate = draft.currency === 'RUB' ? 1 : number(draft.rate) || 1
-  const remaining = Math.max(0, invoiceTotal - paidCurrency)
-  const total = paidRub + rubPayments + remaining * rate
+  const rows = draft.items.map((item) => {
+    const quantity = number(item.quantity)
+    const price = number(item.price)
+    const riskUnit = number(item.risk)
+    return {
+      key: item.key,
+      quantity,
+      price,
+      riskUnit,
+      invoice: price * quantity,
+      risk: riskUnit * quantity,
+    }
+  })
+  const invoiceTotal = rows.reduce((sum, row) => sum + row.invoice, 0)
+  const riskTotal = rows.reduce((sum, row) => sum + row.risk, 0)
+
+  const payments = draft.payments.map((row) => ({
+    amount: number(row.amount),
+    rate: number(row.rate),
+    category: row.category,
+    date: row.date,
+  }))
+  const invoice = categoryTotals(invoiceTotal, payments, 'invoice', today, cbrRate)
+  const risk = categoryTotals(riskTotal, payments, 'risk', today, cbrRate)
+
+  const expensesRub = draft.expenses.reduce((sum, row) => sum + expenseRub(row, usdRate), 0)
 
   const unit: Record<string, number> = {}
   const itemTotal: Record<string, number> = {}
+  let dutyRub = 0
+  let vatRub = 0
+  const fullTotal = invoiceTotal + riskTotal
   for (const item of draft.items) {
-    const quantity = number(item.quantity)
-    const share = invoiceTotal > 0 ? number(item.amount) / invoiceTotal : 0
-    itemTotal[item.key] = invoiceTotal > 0 ? total * share : 0
-    const rowTotal = itemTotal[item.key] ?? 0
-    unit[item.key] = quantity > 0 && invoiceTotal > 0 ? rowTotal / quantity : 0
+    const row = rows.find((candidate) => candidate.key === item.key)
+    const quantity = row?.quantity ?? 0
+    const price = row?.price ?? 0
+    const riskUnit = row?.riskUnit ?? 0
+    const dutyUnit = (price * number(item.duty)) / 100
+    const vatUnit = ((price + dutyUnit) * number(item.vat)) / 100
+    const baseUnit = (price + dutyUnit + vatUnit) * invoice.rate + riskUnit * risk.rate
+    const share = fullTotal > 0 ? ((row?.invoice ?? 0) + (row?.risk ?? 0)) / fullTotal : 0
+    const rowTotal = baseUnit * quantity + expensesRub * share
+    dutyRub += dutyUnit * quantity * invoice.rate
+    vatRub += vatUnit * quantity * invoice.rate
+    itemTotal[item.key] = rowTotal
+    unit[item.key] = quantity > 0 ? rowTotal / quantity : 0
   }
 
+  let total = 0
+  for (const item of draft.items) total += itemTotal[item.key] ?? 0
+
   return {
-    total,
+    invoice,
+    risk,
+    cbrRate,
+    expensesRub,
+    dutyRub,
+    vatRub,
     unit,
     itemTotal,
-    invoiceTotal,
-    paidCurrency,
-    paidRub,
-    rubPayments,
-    remaining,
-    plannedCurrency,
-    plannedRub,
-    plannedRubPayments,
-    paymentsTotal,
-    limitExceeded: paymentsTotal > invoiceTotal,
-    effectiveRate: invoiceTotal > 0 ? total / invoiceTotal : 0,
+    total,
+    limitInvoiceExceeded: invoice.paidCurrency + invoice.plannedCurrency > invoiceTotal,
+    limitRiskExceeded: risk.paidCurrency + risk.plannedCurrency > riskTotal,
   }
 }
 
@@ -229,20 +297,25 @@ function draftFrom(batch: Batch): Draft {
       title: item.product_name,
       code: item.product_code,
       quantity: trim(item.quantity),
-      amount: trim(item.total_invoice_currency),
+      // Цена неизвестна (позиции из файла «Партия») — поле оставляем пустым.
+      price: number(item.unit_price_currency) === 0 ? '' : trim(item.unit_price_currency),
+      duty: trim(item.duty_percent),
+      vat: trim(item.vat_percent),
+      risk: trim(item.risk_unit_currency),
     })),
     payments: batch.payments.map((payment, index) => ({
       key: `p${index}`,
       date: payment.payment_date,
       amount: trim(payment.amount_currency),
       rate: trim(payment.exchange_rate),
+      category: payment.category,
       comment: payment.comment ?? '',
     })),
     expenses: batch.expenses.map((expense, index) => ({
       key: `e${index}`,
-      date: expense.expense_date,
-      amount: trim(expense.amount_rub),
       description: expense.description,
+      currency: expense.currency,
+      amount: trim(expense.amount_currency),
     })),
     isDraft,
   }
@@ -258,7 +331,18 @@ function emptyDraft(day: string): Draft {
     supplierText: '',
     rate: '1',
     comment: '',
-    items: [{ key: 'i0', title: '', code: '', quantity: '', amount: '' }],
+    items: [
+      {
+        key: 'i0',
+        title: '',
+        code: '',
+        quantity: '',
+        price: '',
+        duty: '0',
+        vat: '22',
+        risk: '0',
+      },
+    ],
     payments: [],
     expenses: [],
     isDraft: false,
@@ -278,6 +362,8 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   const [itemsHint, setItemsHint] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  /** Курс ЦБ на сегодня для расходов в usd: без даты — последний доступный. */
+  const [usdRate, setUsdRate] = useState<string | null>(null)
   const itemsInput = useRef<HTMLInputElement>(null)
   // Ключи новых строк: у загруженных строк ключи вида i0/p0/e0, поэтому у новых
   // префикс другой — иначе React получает два элемента с одинаковым ключом.
@@ -315,6 +401,13 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
       .catch(() => setProducts([]))
   }, [])
 
+  useEffect(() => {
+    // Курс ЦБ на сегодня нужен расходам в usd; без него такой расход не оценён.
+    fetchRate('USD')
+      .then((rate) => setUsdRate(rate.rate))
+      .catch(() => setUsdRate(null))
+  }, [])
+
   const weeks = useMemo(() => {
     const cells = monthDays(month)
     const rows: { date: string; inMonth: boolean }[][] = []
@@ -335,7 +428,8 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   }, [batches])
 
   const dayBatches = byDay.get(day) ?? []
-  const cost = draft ? liveCost(draft) : null
+  const cost = draft ? liveCost(draft, usdRate === null ? null : number(usdRate)) : null
+  const hasRisk = (cost?.risk.total ?? 0) > 0
 
   const shiftMonth = (delta: number) => {
     const base = monthStart(month)
@@ -363,7 +457,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
 
   /**
    * Позиции из файла «Партия» (1С): в партию попадают товар и количество.
-   * Суммы и себестоимость файл не несёт — их считает финансовая часть карточки.
+   * Цену, пошлину, НДС и Risk файл не несёт — их заполняют в карточке.
    */
   const loadItems = async () => {
     if (!draft?.id || !itemsFile) return
@@ -406,8 +500,9 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!draft) return
-    if (liveCost(draft).limitExceeded) {
-      setError('Сумма валютных платежей больше стоимости товаров партии')
+    const current = liveCost(draft, usdRate === null ? null : number(usdRate))
+    if (current.limitInvoiceExceeded || current.limitRiskExceeded) {
+      setError('Сумма валютных платежей больше суммы партии по этой категории')
       return
     }
     const items = draft.items
@@ -415,7 +510,10 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
       .map((item) => ({
         product_code: item.code.trim(),
         quantity: item.quantity.replace(',', '.'),
-        total_invoice_currency: (item.amount || '0').replace(',', '.'),
+        unit_price_currency: (item.price || '0').replace(',', '.'),
+        duty_percent: (item.duty || '0').replace(',', '.'),
+        vat_percent: (item.vat || '0').replace(',', '.'),
+        risk_unit_currency: (item.risk || '0').replace(',', '.'),
       }))
     if (items.length === 0 && !draft.isDraft) {
       setError('Добавьте хотя бы одну строку: товар и количество')
@@ -430,7 +528,6 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
         draft.supplierId === '__manual__'
           ? draft.supplierText.trim() || null
           : (suppliers.find((row) => row.id === draft.supplierId)?.name ?? null),
-      total_invoice_value: null,
       current_exchange_rate: draft.currency === 'RUB' ? '1' : draft.rate.replace(',', '.') || null,
       auto_rate: false,
       comment: draft.comment || null,
@@ -441,13 +538,14 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
           payment_date: row.date,
           amount_currency: row.amount.replace(',', '.'),
           exchange_rate: row.rate.replace(',', '.'),
+          category: row.category,
           comment: row.comment.trim() === '' ? null : row.comment.trim(),
         })),
       expenses: draft.expenses
         .filter((row) => number(row.amount) > 0)
         .map((row) => ({
-          expense_date: row.date || null,
-          amount_rub: row.amount.replace(',', '.'),
+          amount_currency: row.amount.replace(',', '.'),
+          currency: row.currency,
           description: row.description,
         })),
     }
@@ -733,7 +831,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                 {busy ? 'Загрузка…' : 'Загрузить позиции из 1С'}
               </button>
               <span className="hint">
-                Из файла берутся товар и количество: суммы и себестоимость считает карточка.
+                Из файла берутся товар и количество: цены и себестоимость считает карточка.
               </span>
             </div>
           ) : null}
@@ -748,16 +846,25 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
               <tr>
                 <th scope="col">Товар</th>
                 <th scope="col" className="num">
-                  Количество
+                  Стоимость за ед., {currencyLabel(draft.currency)}
                 </th>
                 <th scope="col" className="num">
-                  Сумма в валюте
+                  Кол-во
                 </th>
                 <th scope="col" className="num">
-                  Стоимость, ₽
+                  Пошлина, %
                 </th>
                 <th scope="col" className="num">
-                  Себестоимость ед., ₽
+                  НДС, %
+                </th>
+                <th scope="col" className="num">
+                  Risk, {currencyLabel(draft.currency)}
+                </th>
+                <th scope="col" className="num">
+                  Цена за ед., ₽
+                </th>
+                <th scope="col" className="num">
+                  Сумма, ₽
                 </th>
                 <th scope="col" aria-label="Действия" />
               </tr>
@@ -799,6 +906,21 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                   <td className="num">
                     <input
                       className="cell"
+                      aria-label={`Стоимость за ед. ${item.key}`}
+                      value={item.price}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          items: draft.items.map((row) =>
+                            row.key === item.key ? { ...row, price: event.target.value } : row,
+                          ),
+                        })
+                      }
+                    />
+                  </td>
+                  <td className="num">
+                    <input
+                      className="cell"
                       aria-label={`Количество ${item.key}`}
                       value={item.quantity}
                       onChange={(event) =>
@@ -814,23 +936,53 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                   <td className="num">
                     <input
                       className="cell"
-                      aria-label={`Сумма ${item.key}`}
-                      value={item.amount}
+                      aria-label={`Пошлина ${item.key}`}
+                      value={item.duty}
                       onChange={(event) =>
                         setDraft({
                           ...draft,
                           items: draft.items.map((row) =>
-                            row.key === item.key ? { ...row, amount: event.target.value } : row,
+                            row.key === item.key ? { ...row, duty: event.target.value } : row,
                           ),
                         })
                       }
                     />
                   </td>
-                  <td className="num" data-testid={`item-total-${item.key}`}>
-                    {formatMoney(String(cost?.itemTotal[item.key] ?? 0))}
+                  <td className="num">
+                    <input
+                      className="cell"
+                      aria-label={`НДС ${item.key}`}
+                      value={item.vat}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          items: draft.items.map((row) =>
+                            row.key === item.key ? { ...row, vat: event.target.value } : row,
+                          ),
+                        })
+                      }
+                    />
+                  </td>
+                  <td className="num">
+                    <input
+                      className="cell"
+                      aria-label={`Risk ${item.key}`}
+                      value={item.risk}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          items: draft.items.map((row) =>
+                            row.key === item.key ? { ...row, risk: event.target.value } : row,
+                          ),
+                        })
+                      }
+                    />
                   </td>
                   <td className="num" data-testid={`unit-cost-${item.key}`}>
                     {formatMoney(String(cost?.unit[item.key] ?? 0))}
+                  </td>
+                  <td className="num" data-testid={`item-total-${item.key}`}>
+                    {formatMoney(String(cost?.itemTotal[item.key] ?? 0))}
                   </td>
                   <td>
                     <button
@@ -865,7 +1017,16 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                   ...draft,
                   items: [
                     ...draft.items,
-                    { key: nextKey('i'), title: '', code: '', quantity: '', amount: '' },
+                    {
+                      key: nextKey('i'),
+                      title: '',
+                      code: '',
+                      quantity: '',
+                      price: '',
+                      duty: '0',
+                      vat: '22',
+                      risk: '0',
+                    },
                   ],
                 })
               }
@@ -874,11 +1035,136 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
             </button>
           </div>
 
+          <h2 className="section-title">Общие расходы (на партию)</h2>
+          <p className="hint">
+            Доставка, оформление и прочее. Валюта — только руб. или usd; расход в usd считается по
+            курсу ЦБ на сегодня
+            {usdRate === null ? ' (курс пока не получен)' : ` (${trim(usdRate)} ₽)`}.
+          </p>
+          <table className="receipt-expenses" data-testid="receipt-expenses">
+            <thead>
+              <tr>
+                <th scope="col">Название</th>
+                <th scope="col">Валюта</th>
+                <th scope="col" className="num">
+                  Сумма
+                </th>
+                <th scope="col" className="num">
+                  Сумма, ₽
+                </th>
+                <th scope="col" aria-label="Действия" />
+              </tr>
+            </thead>
+            <tbody>
+              {draft.expenses.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="hint">
+                    Общих расходов нет.
+                  </td>
+                </tr>
+              ) : (
+                draft.expenses.map((row) => (
+                  <tr key={row.key}>
+                    <td>
+                      <input
+                        aria-label={`Расход ${row.key}`}
+                        placeholder="название расхода"
+                        value={row.description}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            expenses: draft.expenses.map((expense) =>
+                              expense.key === row.key
+                                ? { ...expense, description: event.target.value }
+                                : expense,
+                            ),
+                          })
+                        }
+                      />
+                    </td>
+                    <td>
+                      <select
+                        aria-label={`Валюта расхода ${row.key}`}
+                        value={row.currency}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            expenses: draft.expenses.map((expense) =>
+                              expense.key === row.key
+                                ? { ...expense, currency: event.target.value as ExpenseCurrency }
+                                : expense,
+                            ),
+                          })
+                        }
+                      >
+                        <option value="RUB">руб.</option>
+                        <option value="USD">usd</option>
+                      </select>
+                    </td>
+                    <td className="num">
+                      <input
+                        className="cell"
+                        aria-label={`Сумма расхода ${row.key}`}
+                        value={row.amount}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            expenses: draft.expenses.map((expense) =>
+                              expense.key === row.key
+                                ? { ...expense, amount: event.target.value }
+                                : expense,
+                            ),
+                          })
+                        }
+                      />
+                    </td>
+                    <td className="num" data-testid={`expense-rub-${row.key}`}>
+                      {formatMoney(
+                        String(expenseRub(row, usdRate === null ? null : number(usdRate))),
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="mini"
+                        onClick={() =>
+                          setDraft({
+                            ...draft,
+                            expenses: draft.expenses.filter((expense) => expense.key !== row.key),
+                          })
+                        }
+                      >
+                        Убрать
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+          <div className="toolbar">
+            <button
+              type="button"
+              onClick={() =>
+                setDraft({
+                  ...draft,
+                  expenses: [
+                    ...draft.expenses,
+                    { key: nextKey('e'), description: '', currency: 'RUB', amount: '' },
+                  ],
+                })
+              }
+            >
+              Добавить расход
+            </button>
+          </div>
+
           <h2 className="section-title">Фин. инфо.</h2>
 
           <table className="receipt-payments" data-testid="receipt-payments">
             <thead>
               <tr>
+                <th scope="col">Категория</th>
                 <th scope="col">Валютный платёж: дата</th>
                 <th scope="col" className="num">
                   Сумма, {draft.currency}
@@ -896,13 +1182,35 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
             <tbody>
               {draft.payments.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="hint">
+                  <td colSpan={7} className="hint">
                     Валютных платежей нет — инвойс не закрыт.
                   </td>
                 </tr>
               ) : (
                 draft.payments.map((row) => (
                   <tr key={row.key}>
+                    <td>
+                      <select
+                        aria-label={`Категория платежа ${row.key}`}
+                        value={row.category}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            payments: draft.payments.map((payment) =>
+                              payment.key === row.key
+                                ? { ...payment, category: event.target.value as PaymentCategory }
+                                : payment,
+                            ),
+                          })
+                        }
+                      >
+                        <option value="invoice">Инвойс</option>
+                        {/* Risk предлагаем только когда он есть в партии. */}
+                        {hasRisk || row.category === 'risk' ? (
+                          <option value="risk">Risk</option>
+                        ) : null}
+                      </select>
+                    </td>
                     <td>
                       <input
                         type="date"
@@ -1006,6 +1314,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                       date: draft.date,
                       amount: '',
                       rate: draft.currency === 'RUB' ? '1' : draft.rate,
+                      category: 'invoice',
                       comment: '',
                     },
                   ],
@@ -1016,186 +1325,139 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
             </button>
           </div>
 
-          <table className="receipt-expenses" data-testid="receipt-expenses">
-            <thead>
-              <tr>
-                <th scope="col">Руб. платёж</th>
-                <th scope="col">Дата</th>
-                <th scope="col" className="num">
-                  Сумма, ₽
-                </th>
-                <th scope="col" aria-label="Действия" />
-              </tr>
-            </thead>
-            <tbody>
-              {draft.expenses.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="hint">
-                    Рублёвых платежей нет.
-                  </td>
-                </tr>
-              ) : (
-                draft.expenses.map((row) => (
-                  <tr key={row.key}>
-                    <td>
-                      <div className="cell-with-badge">
-                        <input
-                          aria-label={`Расход ${row.key}`}
-                          value={row.description}
-                          onChange={(event) =>
-                            setDraft({
-                              ...draft,
-                              expenses: draft.expenses.map((expense) =>
-                                expense.key === row.key
-                                  ? { ...expense, description: event.target.value }
-                                  : expense,
-                              ),
-                            })
-                          }
-                        />
-                        {row.date > iso(new Date()) ? <span className="badge"> план</span> : null}
-                      </div>
-                    </td>
-                    <td>
-                      <input
-                        type="date"
-                        aria-label={`Дата расхода ${row.key}`}
-                        value={row.date}
-                        onChange={(event) =>
-                          setDraft({
-                            ...draft,
-                            expenses: draft.expenses.map((expense) =>
-                              expense.key === row.key
-                                ? { ...expense, date: event.target.value }
-                                : expense,
-                            ),
-                          })
-                        }
-                      />
-                    </td>
-                    <td className="num">
-                      <input
-                        className="cell"
-                        aria-label={`Сумма расхода ${row.key}`}
-                        value={row.amount}
-                        onChange={(event) =>
-                          setDraft({
-                            ...draft,
-                            expenses: draft.expenses.map((expense) =>
-                              expense.key === row.key
-                                ? { ...expense, amount: event.target.value }
-                                : expense,
-                            ),
-                          })
-                        }
-                      />
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="mini"
-                        onClick={() =>
-                          setDraft({
-                            ...draft,
-                            expenses: draft.expenses.filter((expense) => expense.key !== row.key),
-                          })
-                        }
-                      >
-                        Убрать
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-          <div className="toolbar">
-            <button
-              type="button"
-              onClick={() =>
-                setDraft({
-                  ...draft,
-                  expenses: [
-                    ...draft.expenses,
-                    { key: nextKey('e'), date: draft.date, amount: '', description: 'Доставка' },
-                  ],
-                })
-              }
-            >
-              Добавить руб. платёж
-            </button>
-          </div>
-
           <div className="toolbar">
             <span className="hint">
               Инвойс:{' '}
               <strong data-testid="receipt-invoice">
-                {formatMoney(String(cost?.invoiceTotal ?? 0))}
+                {formatMoney(String(cost?.invoice.total ?? 0))} {draft.currency}
               </strong>{' '}
-              {draft.currency} · оплачено в валюте:{' '}
+              · Risk:{' '}
+              <strong data-testid="receipt-risk-total">
+                {formatMoney(String(cost?.risk.total ?? 0))} {draft.currency}
+              </strong>{' '}
+              · пошлина:{' '}
+              <strong data-testid="receipt-duty">
+                {formatMoney(String(cost?.dutyRub ?? 0))} ₽
+              </strong>{' '}
+              · НДС:{' '}
+              <strong data-testid="receipt-vat">{formatMoney(String(cost?.vatRub ?? 0))} ₽</strong>
+            </span>
+          </div>
+          <div className="toolbar">
+            <span className="hint">
+              Оплачено по инвойсу:{' '}
               <strong data-testid="receipt-paid">
-                {formatMoney(String(cost?.paidCurrency ?? 0))}
+                {formatMoney(String(cost?.invoice.paidCurrency ?? 0))} {draft.currency}
               </strong>{' '}
-              · оплачено ₽: <strong>{formatMoney(String(cost?.paidRub ?? 0))}</strong> · руб.
-              платежи: <strong>{formatMoney(String(cost?.rubPayments ?? 0))}</strong>
+              = <strong>{formatMoney(String(cost?.invoice.paidRub ?? 0))} ₽</strong> · по Risk:{' '}
+              <strong data-testid="receipt-risk-paid">
+                {formatMoney(String(cost?.risk.paidCurrency ?? 0))} {draft.currency}
+              </strong>{' '}
+              = <strong>{formatMoney(String(cost?.risk.paidRub ?? 0))} ₽</strong> · общие расходы:{' '}
+              <strong data-testid="receipt-expenses-rub">
+                {formatMoney(String(cost?.expensesRub ?? 0))} ₽
+              </strong>
+            </span>
+          </div>
+          <div className="toolbar">
+            <span className="hint">
+              Незакрытая часть инвойса:{' '}
+              <strong data-testid="receipt-remaining">
+                {formatMoney(String(cost?.invoice.remaining ?? 0))} {draft.currency}
+              </strong>{' '}
+              {trim(draft.rate) ? (
+                <>
+                  по курсу <strong>{formatRate(cost?.invoice.rate ?? 0)}</strong>
+                </>
+              ) : (
+                // У черновика из 1С курса ещё нет — не показываем выдуманный «курс 1».
+                <>— курс не задан</>
+              )}
+              {hasRisk ? (
+                <>
+                  {' '}
+                  · незакрытая часть Risk:{' '}
+                  <strong data-testid="receipt-risk-remaining">
+                    {formatMoney(String(cost?.risk.remaining ?? 0))} {draft.currency}
+                  </strong>{' '}
+                  по курсу <strong>{formatRate(cost?.risk.rate ?? 0)}</strong>
+                </>
+              ) : null}
             </span>
           </div>
           <div className="toolbar">
             <span className="hint">
               План (ещё не наступило):{' '}
               <strong data-testid="receipt-planned">
-                {formatMoney(String(cost?.plannedCurrency ?? 0))} {draft.currency}
+                {formatMoney(String(cost?.invoice.plannedCurrency ?? 0))} {draft.currency}
               </strong>{' '}
-              = <strong>{formatMoney(String(cost?.plannedRub ?? 0))}</strong> ₽ по валютным платежам
-              ·{' '}
-              <strong data-testid="receipt-planned-rub">
-                {formatMoney(String(cost?.plannedRubPayments ?? 0))}
-              </strong>{' '}
-              ₽ рублёвых
+              = <strong>{formatMoney(String(cost?.invoice.plannedRub ?? 0))}</strong> ₽ по инвойсу
+              {hasRisk ? (
+                <>
+                  {' '}
+                  ·{' '}
+                  <strong data-testid="receipt-planned-risk">
+                    {formatMoney(String(cost?.risk.plannedCurrency ?? 0))} {draft.currency}
+                  </strong>{' '}
+                  по Risk
+                </>
+              ) : null}
             </span>
             <span className="sep" />
             <span className="hint">
-              Лимит платежей:{' '}
+              Лимит платежей — инвойс:{' '}
               <strong data-testid="receipt-limit">
                 {formatMoney(
-                  String(Math.max(0, (cost?.invoiceTotal ?? 0) - (cost?.paymentsTotal ?? 0))),
+                  String(
+                    Math.max(
+                      0,
+                      (cost?.invoice.total ?? 0) -
+                        (cost?.invoice.paidCurrency ?? 0) -
+                        (cost?.invoice.plannedCurrency ?? 0),
+                    ),
+                  ),
                 )}{' '}
                 {draft.currency}
               </strong>
+              {hasRisk ? (
+                <>
+                  {' '}
+                  · Risk:{' '}
+                  <strong data-testid="receipt-risk-limit">
+                    {formatMoney(
+                      String(
+                        Math.max(
+                          0,
+                          (cost?.risk.total ?? 0) -
+                            (cost?.risk.paidCurrency ?? 0) -
+                            (cost?.risk.plannedCurrency ?? 0),
+                        ),
+                      ),
+                    )}{' '}
+                    {draft.currency}
+                  </strong>
+                </>
+              ) : null}
             </span>
           </div>
-          {cost?.limitExceeded ? (
+          {cost?.limitInvoiceExceeded || cost?.limitRiskExceeded ? (
             <p className="error" role="alert" data-testid="receipt-limit-error">
-              Сумма валютных платежей ({formatMoney(String(cost.paymentsTotal))} {draft.currency})
-              больше стоимости товаров партии ({formatMoney(String(cost.invoiceTotal))}{' '}
-              {draft.currency}). Уменьшите платёж или добавьте товары.
+              {cost.limitRiskExceeded
+                ? 'Сумма платежей категории Risk больше Risk партии.'
+                : 'Сумма валютных платежей больше инвойсной стоимости партии.'}{' '}
+              Уменьшите платёж или добавьте товары.
             </p>
           ) : null}
           <div className="toolbar">
             <span className="hint">
-              Незакрытая часть:{' '}
-              <strong data-testid="receipt-remaining">
-                {formatMoney(String(cost?.remaining ?? 0))} {draft.currency}
-              </strong>{' '}
-              {trim(draft.rate) ? (
+              Курс инвойса:{' '}
+              <strong data-testid="receipt-effective">{formatRate(cost?.invoice.rate ?? 0)}</strong>
+              {hasRisk ? (
                 <>
-                  по курсу <strong>{trim(draft.rate)}</strong> ={' '}
-                  <strong>
-                    {formatMoney(String((cost?.remaining ?? 0) * (number(draft.rate) || 1)))}
-                  </strong>{' '}
-                  ₽
+                  {' '}
+                  · курс Risk: <strong>{formatRate(cost?.risk.rate ?? 0)}</strong>
                 </>
-              ) : (
-                // У черновика из 1С курса ещё нет — не показываем выдуманный «курс 1».
-                <>— курс не задан</>
-              )}
-            </span>
-            <span className="sep" />
-            <span className="hint">
-              Средний курс партии:{' '}
-              <strong data-testid="receipt-effective">
-                {formatRate(cost?.effectiveRate ?? 0)}
-              </strong>{' '}
+              ) : null}{' '}
               · себестоимость:{' '}
               <strong data-testid="receipt-total">{formatMoney(String(cost?.total ?? 0))} ₽</strong>
             </span>
@@ -1205,7 +1467,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
             <button
               type="submit"
               className="primary"
-              disabled={busy || (cost?.limitExceeded ?? false)}
+              disabled={busy || cost?.limitInvoiceExceeded || cost?.limitRiskExceeded}
             >
               Сохранить
             </button>

@@ -100,6 +100,12 @@ export type CounterpartyIn = {
   is_import_supplier?: boolean
 }
 
+/** Категории валютных платежей: инвойс и рисковая надбавка закрываются отдельно. */
+export type PaymentCategory = 'invoice' | 'risk'
+
+/** Валюты общих расходов: выбор только из этих двух. */
+export type ExpenseCurrency = 'RUB' | 'USD'
+
 export type BatchItem = {
   id: string
   product_code: string
@@ -107,7 +113,16 @@ export type BatchItem = {
   product_kind: string
   unit: string
   quantity: string
-  total_invoice_currency: string
+  unit_price_currency: string
+  duty_percent: string
+  vat_percent: string
+  risk_unit_currency: string
+  invoice_currency: string
+  risk_currency: string
+  duty_rub: string
+  vat_rub: string
+  risk_rub: string
+  expenses_rub: string
   item_total_rub: string
   unit_cost: string
   quantity_on_hand: string
@@ -115,16 +130,25 @@ export type BatchItem = {
 
 export type BatchFinance = {
   invoice_total_currency: string
-  total_paid_currency: string
-  total_paid_rub: string
-  additional_expenses_rub: string
-  remaining_payment_currency: string
+  risk_total_currency: string
   exchange_rate: string
   rate_date: string | null
   rate_updated_at: string | null
-  planned_payments_currency: string
-  planned_payments_rub: string
-  planned_expenses_rub: string
+  invoice_paid_currency: string
+  invoice_paid_rub: string
+  invoice_remaining_currency: string
+  invoice_rate: string
+  risk_paid_currency: string
+  risk_paid_rub: string
+  risk_remaining_currency: string
+  risk_rate: string
+  planned_invoice_currency: string
+  planned_invoice_rub: string
+  planned_risk_currency: string
+  planned_risk_rub: string
+  expenses_rub: string
+  duty_rub: string
+  vat_rub: string
   effective_rate: string
   final_cost_rub: string
 }
@@ -135,6 +159,7 @@ export type BatchPayment = {
   amount_currency: string
   exchange_rate: string
   amount_rub: string
+  category: PaymentCategory
   comment: string | null
 }
 
@@ -142,6 +167,7 @@ export type BatchPaymentIn = {
   payment_date: string
   amount_currency: string
   exchange_rate: string
+  category: PaymentCategory
   comment?: string | null
 }
 
@@ -166,21 +192,24 @@ export type BatchItemIn = {
   product_code: string
   product_name?: string | null
   quantity: string
-  total_invoice_currency: string
+  unit_price_currency: string
+  duty_percent: string
+  vat_percent: string
+  risk_unit_currency: string
 }
 
 export type BatchExpenseIn = {
-  expense_date: string | null
-  amount_rub: string
+  amount_currency: string
+  currency: ExpenseCurrency
   description: string
 }
 
 export type BatchExpense = {
   id: string
-  expense_date: string
+  amount_currency: string
+  currency: ExpenseCurrency
   amount_rub: string
   description: string
-  is_planned: boolean
 }
 
 export type BatchIn = {
@@ -189,7 +218,6 @@ export type BatchIn = {
   currency: string
   supplier_id: string | null
   supplier?: string | null
-  total_invoice_value: string | null
   current_exchange_rate: string | null
   auto_rate: boolean
   comment?: string | null

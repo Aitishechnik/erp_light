@@ -53,16 +53,25 @@ function batch(overrides: Partial<Batch> = {}): Batch {
     created_at: '2026-10-08T10:00:00Z',
     finance: {
       invoice_total_currency: '1000.00',
-      total_paid_currency: '600.00',
-      total_paid_rub: '48000.00',
-      additional_expenses_rub: '0.00',
-      remaining_payment_currency: '400.00',
+      risk_total_currency: '0.00',
       exchange_rate: '90',
       rate_date: '2026-10-08',
       rate_updated_at: '2026-10-08T10:00:00Z',
-      planned_payments_currency: '0.00',
-      planned_payments_rub: '0.00',
-      planned_expenses_rub: '0.00',
+      invoice_paid_currency: '600.00',
+      invoice_paid_rub: '48000.00',
+      invoice_remaining_currency: '400.00',
+      invoice_rate: '84.000000',
+      risk_paid_currency: '0.00',
+      risk_paid_rub: '0.00',
+      risk_remaining_currency: '0.00',
+      risk_rate: '0.000000',
+      planned_invoice_currency: '0.00',
+      planned_invoice_rub: '0.00',
+      planned_risk_currency: '0.00',
+      planned_risk_rub: '0.00',
+      expenses_rub: '0.00',
+      duty_rub: '0.00',
+      vat_rub: '0.00',
       effective_rate: '84.000000',
       final_cost_rub: '84000.00',
     },
@@ -73,6 +82,7 @@ function batch(overrides: Partial<Batch> = {}): Batch {
         amount_currency: '600.00',
         exchange_rate: '80',
         amount_rub: '48000.00',
+        category: 'invoice',
         comment: null,
       },
     ],
@@ -85,7 +95,16 @@ function batch(overrides: Partial<Batch> = {}): Batch {
         product_kind: 'finished',
         unit: 'кг',
         quantity: '10.000',
-        total_invoice_currency: '1000.00',
+        unit_price_currency: '100.0000',
+        duty_percent: '0.0000',
+        vat_percent: '0.0000',
+        risk_unit_currency: '0.0000',
+        invoice_currency: '1000.00',
+        risk_currency: '0.00',
+        duty_rub: '0.00',
+        vat_rub: '0.00',
+        risk_rub: '0.00',
+        expenses_rub: '0.00',
         item_total_rub: '84000.00',
         unit_cost: '8400.00',
         quantity_on_hand: '10.000',
@@ -97,6 +116,9 @@ function batch(overrides: Partial<Batch> = {}): Batch {
 
 function routes(extra: Record<string, { status?: number; body?: unknown }> = {}) {
   return {
+    '/api/v1/rates/USD': {
+      body: { code: 'USD', rate_date: '2026-10-14', rate: '90.5000', nominal: 1, source: 'cbr' },
+    },
     '/api/v1/batches': { body: [batch()] },
     '/api/v1/counterparties': { body: SUPPLIERS },
     '/api/v1/products': { body: PRODUCTS },
@@ -171,7 +193,7 @@ describe('ReceiptsPage', () => {
     await user.type(screen.getByLabelText('Валюта'), 'USD')
     await user.type(screen.getByLabelText('Товар i0'), 'ТОВ1')
     await user.type(screen.getByLabelText('Количество i0'), '5')
-    await user.type(screen.getByLabelText('Сумма i0'), '500')
+    await user.type(screen.getByLabelText('Стоимость за ед. i0'), '50')
     await user.clear(screen.getByLabelText('Курс'))
     await user.type(screen.getByLabelText('Курс'), '95')
     await user.click(screen.getByRole('button', { name: 'Сохранить' }))
@@ -183,6 +205,8 @@ describe('ReceiptsPage', () => {
     expect(sent).toContain('"supplier_id":"s1"')
     expect(sent).toContain('"current_exchange_rate":"95"')
     expect(sent).toContain('"quantity":"5"')
+    expect(sent).toContain('"unit_price_currency":"50"')
+    expect(sent).toContain('"vat_percent":"22"')
   })
 
   it('показывает ошибку сервера при сохранении', async () => {
@@ -199,7 +223,7 @@ describe('ReceiptsPage', () => {
     await user.type(screen.getByLabelText('Номер поступления'), 'P-100')
     await user.type(screen.getByLabelText('Товар i0'), 'ТОВ1')
     await user.type(screen.getByLabelText('Количество i0'), '1')
-    await user.type(screen.getByLabelText('Сумма i0'), '10')
+    await user.type(screen.getByLabelText('Стоимость за ед. i0'), '10')
     await user.click(screen.getByRole('button', { name: 'Сохранить' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('уже существует')
@@ -249,9 +273,12 @@ describe('ReceiptsPage — план и лимит', () => {
     await user.type(screen.getByLabelText('Валюта'), 'USD')
     await user.type(screen.getByLabelText('Товар i0'), 'ТОВ1')
     await user.type(screen.getByLabelText('Количество i0'), '10')
-    await user.type(screen.getByLabelText('Сумма i0'), '1000')
+    await user.type(screen.getByLabelText('Стоимость за ед. i0'), '100')
     await user.clear(screen.getByLabelText('Курс'))
     await user.type(screen.getByLabelText('Курс'), '90')
+    // НДС не про план — обнуляем, чтобы считался только инвойс.
+    await user.clear(screen.getByLabelText('НДС i0'))
+    await user.type(screen.getByLabelText('НДС i0'), '0')
 
     await user.click(screen.getByRole('button', { name: 'Добавить валютный платёж' }))
     const pay = screen.getByTestId('receipt-payments').querySelector('tbody tr')
@@ -277,7 +304,7 @@ describe('ReceiptsPage — план и лимит', () => {
     await user.click(screen.getByRole('button', { name: 'Добавить поступление' }))
     await user.type(screen.getByLabelText('Товар i0'), 'ТОВ1')
     await user.type(screen.getByLabelText('Количество i0'), '10')
-    await user.type(screen.getByLabelText('Сумма i0'), '1000')
+    await user.type(screen.getByLabelText('Стоимость за ед. i0'), '100')
     await user.click(screen.getByRole('button', { name: 'Добавить валютный платёж' }))
     await user.type(screen.getByLabelText('Сумма платежа pnew1'), '1500')
     await user.type(screen.getByLabelText('Курс платежа pnew1'), '80')
@@ -289,25 +316,7 @@ describe('ReceiptsPage — план и лимит', () => {
 
   it('черновик из 1С помечен в календаре и сохраняется без позиций', async () => {
     const user = userEvent.setup()
-    const draft = batch({
-      id: 'd1',
-      batch_number: 'ИТ-00000388',
-      source: '1c',
-      currency: 'USD',
-      comment: 'Фундук 145600 + сбор 32980',
-      items: [],
-      payments: [],
-      finance: {
-        ...batch().finance,
-        invoice_total_currency: '0.00',
-        total_paid_currency: '0.00',
-        total_paid_rub: '0.00',
-        remaining_payment_currency: '0.00',
-        exchange_rate: '1',
-        effective_rate: '0.000000',
-        final_cost_rub: '0.00',
-      },
-    })
+    const draft = draftBatch({ comment: 'Фундук 145600 + сбор 32980' })
     mockApi(routes({ '/api/v1/batches': { body: [draft] } }))
     render(<ReceiptsPage />)
 
@@ -361,6 +370,76 @@ describe('ReceiptsPage — план и лимит', () => {
   })
 })
 
+describe('ReceiptsPage — пошлина, НДС, Risk и общие расходы', () => {
+  it('считает цену за единицу по новой формуле', async () => {
+    const user = userEvent.setup()
+    mockApi(routes())
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(screen.getByRole('button', { name: 'Добавить поступление' }))
+    await user.clear(screen.getByLabelText('Валюта'))
+    await user.type(screen.getByLabelText('Валюта'), 'USD')
+    await user.clear(screen.getByLabelText('Курс'))
+    await user.type(screen.getByLabelText('Курс'), '90')
+    await user.type(screen.getByLabelText('Товар i0'), 'ТОВ1')
+    await user.type(screen.getByLabelText('Стоимость за ед. i0'), '10')
+    await user.type(screen.getByLabelText('Количество i0'), '100')
+    await user.type(screen.getByLabelText('Пошлина i0'), '5')
+    await user.type(screen.getByLabelText('Risk i0'), '1')
+
+    // (10 + 0,5 + 2,31) × 90 + 1 × 90 = 1 242,90 ₽ за единицу, 124 290 ₽ за строку.
+    expect(screen.getByTestId('unit-cost-i0')).toHaveTextContent('1 242,90')
+    expect(screen.getByTestId('item-total-i0')).toHaveTextContent('124 290,00')
+    expect(screen.getByTestId('receipt-duty')).toHaveTextContent('4 500,00')
+    expect(screen.getByTestId('receipt-vat')).toHaveTextContent('20 790,00')
+    expect(screen.getByTestId('receipt-risk-total')).toHaveTextContent('100,00')
+  })
+
+  it('добавляет общий расход в usd и пересчитывает его по курсу ЦБ', async () => {
+    const user = userEvent.setup()
+    mockApi(routes())
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(screen.getByRole('button', { name: 'Добавить поступление' }))
+    await user.click(screen.getByRole('button', { name: 'Добавить расход' }))
+
+    await user.type(screen.getByLabelText('Расход enew1'), 'Доставка')
+    await user.selectOptions(screen.getByLabelText('Валюта расхода enew1'), 'USD')
+    await user.type(screen.getByLabelText('Сумма расхода enew1'), '100')
+
+    // 100 $ по курсу ЦБ 90,5 = 9 050 ₽.
+    expect(screen.getByTestId('expense-rub-enew1')).toHaveTextContent('9 050,00')
+    expect(screen.getByTestId('receipt-expenses-rub')).toHaveTextContent('9 050,00')
+
+    // Строка 10 шт × 100 ₽ (партия в рублях, курс 1) + НДС 22 % + расход 9 050 ₽.
+    await user.type(screen.getByLabelText('Товар i0'), 'ТОВ1')
+    await user.type(screen.getByLabelText('Стоимость за ед. i0'), '100')
+    await user.type(screen.getByLabelText('Количество i0'), '10')
+    expect(screen.getByTestId('receipt-vat')).toHaveTextContent('220,00')
+    expect(screen.getByTestId('receipt-total')).toHaveTextContent('10 270,00')
+  })
+
+  it('категория Risk предлагается, только когда Risk есть в партии', async () => {
+    const user = userEvent.setup()
+    mockApi(routes())
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+
+    const category = screen.getByLabelText('Категория платежа p0')
+    expect(within(category).getByRole('option', { name: 'Инвойс' })).toBeInTheDocument()
+    expect(within(category).queryByRole('option', { name: 'Risk' })).toBeNull()
+
+    // Появился Risk в строке — появился и выбор категории платежа.
+    await user.clear(screen.getByLabelText('Risk i0'))
+    await user.type(screen.getByLabelText('Risk i0'), '1')
+    expect(within(category).getByRole('option', { name: 'Risk' })).toBeInTheDocument()
+  })
+})
+
 const IMPORT_USER: SessionUser = {
   id: 'u1',
   login: 'import',
@@ -380,9 +459,10 @@ function draftBatch(overrides: Partial<Batch> = {}): Batch {
     finance: {
       ...batch().finance,
       invoice_total_currency: '0.00',
-      total_paid_currency: '0.00',
-      total_paid_rub: '0.00',
-      remaining_payment_currency: '0.00',
+      invoice_paid_currency: '0.00',
+      invoice_paid_rub: '0.00',
+      invoice_remaining_currency: '0.00',
+      invoice_rate: '0.000000',
       effective_rate: '0.000000',
       final_cost_rub: '0.00',
     },
@@ -409,7 +489,16 @@ describe('ReceiptsPage — позиции из файла «Партия»', () 
           product_kind: 'raw',
           unit: 'кг',
           quantity: '20000.000',
-          total_invoice_currency: '0.00',
+          unit_price_currency: '0.0000',
+          duty_percent: '0.0000',
+          vat_percent: '22.0000',
+          risk_unit_currency: '0.0000',
+          invoice_currency: '0.00',
+          risk_currency: '0.00',
+          duty_rub: '0.00',
+          vat_rub: '0.00',
+          risk_rub: '0.00',
+          expenses_rub: '0.00',
           item_total_rub: '0.00',
           unit_cost: '0.00',
           quantity_on_hand: '20000.000',
@@ -455,6 +544,9 @@ describe('ReceiptsPage — позиции из файла «Партия»', () 
     expect(screen.getByLabelText('Товар i0')).toHaveValue('Грецкий орех сушеный, вес')
     expect(screen.getByTestId('product-code-i0')).toHaveTextContent('код ТОВ395561')
     expect(screen.getByLabelText('Количество i0')).toHaveValue('20000')
+    // Цены файл не несёт — поле пустое, НДС стоит по умолчанию 22 %.
+    expect(screen.getByLabelText('Стоимость за ед. i0')).toHaveValue('')
+    expect(screen.getByLabelText('НДС i0')).toHaveValue('22')
   })
 
   it('колонка называется «Товар», название в поле и код под ним', async () => {

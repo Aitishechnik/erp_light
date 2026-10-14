@@ -70,16 +70,25 @@ const RECEIPT = {
   created_at: '2026-10-08T10:00:00Z',
   finance: {
     invoice_total_currency: '1000.00',
-    total_paid_currency: '0.00',
-    total_paid_rub: '0.00',
-    additional_expenses_rub: '0.00',
-    remaining_payment_currency: '1000.00',
+    risk_total_currency: '0.00',
     exchange_rate: '90',
     rate_date: '2026-10-08',
     rate_updated_at: '2026-10-08T10:00:00Z',
-    planned_payments_currency: '0.00',
-    planned_payments_rub: '0.00',
-    planned_expenses_rub: '0.00',
+    invoice_paid_currency: '0.00',
+    invoice_paid_rub: '0.00',
+    invoice_remaining_currency: '1000.00',
+    invoice_rate: '90.000000',
+    risk_paid_currency: '0.00',
+    risk_paid_rub: '0.00',
+    risk_remaining_currency: '0.00',
+    risk_rate: '0.000000',
+    planned_invoice_currency: '0.00',
+    planned_invoice_rub: '0.00',
+    planned_risk_currency: '0.00',
+    planned_risk_rub: '0.00',
+    expenses_rub: '0.00',
+    duty_rub: '0.00',
+    vat_rub: '0.00',
     effective_rate: '90.000000',
     final_cost_rub: '90000.00',
   },
@@ -93,7 +102,16 @@ const RECEIPT = {
       product_kind: 'goods',
       unit: 'шт',
       quantity: '10.000',
-      total_invoice_currency: '1000.00',
+      unit_price_currency: '100.0000',
+      duty_percent: '0.0000',
+      vat_percent: '0.0000',
+      risk_unit_currency: '0.0000',
+      invoice_currency: '1000.00',
+      risk_currency: '0.00',
+      duty_rub: '0.00',
+      vat_rub: '0.00',
+      risk_rub: '0.00',
+      expenses_rub: '0.00',
       item_total_rub: '90000.00',
       unit_cost: '9000.00',
       quantity_on_hand: '10.000',
@@ -390,6 +408,11 @@ test('поступление заводится в календаре, себе�
   )
   await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [] }))
   await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/rates/USD', (route) =>
+    route.fulfill({
+      json: { code: 'USD', rate_date: '2026-10-14', rate: '90.5000', nominal: 1, source: 'cbr' },
+    }),
+  )
 
   await page.goto('/')
   await openSection(page, 'Закупки', 'Поступления')
@@ -401,7 +424,9 @@ test('поступление заводится в календаре, себе�
   await page.getByLabel('Курс').fill('90')
   await page.getByLabel('Товар i0').fill('SKU-1')
   await page.getByLabel('Количество i0').fill('10')
-  await page.getByLabel('Сумма i0').fill('1000')
+  await page.getByLabel('Стоимость за ед. i0').fill('100')
+  // НДС не в теме этого сценария: обнуляем, чтобы суммы остались круглыми.
+  await page.getByLabel('НДС i0').fill('0')
 
   // Живой пересчёт: 1000 $ × 90 = 90 000 ₽, за единицу — 9 000 ₽.
   await expect(page.getByTestId('receipt-total')).toHaveText('90 000,00 ₽')
@@ -454,6 +479,75 @@ test('поступление заводится в календаре, себе�
   await expect(page.getByTestId('receipt-form')).toHaveCount(0)
 })
 
+test('пошлина, Risk и общие расходы считаются в карточке партии', async ({ page }) => {
+  const posted: Record<string, unknown>[] = []
+  await mockSession(page)
+  await page.route('**/api/v1/batches**', (route) => {
+    if (route.request().method() === 'POST') {
+      posted.push(route.request().postDataJSON() as Record<string, unknown>)
+      return route.fulfill({ status: 201, json: RECEIPT })
+    }
+    return route.fulfill({ json: [] })
+  })
+  await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/rates/USD', (route) =>
+    route.fulfill({
+      json: { code: 'USD', rate_date: '2026-10-14', rate: '90.5000', nominal: 1, source: 'cbr' },
+    }),
+  )
+
+  await page.goto('/')
+  await openSection(page, 'Закупки', 'Поступления')
+  await page.getByRole('button', { name: 'Добавить поступление' }).click()
+  await page.getByLabel('Номер поступления').fill('P-600')
+  await page.getByLabel('Валюта').fill('USD')
+  await page.getByLabel('Курс').fill('90')
+  await page.getByLabel('Товар i0').fill('SKU-1')
+  await page.getByLabel('Количество i0').fill('10')
+  await page.getByLabel('Стоимость за ед. i0').fill('100')
+  await page.getByLabel('НДС i0').fill('0')
+  await page.getByLabel('Пошлина i0').fill('5')
+  await page.getByLabel('Risk i0').fill('1')
+
+  // (100 + 5) × 90 + 1 × 90 = 9 540 ₽ за единицу, 95 400 ₽ за строку.
+  await expect(page.getByTestId('unit-cost-i0')).toHaveText('9 540,00')
+  await expect(page.getByTestId('receipt-total')).toHaveText('95 400,00 ₽')
+  await expect(page.getByTestId('receipt-risk-total')).toContainText('10,00')
+  await expect(page.getByTestId('receipt-duty')).toContainText('4 500,00')
+
+  // Общий расход в рублях входит в себестоимость целиком.
+  await page.getByRole('button', { name: 'Добавить расход' }).click()
+  await page.getByLabel('Расход enew1').fill('Доставка')
+  await page.getByLabel('Сумма расхода enew1').fill('5000')
+  await expect(page.getByTestId('receipt-expenses-rub')).toContainText('5 000,00')
+  await expect(page.getByTestId('receipt-total')).toHaveText('100 400,00 ₽')
+
+  // Платёж категории Risk закрывает Risk по своему курсу.
+  await page.getByRole('button', { name: 'Добавить валютный платёж' }).click()
+  const payRow = page.locator('[data-testid="receipt-payments"] tbody tr').first()
+  await payRow.getByLabel(/Категория платежа/).selectOption('risk')
+  await payRow.getByLabel(/Сумма платежа/).fill('10')
+  await payRow.getByLabel(/Курс платежа/).fill('100')
+  await expect(payRow).toContainText('1 000,00')
+  await expect(page.getByTestId('receipt-total')).toHaveText('100 500,00 ₽')
+
+  await page.getByRole('button', { name: 'Сохранить' }).click()
+  await expect(page.getByTestId('receipt-form')).toHaveCount(0)
+
+  const body = posted[0] as {
+    payments: { category: string }[]
+    expenses: { currency: string; amount_currency: string }[]
+    items: { unit_price_currency: string; duty_percent: string; risk_unit_currency: string }[]
+  }
+  expect(body.payments[0]?.category).toBe('risk')
+  expect(body.expenses[0]?.currency).toBe('RUB')
+  expect(body.expenses[0]?.amount_currency).toBe('5000')
+  expect(body.items[0]?.unit_price_currency).toBe('100')
+  expect(body.items[0]?.duty_percent).toBe('5')
+  expect(body.items[0]?.risk_unit_currency).toBe('1')
+})
+
 test('закупщик грузит позиции партии из файла 1С в черновик', async ({ page }) => {
   const today = new Date().toISOString().slice(0, 10)
   const draft = {
@@ -466,7 +560,8 @@ test('закупщик грузит позиции партии из файла 
     finance: {
       ...RECEIPT.finance,
       invoice_total_currency: '0.00',
-      remaining_payment_currency: '0.00',
+      invoice_remaining_currency: '0.00',
+      invoice_rate: '0.000000',
       effective_rate: '0.000000',
       final_cost_rub: '0.00',
     },
@@ -481,7 +576,16 @@ test('закупщик грузит позиции партии из файла 
         product_kind: 'raw',
         unit: 'кг',
         quantity: '20000.000',
-        total_invoice_currency: '0.00',
+        unit_price_currency: '0.0000',
+        duty_percent: '0.0000',
+        vat_percent: '22.0000',
+        risk_unit_currency: '0.0000',
+        invoice_currency: '0.00',
+        risk_currency: '0.00',
+        duty_rub: '0.00',
+        vat_rub: '0.00',
+        risk_rub: '0.00',
+        expenses_rub: '0.00',
         item_total_rub: '0.00',
         unit_cost: '0.00',
         quantity_on_hand: '20000.000',
