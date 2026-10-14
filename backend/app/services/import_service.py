@@ -1,6 +1,6 @@
 """Загрузка выгрузок 1С (.xlsx).
 
-Семь типов данных, у каждого свой файл и свой набор колонок:
+Восемь типов данных, у каждого свой файл и свой набор колонок:
 
 | Тип | Файл | Колонки |
 |---|---|---|
@@ -11,18 +11,22 @@
 | Сырьё | три колонки | Код, Наименование, Базовая единица измерения |
 | Готовая продукция | три колонки | Код, Наименование, Базовая единица измерения |
 | Импортные поступления | четыре колонки | Номер, Дата, Контрагент, Комментарий |
+| Позиции партии | две колонки | Номенклатура, Количество |
 
 Дубли не создаются: номенклатура опознаётся по коду 1С, контрагенты — по
 наименованию без учёта регистра и лишних пробелов, поступления — по номеру.
 Повторная загрузка того же файла только обновляет найденные записи.
 
-Последний тип — не справочник, а черновики партий для календаря поступлений:
-подробности в `receipt_import_service`.
+Два последних типа — не справочники: «Импортные поступления» создают черновики
+партий (`receipt_import_service`), «Позиции партии» наполняют уже заведённый
+черновик из карточки поступления (`batch_import_service`). Отдельной карточки
+на странице «Загрузка данных» у позиций нет — поступление выбирается карточкой.
 """
 
 from __future__ import annotations
 
 import hashlib
+import zipfile
 from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Any
@@ -43,6 +47,7 @@ KIND_MATERIALS = "materials"
 KIND_RAW = "raw"
 KIND_FINISHED = "finished"
 KIND_IMPORT_RECEIPTS = "import_receipts"
+KIND_BATCH_ITEMS = "batch_items"
 
 MAX_FILE_SIZE = 10 * 1024 * 1024
 MAX_ROWS = 50_000
@@ -72,12 +77,16 @@ class ImportKind:
 
     kind: str
     title: str
-    entity: str  # products | counterparties | batches
+    entity: str  # products | counterparties | batches | batch_items
     columns: tuple[str, ...]
     product_kind: str | None = None
     role_field: str | None = None
     roles: tuple[str, ...] = DIRECTORY_WRITE_ROLES
     note: str | None = None
+    # Колонки, которые читаем, только если они есть в файле.
+    optional_columns: tuple[str, ...] = ()
+    # listed=False: тип не показывается карточкой на «Загрузке данных» — только в журнале.
+    listed: bool = True
 
 
 KINDS: dict[str, ImportKind] = {
@@ -134,6 +143,19 @@ KINDS: dict[str, ImportKind] = {
             "комментарий. Позиции и платежи дозаполняются в карточке."
         ),
     ),
+    KIND_BATCH_ITEMS: ImportKind(
+        kind=KIND_BATCH_ITEMS,
+        title="Позиции партии",
+        entity="batch_items",
+        columns=("Номенклатура", "Количество"),
+        optional_columns=("Ед.",),
+        roles=(ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER),
+        note=(
+            "Файл «Партия» из 1С: в поступление попадают товар и количество. "
+            "Загружается из карточки поступления, а не с этой страницы."
+        ),
+        listed=False,
+    ),
 }
 
 
@@ -158,6 +180,38 @@ def _norm_header(value: Any) -> str:
     return " ".join(str(value).split()).strip().casefold() if value is not None else ""
 
 
+# Канонические имена частей пакета .xlsx, которые ищет openpyxl. 1С иногда пишет
+# их с большой буквы («xl/SharedStrings.xml»), и тогда файл не открывается.
+CANONICAL_PARTS = {
+    "[content_types].xml": "[Content_Types].xml",
+    "xl/sharedstrings.xml": "xl/sharedStrings.xml",
+    "xl/workbook.xml": "xl/workbook.xml",
+    "xl/styles.xml": "xl/styles.xml",
+}
+
+
+def _repair_part_names(content: bytes) -> bytes:
+    """Перепаковать .xlsx с каноническими именами частей пакета.
+
+    Имена частей в OPC регистронезависимы, но openpyxl ищет строго по имени.
+    Архив пересобирается только если правда есть что исправлять.
+    """
+    with zipfile.ZipFile(BytesIO(content)) as source:
+        names = source.namelist()
+        fixed = {
+            name: CANONICAL_PARTS[name.casefold()]
+            for name in names
+            if name.casefold() in CANONICAL_PARTS and CANONICAL_PARTS[name.casefold()] != name
+        }
+        if not fixed:
+            return content
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as target:
+            for name in names:
+                target.writestr(fixed.get(name, name), source.read(name))
+    return buffer.getvalue()
+
+
 def _cell(value: Any) -> str:
     if value is None:
         return ""
@@ -172,7 +226,9 @@ def _read_rows(content: bytes, kind: ImportKind) -> list[dict[str, str]]:
     if len(content) > MAX_FILE_SIZE:
         raise ImportDataError("Файл больше 10 МБ — выгрузку нужно разделить")
     try:
-        workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
+        workbook = load_workbook(
+            BytesIO(_repair_part_names(content)), read_only=True, data_only=True
+        )
     except Exception as exc:  # noqa: BLE001 — любая ошибка чтения xlsx
         raise ImportDataError("Не удалось прочитать файл: нужен .xlsx из 1С") from exc
 
@@ -184,9 +240,12 @@ def _read_rows(content: bytes, kind: ImportKind) -> list[dict[str, str]]:
             raise ImportDataError("В файле нет строки с заголовками")
         header = [_norm_header(cell) for cell in header_raw]
         index: dict[str, int] = {}
-        for column in kind.columns:
+        for column in (*kind.columns, *kind.optional_columns):
             wanted = _norm_header(column)
+            optional = column in kind.optional_columns
             if wanted not in header:
+                if optional:
+                    continue
                 raise ImportDataError(
                     f"Нет колонки «{column}». Ожидаются колонки: {', '.join(kind.columns)}"
                 )
@@ -207,6 +266,14 @@ def _read_rows(content: bytes, kind: ImportKind) -> list[dict[str, str]]:
         return parsed
     finally:
         workbook.close()
+
+
+def read_rows(content: bytes, kind_code: str) -> list[dict[str, str]]:
+    """Строки выгрузки по коду типа загрузки — для сервисов, которые пишут сами."""
+    kind = KINDS.get(kind_code)
+    if kind is None:
+        raise ImportDataError(f"Неизвестный тип загрузки: {kind_code}", status_code=404)
+    return _read_rows(content, kind)
 
 
 def _import_products(db: Session, kind: ImportKind, rows: list[dict[str, str]]) -> Outcome:
@@ -309,6 +376,11 @@ def import_file(db: Session, kind_code: str, file_name: str, content: bytes) -> 
         from app.services.receipt_import_service import import_receipts
 
         outcome = import_receipts(db, rows)
+    elif kind.entity == "batch_items":
+        # Поступление известно только карточке — общая загрузка такие файлы не берёт.
+        raise ImportDataError(
+            "Позиции партии загружаются из карточки поступления, а не со страницы «Загрузка данных»"
+        )
     else:
         outcome = _import_counterparties(db, kind, rows)
 

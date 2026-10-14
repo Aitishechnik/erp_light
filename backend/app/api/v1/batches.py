@@ -1,4 +1,4 @@
-"""Поступления партий: календарь, карточка, создание, правка, удаление."""
+"""Поступления партий: календарь, карточка, создание, правка, удаление, позиции из 1С."""
 
 from __future__ import annotations
 
@@ -6,13 +6,16 @@ import uuid
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession, require_roles
+from app.api.v1.imports import session_out
 from app.models.auth import ROLE_IMPORT_MANAGER, ROLE_PURCHASE_DIRECTOR, User
 from app.models.domain import Batch
 from app.schemas.domain import BatchCreate, BatchOut
+from app.schemas.imports import BatchImportOut
+from app.services import batch_import_service
 from app.services.batch_service import (
     batch_finance,
     create_batch,
@@ -24,6 +27,7 @@ from app.services.batch_service import (
     update_batch,
 )
 from app.services.currency_service import RateError
+from app.services.import_service import ImportDataError
 
 router = APIRouter(tags=["batches"])
 
@@ -129,3 +133,36 @@ def remove_batch(batch_id: uuid.UUID, user: Writer, db: DbSession) -> Response:
     if not delete_batch(db, batch_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Поступление не найдено")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/batches/{batch_id}/import-items", response_model=BatchImportOut)
+def import_batch_items(
+    batch_id: uuid.UUID,
+    user: Writer,
+    db: DbSession,
+    file: Annotated[UploadFile, File(description="Выгрузка «Партия» из 1С в формате .xlsx")],
+) -> BatchImportOut:
+    """Позиции партии файлом «Партия»: товар и количество, по строкам выгрузки.
+
+    Поступление берётся из карточки — в файле нет ни номера, ни даты. Суммы и
+    себестоимость здесь не считаются: строки создаются без инвойсной суммы.
+    """
+    batch = load_batch(db, batch_id)
+    if batch is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Поступление не найдено")
+    if batch.payments:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "У поступления уже есть платежи: их суммы считались от прежних позиций. "
+            "Удалите платежи, чтобы заменить позиции из файла.",
+        )
+    content = file.file.read()
+    try:
+        report = batch_import_service.import_items(
+            db, batch, file.filename or "без имени.xlsx", content
+        )
+    except ImportDataError as exc:
+        raise HTTPException(exc.status_code, exc.message) from exc
+    loaded = load_batch(db, batch_id)
+    assert loaded is not None
+    return BatchImportOut(batch=_out(db, loaded), report=session_out(report))

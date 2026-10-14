@@ -7,6 +7,8 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.schemas.domain import BatchOut
+
 
 class ImportKindOut(BaseModel):
     kind: str
@@ -30,3 +32,10 @@ class ImportSessionOut(BaseModel):
     rows_failed: int
     message: str | None
     created_at: datetime
+
+
+class BatchImportOut(BaseModel):
+    """Итог загрузки позиций файлом «Партия»: партия после загрузки и строка журнала."""
+
+    batch: BatchOut
+    report: ImportSessionOut

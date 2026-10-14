@@ -15,7 +15,7 @@ from app.services.import_service import KINDS, ImportDataError
 router = APIRouter(tags=["imports"])
 
 
-def _session_out(row: ImportSession) -> ImportSessionOut:
+def session_out(row: ImportSession) -> ImportSessionOut:
     return ImportSessionOut(
         id=row.id,
         kind=row.kind,
@@ -34,7 +34,11 @@ def _session_out(row: ImportSession) -> ImportSessionOut:
 
 @router.get("/imports/kinds", response_model=list[ImportKindOut])
 def list_kinds(user: CurrentUser) -> list[ImportKindOut]:
-    """Типы данных, которые можно загружать. Роли — чтобы экран показал доступное."""
+    """Типы данных, которые можно загружать. Роли — чтобы экран показал доступное.
+
+    Типы с ``listed=False`` (позиции партии) грузятся из карточки поступления:
+    в списке они не нужны, но в журнале видны.
+    """
     return [
         ImportKindOut(
             kind=kind.kind,
@@ -45,6 +49,7 @@ def list_kinds(user: CurrentUser) -> list[ImportKindOut]:
             note=kind.note,
         )
         for kind in KINDS.values()
+        if kind.listed
     ]
 
 
@@ -55,7 +60,7 @@ def list_imports(
     limit: int = Query(default=20, ge=1, le=200),
 ) -> list[ImportSessionOut]:
     """Журнал загрузок: что и когда загружали, с итогами."""
-    return [_session_out(row) for row in service.list_sessions(db, limit=limit)]
+    return [session_out(row) for row in service.list_sessions(db, limit=limit)]
 
 
 @router.post("/imports/{kind}", response_model=ImportSessionOut)
@@ -80,4 +85,4 @@ def upload(
         result = service.import_file(db, kind, file.filename or "без имени.xlsx", content)
     except ImportDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
-    return _session_out(result.session)
+    return session_out(result.session)
