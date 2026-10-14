@@ -587,7 +587,7 @@ button.primary,
 .receipt-payments td input,
 .receipt-expenses td input {
   width: 100%;
-  min-width: 5.5rem;
+  min-width: 4.75rem;
 }
 
 .receipt-expenses td:first-child input {
@@ -598,9 +598,14 @@ button.primary,
   min-width: 8rem;
 }
 
+/* Колонка «Товар»: названия из 1С длинные, поле должно вмещать их целиком. */
 .receipt-items td:first-child {
   white-space: normal;
-  min-width: 14rem;
+  min-width: 21rem;
+}
+
+.receipt-items td:first-child input {
+  min-width: 20rem;
 }
 
 .receipt-items .unit {
