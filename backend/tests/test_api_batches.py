@@ -16,17 +16,21 @@ BATCH_PAYLOAD = {
             "product_name": "Товар 1",
             "product_kind": "goods",
             "quantity": "10",
-            "total_invoice_currency": "600.00",
+            "unit_price_currency": "60.00",
+            "duty_percent": "0",
+            "vat_percent": "0",
         },
         {
             "product_code": "SKU-2",
             "product_name": "Материал 2",
             "product_kind": "material",
             "quantity": "5",
-            "total_invoice_currency": "400.00",
+            "unit_price_currency": "80.00",
+            "duty_percent": "0",
+            "vat_percent": "0",
         },
     ],
-    "expenses": [{"amount_rub": "500.00", "description": "Доставка"}],
+    "expenses": [{"amount_currency": "500.00", "currency": "RUB", "description": "Доставка"}],
 }
 
 
@@ -41,7 +45,7 @@ def test_create_batch_computes_cost_and_stock(client: TestClient) -> None:
 
     body = created.json()
     assert Decimal(body["finance"]["invoice_total_currency"]) == Decimal("1000.00")
-    assert Decimal(body["finance"]["additional_expenses_rub"]) == Decimal("500.00")
+    assert Decimal(body["finance"]["expenses_rub"]) == Decimal("500.00")
     assert Decimal(body["finance"]["final_cost_rub"]) == Decimal("1500.00")
 
     by_code = {item["product_code"]: item for item in body["items"]}
@@ -80,6 +84,8 @@ def test_unknown_batch_returns_404(client: TestClient) -> None:
     assert response.status_code == 404
 
 
-def test_invoice_total_defaults_to_sum_of_items(client: TestClient) -> None:
+def test_invoice_total_is_sum_of_item_prices(client: TestClient) -> None:
+    """Инвойс партии не хранится: он всегда равен сумме «цена × количество»."""
     created = client.post("/api/v1/batches", json=BATCH_PAYLOAD).json()
     assert Decimal(created["finance"]["invoice_total_currency"]) == Decimal("1000.00")
+    assert Decimal(created["finance"]["risk_total_currency"]) == Decimal("0.00")

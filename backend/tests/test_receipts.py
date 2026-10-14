@@ -1,4 +1,9 @@
-"""Поступления и курсы валют: динамический пересчёт себестоимости."""
+"""Поступления и курсы валют: динамический пересчёт себестоимости.
+
+Формула — по контракту [`docs/data-contract-receipts.md`](../../docs/data-contract-receipts.md) §3:
+инвойс и Risk закрываются платежами своих категорий, пошлина и НДС считаются в
+валюте, общие расходы делятся между строками по полной валютной стоимости.
+"""
 
 from datetime import date
 from decimal import Decimal
@@ -67,22 +72,29 @@ def _with_cbr(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(currency_service, "fetch_cbr_rates", _cbr_answer)
 
 
+def _item(**overrides: object) -> dict[str, object]:
+    """Строка партии: 10 шт по 100 $ без пошлины, НДС и Risk."""
+    item: dict[str, object] = {
+        "product_code": "ТОВ1",
+        "product_name": "Товар 1",
+        "quantity": "10",
+        "unit_price_currency": "100.00",
+        "duty_percent": "0",
+        "vat_percent": "0",
+        "risk_unit_currency": "0",
+    }
+    item.update(overrides)
+    return item
+
+
 def _payload(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
         "batch_number": "P-100",
         "batch_date": DAY,
         "currency": "USD",
-        "total_invoice_value": "1000.00",
         "current_exchange_rate": "90",
-        "items": [
-            {
-                "product_code": "ТОВ1",
-                "product_name": "Товар 1",
-                "quantity": "10",
-                "total_invoice_currency": "1000.00",
-            }
-        ],
-        "expenses": [{"amount_rub": "500.00", "description": "Доставка"}],
+        "items": [_item()],
+        "expenses": [{"amount_currency": "500.00", "currency": "RUB", "description": "Доставка"}],
     }
     payload.update(overrides)
     return payload
@@ -232,8 +244,13 @@ def test_unknown_supplier_is_rejected(
     assert "не найден" in response.json()["detail"]
 
 
-def _payment(amount: str, rate: str, day: str = DAY) -> dict[str, str]:
-    return {"payment_date": day, "amount_currency": amount, "exchange_rate": rate}
+def _payment(amount: str, rate: str, day: str = DAY, category: str = "invoice") -> dict[str, str]:
+    return {
+        "payment_date": day,
+        "amount_currency": amount,
+        "exchange_rate": rate,
+        "category": category,
+    }
 
 
 def test_currency_payment_closes_invoice_and_fixes_rate(
@@ -250,12 +267,13 @@ def test_currency_payment_closes_invoice_and_fixes_rate(
     body = created.json()
     finance = body["finance"]
     # 600 $ оплачено по 80 = 48 000 ₽; остаток 400 $ по курсу ЦБ 90,5 = 36 200 ₽.
-    assert Decimal(finance["total_paid_currency"]) == Decimal("600.00")
-    assert Decimal(finance["total_paid_rub"]) == Decimal("48000.00")
-    assert Decimal(finance["remaining_payment_currency"]) == Decimal("400.00")
+    assert Decimal(finance["invoice_paid_currency"]) == Decimal("600.00")
+    assert Decimal(finance["invoice_paid_rub"]) == Decimal("48000.00")
+    assert Decimal(finance["invoice_remaining_currency"]) == Decimal("400.00")
     # 48 000 + 500 ₽ доставки + 36 200 = 84 700 ₽
     assert Decimal(finance["final_cost_rub"]) == Decimal("84700.00")
     assert Decimal(body["payments"][0]["amount_rub"]) == Decimal("48000.00")
+    assert body["payments"][0]["category"] == "invoice"
     assert body["finance"]["rate_date"] == DAY
 
 
@@ -285,7 +303,7 @@ def test_fixed_payment_is_not_revalued_when_rate_grows(
     updated = client.get(f"/api/v1/batches/{created['id']}")
     assert updated.status_code == 200, updated.text
     finance = updated.json()["finance"]
-    assert Decimal(finance["total_paid_rub"]) == Decimal("48000.00")  # платёж не изменился
+    assert Decimal(finance["invoice_paid_rub"]) == Decimal("48000.00")  # платёж не изменился
     assert Decimal(finance["exchange_rate"]) == Decimal("100")
     # 48 000 (платёж) + 500 ₽ доставки + 400 × 100 = 88 500 ₽
     assert Decimal(finance["final_cost_rub"]) == Decimal("88500.00")
@@ -319,26 +337,15 @@ def test_payments_are_split_between_items_proportionally(
         current_exchange_rate="90",
         payments=[_payment("1000", "80")],
         items=[
-            {
-                "product_code": "ТОВ1",
-                "product_name": "Первый",
-                "quantity": "10",
-                "total_invoice_currency": "600.00",
-            },
-            {
-                "product_code": "ТОВ2",
-                "product_name": "Второй",
-                "quantity": "10",
-                "total_invoice_currency": "400.00",
-            },
+            _item(product_code="ТОВ1", product_name="Первый", unit_price_currency="60.00"),
+            _item(product_code="ТОВ2", product_name="Второй", unit_price_currency="40.00"),
         ],
-        total_invoice_value="1000.00",
     )
     created = client.post("/api/v1/batches", json=payload)
     assert created.status_code == 201, created.text
     body = created.json()
     # Инвойс закрыт платежом 1000 $ по 80 → 80 000 ₽ + 500 ₽ доставки = 80 500 ₽.
-    assert Decimal(body["finance"]["remaining_payment_currency"]) == Decimal("0.00")
+    assert Decimal(body["finance"]["invoice_remaining_currency"]) == Decimal("0.00")
     assert Decimal(body["finance"]["final_cost_rub"]) == Decimal("80500.00")
     costs = {item["product_code"]: item for item in body["items"]}
     # 80 500 ₽ делим пропорционально: 60% и 40%, по 10 шт в строке.
@@ -355,7 +362,7 @@ def test_payments_can_be_edited(client: TestClient, login, monkeypatch: pytest.M
         "/api/v1/batches",
         json=_payload(current_exchange_rate="90", payments=[_payment("500", "80")]),
     ).json()
-    assert Decimal(created["finance"]["total_paid_currency"]) == Decimal("500.00")
+    assert Decimal(created["finance"]["invoice_paid_currency"]) == Decimal("500.00")
 
     updated = client.put(
         f"/api/v1/batches/{created['id']}",
@@ -366,9 +373,9 @@ def test_payments_can_be_edited(client: TestClient, login, monkeypatch: pytest.M
     )
     assert updated.status_code == 200, updated.text
     finance = updated.json()["finance"]
-    assert Decimal(finance["total_paid_currency"]) == Decimal("1000.00")
-    assert Decimal(finance["total_paid_rub"]) == Decimal("82500.00")
-    assert Decimal(finance["remaining_payment_currency"]) == Decimal("0.00")
+    assert Decimal(finance["invoice_paid_currency"]) == Decimal("1000.00")
+    assert Decimal(finance["invoice_paid_rub"]) == Decimal("82500.00")
+    assert Decimal(finance["invoice_remaining_currency"]) == Decimal("0.00")
     assert Decimal(finance["final_cost_rub"]) == Decimal("83000.00")
     assert len(updated.json()["payments"]) == 2
 
@@ -421,10 +428,10 @@ def test_future_payment_is_plan_only(
     )
     assert created.status_code == 201, created.text
     finance = created.json()["finance"]
-    assert Decimal(finance["total_paid_currency"]) == Decimal("0.00")
-    assert Decimal(finance["planned_payments_currency"]) == Decimal("600.00")
-    assert Decimal(finance["planned_payments_rub"]) == Decimal("48000.00")
-    assert Decimal(finance["remaining_payment_currency"]) == Decimal("1000.00")
+    assert Decimal(finance["invoice_paid_currency"]) == Decimal("0.00")
+    assert Decimal(finance["planned_invoice_currency"]) == Decimal("600.00")
+    assert Decimal(finance["planned_invoice_rub"]) == Decimal("48000.00")
+    assert Decimal(finance["invoice_remaining_currency"]) == Decimal("1000.00")
     # Ничего не оплачено: 1000 $ × 90,5 + 500 ₽ доставки = 91 000 ₽.
     assert Decimal(finance["final_cost_rub"]) == Decimal("91000.00")
 
@@ -442,30 +449,162 @@ def test_payment_counts_on_its_day(
         "/api/v1/batches",
         json=_payload(current_exchange_rate="90", payments=[_payment("600", "80", today)]),
     ).json()
-    assert Decimal(created["finance"]["total_paid_currency"]) == Decimal("600.00")
-    assert Decimal(created["finance"]["planned_payments_currency"]) == Decimal("0.00")
+    assert Decimal(created["finance"]["invoice_paid_currency"]) == Decimal("600.00")
+    assert Decimal(created["finance"]["planned_invoice_currency"]) == Decimal("0.00")
 
 
-def test_future_expense_is_plan_only(
+def test_usd_expense_is_converted_at_cbr_rate(
     client: TestClient, login, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Рублёвый платёж с будущей датой тоже пока план."""
+    """Общий расход в usd пересчитывается по курсу ЦБ на текущий день."""
+    login("purchase")
+    _with_cbr(monkeypatch)
+    created = client.post(
+        "/api/v1/batches",
+        json=_payload(
+            expenses=[{"amount_currency": "100", "currency": "USD", "description": "Доставка"}]
+        ),
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["expenses"][0]["currency"] == "USD"
+    assert Decimal(body["expenses"][0]["amount_currency"]) == Decimal("100.00")
+    assert Decimal(body["expenses"][0]["amount_rub"]) == Decimal("9050.00")
+    assert Decimal(body["finance"]["expenses_rub"]) == Decimal("9050.00")
+    # Инвойс без оплат оценивается по курсу ЦБ 90,5: 90 500 ₽ + 9 050 ₽ = 99 550 ₽.
+    assert Decimal(body["finance"]["exchange_rate"]) == Decimal("90.5")
+    assert Decimal(body["finance"]["final_cost_rub"]) == Decimal("99550.00")
+
+
+def test_rub_expense_is_taken_as_is(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    login("purchase")
+    _no_network(monkeypatch)
+    body = client.post("/api/v1/batches", json=_payload()).json()
+    assert body["expenses"][0]["currency"] == "RUB"
+    assert Decimal(body["expenses"][0]["amount_rub"]) == Decimal("500.00")
+    assert Decimal(body["finance"]["expenses_rub"]) == Decimal("500.00")
+
+
+def test_expense_currency_is_limited_to_rub_and_usd(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    login("purchase")
+    _no_network(monkeypatch)
+    response = client.post(
+        "/api/v1/batches",
+        json=_payload(
+            expenses=[{"amount_currency": "100", "currency": "EUR", "description": "Доставка"}]
+        ),
+    )
+    assert response.status_code == 422
+
+
+def test_duty_vat_and_risk_are_shown_in_the_card(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Новые поля карточки: цена за единицу, пошлина, НДС, Risk и их рубли."""
     login("purchase")
     _no_network(monkeypatch)
     created = client.post(
         "/api/v1/batches",
         json=_payload(
             current_exchange_rate="90",
-            expenses=[{"expense_date": FUTURE, "amount_rub": "500", "description": "Пошлина"}],
+            items=[
+                {
+                    "product_code": "ТОВ1",
+                    "product_name": "Товар 1",
+                    "quantity": "100",
+                    "unit_price_currency": "10",
+                    "duty_percent": "5",
+                    "vat_percent": "22",
+                    "risk_unit_currency": "1",
+                }
+            ],
+            expenses=[{"amount_currency": "50000", "currency": "RUB", "description": "Доставка"}],
         ),
     )
     assert created.status_code == 201, created.text
     body = created.json()
-    assert Decimal(body["finance"]["additional_expenses_rub"]) == Decimal("0.00")
-    assert Decimal(body["finance"]["planned_expenses_rub"]) == Decimal("500.00")
-    assert Decimal(body["finance"]["final_cost_rub"]) == Decimal("90000.00")
-    assert body["expenses"][0]["is_planned"] is True
-    assert body["expenses"][0]["expense_date"] == FUTURE
+    finance = body["finance"]
+    assert Decimal(finance["invoice_total_currency"]) == Decimal("1000.00")
+    assert Decimal(finance["risk_total_currency"]) == Decimal("100.00")
+    assert Decimal(finance["duty_rub"]) == Decimal("4500.00")
+    assert Decimal(finance["vat_rub"]) == Decimal("20790.00")
+
+    item = body["items"][0]
+    assert Decimal(item["unit_price_currency"]) == Decimal("10.0000")
+    assert Decimal(item["duty_percent"]) == Decimal("5.0000")
+    assert Decimal(item["vat_percent"]) == Decimal("22.0000")
+    assert Decimal(item["risk_unit_currency"]) == Decimal("1.0000")
+    assert Decimal(item["invoice_currency"]) == Decimal("1000.00")
+    assert Decimal(item["risk_currency"]) == Decimal("100.00")
+    assert Decimal(item["expenses_rub"]) == Decimal("50000.00")
+    # Согласованный пример: (10 + 0,5 + 2,31) × 90 + 1 × 90 = 1242,90 ₽/шт.
+    assert Decimal(item["unit_cost"]) == Decimal("1742.90")
+    assert Decimal(item["item_total_rub"]) == Decimal("174290.00")
+    assert Decimal(finance["final_cost_rub"]) == Decimal("174290.00")
+
+
+def test_risk_is_paid_by_its_own_payments(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Платежи категории risk закрывают Risk по своим курсам, остаток — по ЦБ."""
+    login("purchase")
+    _no_network(monkeypatch)
+    created = client.post(
+        "/api/v1/batches",
+        json=_payload(
+            current_exchange_rate="90",
+            items=[_item(quantity="10", unit_price_currency="100", risk_unit_currency="5")],
+            expenses=[],
+            payments=[_payment("40", "80", category="risk")],
+        ),
+    )
+    assert created.status_code == 201, created.text
+    finance = created.json()["finance"]
+    assert Decimal(finance["invoice_rate"]) == Decimal("90.000000")
+    assert Decimal(finance["risk_paid_currency"]) == Decimal("40.00")
+    assert Decimal(finance["risk_paid_rub"]) == Decimal("3200.00")
+    assert Decimal(finance["risk_remaining_currency"]) == Decimal("10.00")
+    # (40 × 80 + 10 × 90) ÷ 50 = 82 ₽ за 1 $ Risk.
+    assert Decimal(finance["risk_rate"]) == Decimal("82.000000")
+    # (100 × 90 + 5 × 82) × 10 шт = 94 100 ₽.
+    assert Decimal(finance["final_cost_rub"]) == Decimal("94100.00")
+
+
+def test_risk_payments_are_limited_by_risk_total(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Лимит считается по каждой категории: Risk нельзя закрыть больше, чем он есть."""
+    login("purchase")
+    _no_network(monkeypatch)
+    response = client.post(
+        "/api/v1/batches",
+        json=_payload(
+            current_exchange_rate="90",
+            items=[_item(quantity="10", unit_price_currency="100", risk_unit_currency="5")],
+            expenses=[],
+            payments=[_payment("60", "80", category="risk")],
+        ),
+    )
+    assert response.status_code == 400
+    assert "Risk" in response.json()["detail"]
+
+
+def test_risk_payment_without_risk_is_rejected(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Нет Risk в партии — платёж категории risk отклоняется."""
+    login("purchase")
+    _no_network(monkeypatch)
+    response = client.post(
+        "/api/v1/batches",
+        json=_payload(current_exchange_rate="90", payments=[_payment("10", "80", category="risk")]),
+    )
+    assert response.status_code == 400
+    assert "Risk" in response.json()["detail"]
 
 
 def test_payments_over_invoice_are_rejected(
@@ -478,12 +617,11 @@ def test_payments_over_invoice_are_rejected(
         "/api/v1/batches",
         json=_payload(
             current_exchange_rate="90",
-            total_invoice_value="1000.00",
             payments=[_payment("900", "80"), _payment("200", "85")],
         ),
     )
     assert response.status_code == 400
-    assert "больше стоимости товаров" in response.json()["detail"]
+    assert "больше суммы партии" in response.json()["detail"]
 
 
 def test_payment_equal_to_invoice_is_allowed(
@@ -493,14 +631,10 @@ def test_payment_equal_to_invoice_is_allowed(
     _no_network(monkeypatch)
     response = client.post(
         "/api/v1/batches",
-        json=_payload(
-            current_exchange_rate="90",
-            total_invoice_value="1000.00",
-            payments=[_payment("1000", "80")],
-        ),
+        json=_payload(current_exchange_rate="90", payments=[_payment("1000", "80")]),
     )
     assert response.status_code == 201, response.text
-    assert Decimal(response.json()["finance"]["remaining_payment_currency"]) == Decimal("0.00")
+    assert Decimal(response.json()["finance"]["invoice_remaining_currency"]) == Decimal("0.00")
 
 
 def test_effective_rate_is_weighted_average(
@@ -511,23 +645,15 @@ def test_effective_rate_is_weighted_average(
     _cbr_with(monkeypatch, "85,0000")
     payload = _payload(
         current_exchange_rate=None,
-        total_invoice_value="10000.00",
-        items=[
-            {
-                "product_code": "ТОВ1",
-                "product_name": "Товар",
-                "quantity": "100",
-                "total_invoice_currency": "10000.00",
-            }
-        ],
+        items=[_item(quantity="100", unit_price_currency="100")],
         expenses=[],
         payments=[_payment("5000", "110"), _payment("1000", "115")],
     )
     created = client.post("/api/v1/batches", json=payload)
     assert created.status_code == 201, created.text
     finance = created.json()["finance"]
-    assert Decimal(finance["total_paid_rub"]) == Decimal("665000.00")
-    assert Decimal(finance["remaining_payment_currency"]) == Decimal("4000.00")
+    assert Decimal(finance["invoice_paid_rub"]) == Decimal("665000.00")
+    assert Decimal(finance["invoice_remaining_currency"]) == Decimal("4000.00")
     assert Decimal(finance["final_cost_rub"]) == Decimal("1005000.00")
     assert Decimal(finance["effective_rate"]) == Decimal("100.500000")
     assert Decimal(finance["exchange_rate"]) == Decimal("85")

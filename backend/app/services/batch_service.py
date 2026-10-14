@@ -31,9 +31,9 @@ from app.schemas.domain import (
 )
 from app.services import currency_service
 from app.services.cost import (
+    CATEGORY_INVOICE,
+    CATEGORY_RISK,
     BatchFinance,
-    batch_invoice_total_currency,
-    calculate_item_cost,
     finance_for_batch,
     q2,
 )
@@ -106,6 +106,31 @@ def load_batch(db: Session, batch_id: uuid.UUID) -> Batch | None:
     )
 
 
+def expense_rates(db: Session, batch: Batch) -> dict[str, Decimal]:
+    """Курсы ЦБ на текущий день для валют общих расходов партии.
+
+    Расход в валюте пересчитывается по последнему доступному курсу ЦБ; если курса
+    нет, расход оценивается в ноль — выдуманное число в себестоимость не попадает.
+    """
+    rates: dict[str, Decimal] = {}
+    codes = {(expense.currency or "RUB").strip().upper() for expense in batch.expenses}
+    for code in codes:
+        if code == "RUB":
+            continue
+        row = currency_service.latest_rate_row(db, code)
+        if row is not None:
+            rates[code] = row.rate
+    return rates
+
+
+def expense_amount_rub(expense: BatchExpense, rates: dict[str, Decimal]) -> Decimal:
+    """Рублёвая величина общего расхода: рубли как есть, валюта — по курсу ЦБ."""
+    code = (expense.currency or "RUB").strip().upper()
+    if code == "RUB":
+        return q2(expense.amount_currency)
+    return q2(expense.amount_currency * rates.get(code, ZERO))
+
+
 def batch_finance(db: Session, batch: Batch) -> tuple[BatchFinance, CurrencyRate | None]:
     """Себестоимость партии: платежи по своим курсам + незакрытая часть по текущему.
 
@@ -113,7 +138,7 @@ def batch_finance(db: Session, batch: Batch) -> tuple[BatchFinance, CurrencyRate
     поэтому оценка остатка меняется, а зафиксированные курсы платежей — нет.
     """
     rate, rate_row = currency_service.batch_rate(db, batch.currency, batch.current_exchange_rate)
-    finance = finance_for_batch(batch, rate=rate)
+    finance = finance_for_batch(batch, rate=rate, expense_rates=expense_rates(db, batch))
     return finance, rate_row if isinstance(rate_row, CurrencyRate) else None
 
 
@@ -123,19 +148,16 @@ def serialize_batch(
     *,
     finance: BatchFinance | None = None,
     rate_row: CurrencyRate | None = None,
+    rates: dict[str, Decimal] | None = None,
 ) -> BatchOut:
     """Партия с посчитанной себестоимостью по каждой строке."""
     snaps = snapshots if snapshots is not None else {}
+    expense_rate_map = rates or {}
     if finance is None:
-        finance = finance_for_batch(batch)
+        finance = finance_for_batch(batch, expense_rates=expense_rate_map)
 
     items: list[BatchItemOut] = []
-    for item in batch.items:
-        item_total_rub, unit_cost = calculate_item_cost(
-            finance,
-            item_invoice_currency=item.total_invoice_currency,
-            item_quantity=item.quantity,
-        )
+    for item, cost in zip(batch.items, finance.items, strict=True):
         snapshot = snaps.get(item.id)
         on_hand = snapshot.quantity if snapshot is not None else item.quantity
         items.append(
@@ -146,23 +168,31 @@ def serialize_batch(
                 product_kind=item.product.kind,
                 unit=item.product.unit,
                 quantity=item.quantity,
-                total_invoice_currency=item.total_invoice_currency,
-                item_total_rub=item_total_rub,
-                unit_cost=unit_cost,
+                unit_price_currency=item.unit_price_currency,
+                duty_percent=item.duty_percent,
+                vat_percent=item.vat_percent,
+                risk_unit_currency=item.risk_unit_currency,
+                invoice_currency=cost.invoice_currency,
+                risk_currency=cost.risk_currency,
+                duty_rub=cost.duty_rub,
+                vat_rub=cost.vat_rub,
+                risk_rub=cost.risk_rub,
+                expenses_rub=cost.expenses_rub,
+                item_total_rub=cost.item_total_rub,
+                unit_cost=cost.unit_cost,
                 quantity_on_hand=on_hand,
             )
         )
 
-    today = date.today()
     expenses = [
         BatchExpenseOut(
             id=expense.id,
-            expense_date=expense.expense_date,
-            amount_rub=expense.amount_rub,
             description=expense.description,
-            is_planned=expense.expense_date > today,
+            currency=(expense.currency or "RUB").strip().upper(),
+            amount_currency=expense.amount_currency,
+            amount_rub=expense_amount_rub(expense, expense_rate_map),
         )
-        for expense in sorted(batch.expenses, key=lambda row: (row.expense_date, row.created_at))
+        for expense in sorted(batch.expenses, key=lambda row: row.created_at)
     ]
 
     payments = [
@@ -172,6 +202,7 @@ def serialize_batch(
             amount_currency=payment.amount_currency,
             exchange_rate=payment.exchange_rate,
             amount_rub=q2(payment.amount_currency * payment.exchange_rate),
+            category=payment.category,
             comment=payment.comment,
         )
         for payment in sorted(batch.payments, key=lambda row: (row.payment_date, row.created_at))
@@ -189,9 +220,28 @@ def serialize_batch(
         comment=batch.comment,
         created_at=batch.created_at,
         finance=BatchFinanceOut(
-            **{k: Decimal(v) for k, v in finance.as_dict().items()},
+            invoice_total_currency=finance.invoice_total_currency,
+            risk_total_currency=finance.risk_total_currency,
+            exchange_rate=finance.cbr_rate,
             rate_date=rate_row.rate_date if rate_row is not None else None,
             rate_updated_at=rate_row.fetched_at if rate_row is not None else None,
+            invoice_paid_currency=finance.invoice.paid_currency,
+            invoice_paid_rub=finance.invoice.paid_rub,
+            invoice_remaining_currency=finance.invoice.remaining_currency,
+            invoice_rate=finance.invoice.rate,
+            risk_paid_currency=finance.risk.paid_currency,
+            risk_paid_rub=finance.risk.paid_rub,
+            risk_remaining_currency=finance.risk.remaining_currency,
+            risk_rate=finance.risk.rate,
+            planned_invoice_currency=finance.invoice.planned_currency,
+            planned_invoice_rub=finance.invoice.planned_rub,
+            planned_risk_currency=finance.risk.planned_currency,
+            planned_risk_rub=finance.risk.planned_rub,
+            expenses_rub=finance.expenses_rub,
+            duty_rub=finance.duty_rub,
+            vat_rub=finance.vat_rub,
+            effective_rate=finance.effective_rate,
+            final_cost_rub=finance.final_cost_rub,
         ),
         payments=payments,
         expenses=expenses,
@@ -220,23 +270,28 @@ def _resolve_supplier(db: Session, payload: BatchCreate) -> tuple[uuid.UUID | No
 
 
 def check_payments_limit(payload: BatchCreate) -> None:
-    """Сумма валютных платежей не может превышать стоимость товаров партии."""
-    invoice_total = (
-        payload.total_invoice_value
-        if payload.total_invoice_value is not None
-        else sum((item.total_invoice_currency for item in payload.items), ZERO)
-    )
-    payments_total = sum((payment.amount_currency for payment in payload.payments), ZERO)
-    if payments_total > invoice_total:
-        raise ValueError(
-            "Сумма валютных платежей "
-            f"({payments_total}) больше стоимости товаров партии ({invoice_total}). "
-            "Уменьшите платёж или добавьте товары."
-        )
+    """Платежи категории не могут превышать сумму этой категории.
+
+    Инвойс и Risk закрываются отдельно: платежи ``invoice`` ограничены инвойсной
+    стоимостью товаров, платежи ``risk`` — суммой Risk по строкам.
+    """
+    totals = {CATEGORY_INVOICE: ZERO, CATEGORY_RISK: ZERO}
+    for item in payload.items:
+        totals[CATEGORY_INVOICE] += q2(item.unit_price_currency * item.quantity)
+        totals[CATEGORY_RISK] += q2(item.risk_unit_currency * item.quantity)
+    paid = {CATEGORY_INVOICE: ZERO, CATEGORY_RISK: ZERO}
+    for payment in payload.payments:
+        paid[payment.category] += payment.amount_currency
+    for category, title in ((CATEGORY_INVOICE, "инвойсу"), (CATEGORY_RISK, "Risk")):
+        if paid[category] > totals[category]:
+            raise ValueError(
+                f"Сумма валютных платежей по {title} ({paid[category]}) больше суммы партии "
+                f"({totals[category]}). Уменьшите платёж или добавьте товары."
+            )
 
 
 def _items_expenses_payments(db: Session, batch: Batch, payload: BatchCreate) -> None:
-    """Наполнить партию строками, рублёвыми и валютными платежами из запроса."""
+    """Наполнить партию строками, общими расходами и валютными платежами."""
     for item in payload.items:
         product = _resolve_product(
             db, item.product_code, item.product_name, item.product_kind, item.unit
@@ -246,15 +301,18 @@ def _items_expenses_payments(db: Session, batch: Batch, payload: BatchCreate) ->
                 batch_id=batch.id,
                 product_id=product.id,
                 quantity=item.quantity,
-                total_invoice_currency=item.total_invoice_currency,
+                unit_price_currency=item.unit_price_currency,
+                duty_percent=item.duty_percent,
+                vat_percent=item.vat_percent,
+                risk_unit_currency=item.risk_unit_currency,
             )
         )
     for expense in payload.expenses:
         db.add(
             BatchExpense(
                 batch_id=batch.id,
-                expense_date=expense.expense_date or date.today(),
-                amount_rub=expense.amount_rub,
+                amount_currency=expense.amount_currency,
+                currency=expense.currency,
                 description=expense.description,
                 source="manual",
             )
@@ -266,6 +324,7 @@ def _items_expenses_payments(db: Session, batch: Batch, payload: BatchCreate) ->
                 payment_date=payment.payment_date,
                 amount_currency=payment.amount_currency,
                 exchange_rate=payment.exchange_rate,
+                category=payment.category,
                 comment=payment.comment,
             )
         )
@@ -296,9 +355,6 @@ def create_batch(db: Session, payload: BatchCreate) -> Batch:
         currency=payload.currency,
         supplier_id=supplier_id,
         supplier=supplier_name,
-        total_invoice_value=payload.total_invoice_value
-        if payload.total_invoice_value is not None
-        else sum((i.total_invoice_currency for i in payload.items), ZERO),
         current_exchange_rate=rate,
         source="manual",
         comment=payload.comment,
@@ -325,11 +381,6 @@ def update_batch(db: Session, batch_id: uuid.UUID, payload: BatchCreate) -> Batc
     batch.currency = payload.currency
     batch.supplier_id = supplier_id
     batch.supplier = supplier_name
-    batch.total_invoice_value = (
-        payload.total_invoice_value
-        if payload.total_invoice_value is not None
-        else sum((i.total_invoice_currency for i in payload.items), ZERO)
-    )
     batch.current_exchange_rate = rate
     batch.comment = payload.comment
 
@@ -364,17 +415,11 @@ def stock_rows(db: Session) -> list[StockRowOut]:
     rows: list[StockRowOut] = []
     for batch in batches:
         finance, _ = batch_finance(db, batch)
-        invoice_total = batch_invoice_total_currency(batch)
-        if invoice_total == 0:
+        if finance.invoice_total_currency == 0 and finance.risk_total_currency == 0:
             continue
-        for item in batch.items:
+        for item, cost in zip(batch.items, finance.items, strict=True):
             snapshot = snaps.get(item.id)
             on_hand = snapshot.quantity if snapshot is not None else item.quantity
-            _, unit_cost = calculate_item_cost(
-                finance,
-                item_invoice_currency=item.total_invoice_currency,
-                item_quantity=item.quantity,
-            )
             rows.append(
                 StockRowOut(
                     batch_item_id=item.id,
@@ -385,8 +430,8 @@ def stock_rows(db: Session) -> list[StockRowOut]:
                     product_kind=item.product.kind,
                     unit=item.product.unit,
                     quantity_on_hand=on_hand,
-                    unit_cost=unit_cost,
-                    value_rub=q2(on_hand * unit_cost),
+                    unit_cost=cost.unit_cost,
+                    value_rub=q2(on_hand * cost.unit_cost),
                     snapshot_date=snapshot.snapshot_date if snapshot is not None else None,
                 )
             )

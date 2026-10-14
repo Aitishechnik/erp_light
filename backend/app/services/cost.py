@@ -1,30 +1,34 @@
 """Оперативная себестоимость партии.
 
-Формула перенесена без изменений из custom_erp (`erp_v_2`):
-  * ``backend/app/services/finance_service.py::calculate_batch_finance``
-  * ``backend/app/core/cost_calculator.py::calculate_unit_cost``
+Формула согласована с продукт-менеджером и описана в
+[`docs/data-contract-receipts.md`](../../../docs/data-contract-receipts.md) §3:
 
-Что сохранено дословно:
-    remaining_payment = max(0, total_invoice_value - total_paid_currency)
-    final_cost_rub    = total_paid_rub + доп.расходы + remaining_payment * курс
-    unit_cost         = final_cost_rub / total_invoice_value
-                        * total_invoice_currency(строки) / quantity(строки)
+    инвойс$      = Σ (стоимость за ед. × кол-во)
+    risk$        = Σ (risk за ед. × кол-во)
+    пошлина$     = стоимость за ед. × пошлина %
+    НДС$         = (стоимость за ед. + пошлина$) × НДС %
+    остаток кат. = max(0, сумма категории$ − оплачено по категории$)
+    курс кат.    = (Σ платёж × курс платежа + остаток × курс ЦБ) ÷ сумма категории$
+    цена за ед.₽ = (стоимость за ед. + пошлина$ + НДС$) × курс инвойса
+                   + risk за ед. × курс risk
+                   + доля общих расходов на единицу
+    сумма строки = цена за ед.₽ × кол-во
+
+Что сохранено из формулы custom_erp (`erp_v_2`): незакрытая часть валютного долга
+оценивается по текущему курсу ЦБ и потому переоценивается, а курсы уже сделанных
+платежей зафиксированы в платежах и не меняются никогда.
 
 Что НЕ перенесено (осознанно): бухгалтерский слой — счета, проводки, курсовые
 разницы по ПБУ. Это зона 1С.
 
-Оплаты приходят из валютных платежей партии (``batch_payments``): каждый платёж
-хранит свой курс, поэтому ``total_paid_rub`` — сумма платежей по их курсам. Курс для
-незакрытой части — текущий (последний доступный курс ЦБ), поэтому она переоценивается,
-а сделанные платежи — нет.
-
-В расчёт входят только платежи с наступившей датой. Платежи с будущей датой —
-это план: они видны в ответе (``planned_*``), но себестоимость не меняют.
+Курс для незакрытой части приходит снаружи (последний доступный курс ЦБ), общие
+расходы — уже в рублях: расход в валюте пересчитывается по курсу ЦБ на текущий день
+в `batch_service`.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
@@ -34,6 +38,12 @@ from app.models.domain import Batch, BatchExpense, BatchPayment
 ZERO = Decimal("0.00")
 ONE = Decimal("1")
 CENT = Decimal("0.01")
+MICRO = Decimal("0.000001")
+HUNDRED = Decimal("100")
+
+#: Категории валютных платежей: инвойс и рисковая надбавка закрываются отдельно.
+CATEGORY_INVOICE = "invoice"
+CATEGORY_RISK = "risk"
 
 
 def q2(value: Decimal) -> Decimal:
@@ -41,145 +51,257 @@ def q2(value: Decimal) -> Decimal:
     return value.quantize(CENT, rounding=ROUND_HALF_UP)
 
 
+def q6(value: Decimal) -> Decimal:
+    """Округление курса до шести знаков — как хранится курс платежа."""
+    return value.quantize(MICRO, rounding=ROUND_HALF_UP)
+
+
+@dataclass(frozen=True)
+class ItemInput:
+    """Строка партии для расчёта: цена, количество и надбавки."""
+
+    unit_price_currency: Decimal = ZERO
+    quantity: Decimal = ZERO
+    duty_percent: Decimal = ZERO
+    vat_percent: Decimal = ZERO
+    risk_unit_currency: Decimal = ZERO
+
+    @property
+    def invoice_currency(self) -> Decimal:
+        """Инвойсная стоимость строки в валюте партии."""
+        return q2(self.unit_price_currency * self.quantity)
+
+    @property
+    def risk_currency(self) -> Decimal:
+        """Risk строки в валюте партии."""
+        return q2(self.risk_unit_currency * self.quantity)
+
+    @property
+    def full_currency(self) -> Decimal:
+        """Полная валютная стоимость строки — база распределения общих расходов."""
+        return self.invoice_currency + self.risk_currency
+
+
+@dataclass(frozen=True)
+class CategoryPayments:
+    """Валютные платежи одной категории: вступившие в силу и план."""
+
+    paid_currency: Decimal = ZERO
+    paid_rub: Decimal = ZERO
+    planned_currency: Decimal = ZERO
+    planned_rub: Decimal = ZERO
+
+
+@dataclass(frozen=True)
+class CategoryFinance:
+    """Итог по валютному долгу одной категории (инвойс или risk)."""
+
+    total_currency: Decimal
+    paid_currency: Decimal
+    paid_rub: Decimal
+    remaining_currency: Decimal
+    rate: Decimal
+    planned_currency: Decimal
+    planned_rub: Decimal
+
+
+@dataclass(frozen=True)
+class ItemCost:
+    """Себестоимость строки партии в рублях."""
+
+    unit_price_currency: Decimal
+    quantity: Decimal
+    duty_percent: Decimal
+    vat_percent: Decimal
+    risk_unit_currency: Decimal
+    invoice_currency: Decimal
+    risk_currency: Decimal
+    duty_rub: Decimal
+    vat_rub: Decimal
+    risk_rub: Decimal
+    expenses_rub: Decimal
+    unit_cost: Decimal
+    item_total_rub: Decimal
+
+
 @dataclass(frozen=True)
 class BatchFinance:
-    """Финансовый итог партии в рублях."""
+    """Финансовый итог партии: курсы категорий, расходы и себестоимость."""
 
-    invoice_total_currency: Decimal
-    total_paid_currency: Decimal
-    total_paid_rub: Decimal
-    additional_expenses_rub: Decimal
-    remaining_payment_currency: Decimal
-    exchange_rate: Decimal
+    cbr_rate: Decimal
+    invoice: CategoryFinance
+    risk: CategoryFinance
+    expenses_rub: Decimal
+    duty_rub: Decimal
+    vat_rub: Decimal
     final_cost_rub: Decimal
-    planned_payments_currency: Decimal = ZERO
-    planned_payments_rub: Decimal = ZERO
-    planned_expenses_rub: Decimal = ZERO
+    items: tuple[ItemCost, ...]
+
+    @property
+    def invoice_total_currency(self) -> Decimal:
+        return self.invoice.total_currency
+
+    @property
+    def risk_total_currency(self) -> Decimal:
+        return self.risk.total_currency
 
     @property
     def effective_rate(self) -> Decimal:
-        """Фактический курс партии: себестоимость / инвойс в валюте."""
-        if self.invoice_total_currency == 0:
-            return ZERO
-        return (self.final_cost_rub / self.invoice_total_currency).quantize(
-            Decimal("0.000001"), rounding=ROUND_HALF_UP
-        )
-
-    def as_dict(self) -> dict[str, str]:
-        return {
-            "invoice_total_currency": str(self.invoice_total_currency),
-            "total_paid_currency": str(self.total_paid_currency),
-            "total_paid_rub": str(self.total_paid_rub),
-            "additional_expenses_rub": str(self.additional_expenses_rub),
-            "remaining_payment_currency": str(self.remaining_payment_currency),
-            "exchange_rate": str(self.exchange_rate),
-            "final_cost_rub": str(self.final_cost_rub),
-            "planned_payments_currency": str(self.planned_payments_currency),
-            "planned_payments_rub": str(self.planned_payments_rub),
-            "planned_expenses_rub": str(self.planned_expenses_rub),
-            "effective_rate": str(self.effective_rate),
-        }
+        """Фактический курс партии по инвойсу — он виден в списке поступлений."""
+        return self.invoice.rate
 
 
-def calculate_batch_finance(
-    *,
-    invoice_total_currency: Decimal,
-    additional_expenses_rub: Decimal = ZERO,
-    total_paid_currency: Decimal = ZERO,
-    total_paid_rub: Decimal = ZERO,
-    exchange_rate: Decimal | None = None,
-    planned_payments_currency: Decimal = ZERO,
-    planned_payments_rub: Decimal = ZERO,
-    planned_expenses_rub: Decimal = ZERO,
-) -> BatchFinance:
-    """Финальная стоимость партии в рублях (оперативный слой).
-
-    ``total_paid_*`` и ``additional_expenses_rub`` — только вступившие в силу платежи;
-    ``planned_*`` показываются отдельно и в расчёт не входят.
-    """
-    rate = exchange_rate if exchange_rate is not None else ONE
-    remaining = max(ZERO, invoice_total_currency - total_paid_currency)
-    final_cost_rub = total_paid_rub + additional_expenses_rub + remaining * rate
-    return BatchFinance(
-        invoice_total_currency=q2(invoice_total_currency),
-        total_paid_currency=q2(total_paid_currency),
-        total_paid_rub=q2(total_paid_rub),
-        additional_expenses_rub=q2(additional_expenses_rub),
-        remaining_payment_currency=q2(remaining),
-        exchange_rate=rate,
-        final_cost_rub=q2(final_cost_rub),
-        planned_payments_currency=q2(planned_payments_currency),
-        planned_payments_rub=q2(planned_payments_rub),
-        planned_expenses_rub=q2(planned_expenses_rub),
+def _category(
+    total_currency: Decimal, payments: CategoryPayments, cbr_rate: Decimal
+) -> CategoryFinance:
+    """Курс категории: платежи по своим курсам + остаток по курсу ЦБ."""
+    total = q2(total_currency)
+    remaining = max(ZERO, total - payments.paid_currency)
+    rate = q6((payments.paid_rub + remaining * cbr_rate) / total) if total > 0 else ZERO
+    return CategoryFinance(
+        total_currency=total,
+        paid_currency=q2(payments.paid_currency),
+        paid_rub=q2(payments.paid_rub),
+        remaining_currency=q2(remaining),
+        rate=rate,
+        planned_currency=q2(payments.planned_currency),
+        planned_rub=q2(payments.planned_rub),
     )
 
 
-def calculate_item_cost(
-    finance: BatchFinance,
+def calculate_finance(
+    items: Sequence[ItemInput],
     *,
-    item_invoice_currency: Decimal,
-    item_quantity: Decimal,
-) -> tuple[Decimal, Decimal]:
-    """``(стоимость строки в рублях, себестоимость единицы)``.
+    cbr_rate: Decimal = ONE,
+    expenses_rub: Decimal = ZERO,
+    invoice: CategoryPayments | None = None,
+    risk: CategoryPayments | None = None,
+) -> BatchFinance:
+    """Себестоимость партии и каждой её строки по согласованной формуле.
 
-    Доля строки в инвойсе партии — база распределения доп.расходов и курса.
+    ``cbr_rate`` — курс ЦБ для незакрытых остатков; ``expenses_rub`` — общие
+    расходы партии, уже переведённые в рубли.
     """
-    if finance.final_cost_rub == 0 or finance.invoice_total_currency == 0:
-        return ZERO, ZERO
-    if item_quantity == 0 or item_invoice_currency == 0:
-        return ZERO, ZERO
+    rate = cbr_rate if cbr_rate > 0 else ONE
+    invoice_finance = _category(
+        sum((item.invoice_currency for item in items), ZERO), invoice or CategoryPayments(), rate
+    )
+    risk_finance = _category(
+        sum((item.risk_currency for item in items), ZERO), risk or CategoryPayments(), rate
+    )
+    full_total = invoice_finance.total_currency + risk_finance.total_currency
 
-    item_share = item_invoice_currency / finance.invoice_total_currency
-    item_total_rub = q2(finance.final_cost_rub * item_share)
-    unit_cost = q2(item_total_rub / item_quantity)
-    return item_total_rub, unit_cost
+    costs: list[ItemCost] = []
+    duty_rub = vat_rub = ZERO
+    for item in items:
+        duty_unit = item.unit_price_currency * item.duty_percent / HUNDRED
+        vat_unit = (item.unit_price_currency + duty_unit) * item.vat_percent / HUNDRED
+        base_unit_rub = (
+            item.unit_price_currency + duty_unit + vat_unit
+        ) * invoice_finance.rate + item.risk_unit_currency * risk_finance.rate
+        share = item.full_currency / full_total if full_total > 0 else ZERO
+        expenses_item_rub = q2(expenses_rub * share)
+        item_total_rub = q2(base_unit_rub * item.quantity + expenses_item_rub)
+        unit_cost = q2(item_total_rub / item.quantity) if item.quantity != 0 else ZERO
+
+        duty_item_rub = q2(duty_unit * item.quantity * invoice_finance.rate)
+        vat_item_rub = q2(vat_unit * item.quantity * invoice_finance.rate)
+        risk_item_rub = q2(item.risk_unit_currency * item.quantity * risk_finance.rate)
+        duty_rub += duty_item_rub
+        vat_rub += vat_item_rub
+        costs.append(
+            ItemCost(
+                unit_price_currency=item.unit_price_currency,
+                quantity=item.quantity,
+                duty_percent=item.duty_percent,
+                vat_percent=item.vat_percent,
+                risk_unit_currency=item.risk_unit_currency,
+                invoice_currency=item.invoice_currency,
+                risk_currency=item.risk_currency,
+                duty_rub=duty_item_rub,
+                vat_rub=vat_item_rub,
+                risk_rub=risk_item_rub,
+                expenses_rub=expenses_item_rub,
+                unit_cost=unit_cost,
+                item_total_rub=item_total_rub,
+            )
+        )
+
+    return BatchFinance(
+        cbr_rate=rate,
+        invoice=invoice_finance,
+        risk=risk_finance,
+        expenses_rub=q2(expenses_rub),
+        duty_rub=q2(duty_rub),
+        vat_rub=q2(vat_rub),
+        final_cost_rub=q2(sum((cost.item_total_rub for cost in costs), ZERO)),
+        items=tuple(costs),
+    )
 
 
-def expenses_totals(
-    expenses: Sequence[BatchExpense], *, today: date | None = None
-) -> tuple[Decimal, Decimal]:
-    """``(рублёвые платежи, план по рублёвым платежам)`` с учётом даты."""
-    current = today or date.today()
-    fact = planned = ZERO
-    for expense in expenses:
-        if expense.expense_date <= current:
-            fact += expense.amount_rub
-        else:
-            planned += expense.amount_rub
-    return q2(fact), q2(planned)
-
-
-def batch_expenses_rub(batch: Batch, *, today: date | None = None) -> Decimal:
-    """Сумма вступивших в силу рублёвых платежей партии."""
-    fact, _ = expenses_totals(batch.expenses, today=today)
-    return fact
-
-
-def batch_invoice_total_currency(batch: Batch) -> Decimal:
-    """Инвойсная стоимость партии: если не задана — сумма по строкам."""
-    if batch.total_invoice_value:
-        return q2(batch.total_invoice_value)
-    return q2(sum((item.total_invoice_currency for item in batch.items), ZERO))
-
-
-def payments_totals(
+def payments_by_category(
     payments: Sequence[BatchPayment], *, today: date | None = None
-) -> tuple[Decimal, Decimal, Decimal, Decimal]:
-    """``(оплачено валюта, оплачено ₽, план валюта, план ₽)``.
+) -> dict[str, CategoryPayments]:
+    """Платежи по категориям: ``invoice`` и ``risk``.
 
-    Платежи с датой в будущем попадают в «план» и в себестоимость не входят.
+    Платёж с будущей датой попадает в «план» и в себестоимость не входит.
     """
     current = today or date.today()
-    paid_currency = paid_rub = planned_currency = planned_rub = ZERO
+    totals: dict[str, dict[str, Decimal]] = {
+        CATEGORY_INVOICE: {
+            "paid_currency": ZERO,
+            "paid_rub": ZERO,
+            "planned_currency": ZERO,
+            "planned_rub": ZERO,
+        },
+        CATEGORY_RISK: {
+            "paid_currency": ZERO,
+            "paid_rub": ZERO,
+            "planned_currency": ZERO,
+            "planned_rub": ZERO,
+        },
+    }
     for payment in payments:
+        bucket = totals.get(payment.category, totals[CATEGORY_INVOICE])
         amount_rub = payment.amount_currency * payment.exchange_rate
-        if payment.payment_date <= current:
-            paid_currency += payment.amount_currency
-            paid_rub += amount_rub
+        prefix = "paid" if payment.payment_date <= current else "planned"
+        bucket[f"{prefix}_currency"] += payment.amount_currency
+        bucket[f"{prefix}_rub"] += amount_rub
+    return {key: CategoryPayments(**value) for key, value in totals.items()}
+
+
+def expenses_rub(
+    expenses: Sequence[BatchExpense], *, rates: Mapping[str, Decimal] | None = None
+) -> Decimal:
+    """Общие расходы партии в рублях.
+
+    Расход в рублях берётся как есть, расход в валюте — по курсу ЦБ на текущий
+    день (``rates``); если курса нет, валютный расход оценивается в ноль, чтобы
+    себестоимость не получила выдуманное число.
+    """
+    known = rates or {}
+    total = ZERO
+    for expense in expenses:
+        code = (expense.currency or "RUB").strip().upper()
+        if code == "RUB":
+            total += expense.amount_currency
         else:
-            planned_currency += payment.amount_currency
-            planned_rub += amount_rub
-    return q2(paid_currency), q2(paid_rub), q2(planned_currency), q2(planned_rub)
+            total += expense.amount_currency * known.get(code, ZERO)
+    return q2(total)
+
+
+def items_from_batch(batch: Batch) -> list[ItemInput]:
+    """Строки партии в виде входных данных расчёта."""
+    return [
+        ItemInput(
+            unit_price_currency=item.unit_price_currency,
+            quantity=item.quantity,
+            duty_percent=item.duty_percent,
+            vat_percent=item.vat_percent,
+            risk_unit_currency=item.risk_unit_currency,
+        )
+        for item in batch.items
+    ]
 
 
 def finance_for_batch(
@@ -187,23 +309,15 @@ def finance_for_batch(
     *,
     rate: Decimal | None = None,
     today: date | None = None,
+    expense_rates: Mapping[str, Decimal] | None = None,
 ) -> BatchFinance:
-    """Финансовый итог партии по строкам, платежам и расходам.
-
-    ``rate`` — курс для незакрытой части (последний доступный, обновляется сам).
-    В расчёт входят только платежи и расходы с наступившей датой.
-    """
-    paid_currency, paid_rub, planned_currency, planned_rub = payments_totals(
-        batch.payments, today=today
-    )
-    expenses_fact, expenses_planned = expenses_totals(batch.expenses, today=today)
-    return calculate_batch_finance(
-        invoice_total_currency=batch_invoice_total_currency(batch),
-        additional_expenses_rub=expenses_fact,
-        total_paid_currency=paid_currency,
-        total_paid_rub=paid_rub,
-        exchange_rate=rate if rate is not None else batch.current_exchange_rate,
-        planned_payments_currency=planned_currency,
-        planned_payments_rub=planned_rub,
-        planned_expenses_rub=expenses_planned,
+    """Финансовый итог партии по строкам, общим расходам и платежам."""
+    cbr_rate = rate if rate is not None else batch.current_exchange_rate
+    by_category = payments_by_category(batch.payments, today=today)
+    return calculate_finance(
+        items_from_batch(batch),
+        cbr_rate=cbr_rate if cbr_rate is not None else ONE,
+        expenses_rub=expenses_rub(batch.expenses, rates=expense_rates),
+        invoice=by_category[CATEGORY_INVOICE],
+        risk=by_category[CATEGORY_RISK],
     )

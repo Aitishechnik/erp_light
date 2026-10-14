@@ -45,6 +45,12 @@ BATCH_TYPES = ("purchase", "production")
 # Источник записи: выгрузка из 1С или ручной ввод.
 SOURCES = ("1c", "manual")
 
+# Категории валютных платежей: инвойс и рисковая надбавка закрываются отдельно.
+PAYMENT_CATEGORIES = ("invoice", "risk")
+
+# Валюты общих расходов: выбор только из этих двух.
+EXPENSE_CURRENCIES = ("RUB", "USD")
+
 
 class Product(Base):
     """Номенклатура: товар, материал, сырьё или готовая продукция.
@@ -84,12 +90,6 @@ class Batch(Base):
     supplier: Mapped[str | None] = mapped_column(
         String(255), nullable=True, comment="Наименование поставщика на момент поступления"
     )
-    total_invoice_value: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
-        nullable=False,
-        default=Decimal("0.00"),
-        comment="Общая инвойсная стоимость партии в валюте контракта",
-    )
     current_exchange_rate: Mapped[Decimal | None] = mapped_column(
         Numeric(15, 6),
         nullable=True,
@@ -113,7 +113,13 @@ class Batch(Base):
 
 
 class BatchItem(Base):
-    """Строка партии: товар, количество и инвойсная стоимость в валюте."""
+    """Строка партии: товар, количество, цена за единицу и надбавки.
+
+    Инвойсная стоимость строки не хранится: она всегда равна
+    ``unit_price_currency × quantity``. Пошлину и НДС считаем в валюте партии
+    (проценты от цены), Risk — отдельная валютная надбавка за единицу; в рубли
+    всё переводится по курсу своей категории (см. ``services/cost.py``).
+    """
 
     __tablename__ = "batch_items"
 
@@ -125,11 +131,29 @@ class BatchItem(Base):
         Uuid, ForeignKey("products.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False, default=Decimal("0"))
-    total_invoice_currency: Mapped[Decimal] = mapped_column(
-        Numeric(15, 2),
+    unit_price_currency: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
         nullable=False,
-        default=Decimal("0.00"),
-        comment="Инвойсная стоимость строки в валюте контракта",
+        default=Decimal("0.0000"),
+        comment="Стоимость единицы в валюте партии",
+    )
+    duty_percent: Mapped[Decimal] = mapped_column(
+        Numeric(9, 4),
+        nullable=False,
+        default=Decimal("0.0000"),
+        comment="Пошлина, % от валютной стоимости единицы",
+    )
+    vat_percent: Mapped[Decimal] = mapped_column(
+        Numeric(9, 4),
+        nullable=False,
+        default=Decimal("22.0000"),
+        comment="НДС, % от стоимости единицы с пошлиной",
+    )
+    risk_unit_currency: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+        default=Decimal("0.0000"),
+        comment="Risk за единицу в валюте партии",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -143,10 +167,11 @@ class BatchItem(Base):
 
 
 class BatchExpense(Base):
-    """Рублёвый платёж по партии (доставка, пошлина и т.п.).
+    """Общий расход на партию (доставка, пошлина и т.п.).
 
-    Как и валютный платёж, вступает в силу своей датой: будущий расход виден
-    как план, но в себестоимость пока не входит.
+    Даты у общего расхода нет: он всегда входит в себестоимость. Сумма хранится в
+    своей валюте (``RUB`` или ``USD``); рублёвая величина расхода в валюте считается
+    по курсу ЦБ на текущий день, поэтому меняется вместе с курсом.
     """
 
     __tablename__ = "batch_expenses"
@@ -155,10 +180,12 @@ class BatchExpense(Base):
     batch_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("batches.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    expense_date: Mapped[date] = mapped_column(
-        Date, nullable=False, server_default=func.current_date(), index=True
+    amount_currency: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2), nullable=False, comment="Сумма расхода в его валюте"
     )
-    amount_rub: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, default="RUB", comment="RUB или USD — только выбор"
+    )
     description: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
     created_at: Mapped[datetime] = mapped_column(
@@ -169,10 +196,11 @@ class BatchExpense(Base):
 
 
 class BatchPayment(Base):
-    """Валютный платёж по партии: закрывает инвойсную стоимость.
+    """Валютный платёж по партии: закрывает инвойс или Risk.
 
-    Курс фиксируется в момент платежа (вручную) и больше никогда не меняется —
-    поэтому уже сделанные платежи не пересчитываются при движении валюты.
+    Категория (``invoice`` или ``risk``) говорит, какой валютный долг закрывает
+    платёж. Курс фиксируется в момент платежа (вручную) и больше никогда не
+    меняется — поэтому уже сделанные платежи не пересчитываются при движении валюты.
     """
 
     __tablename__ = "batch_payments"
@@ -185,6 +213,9 @@ class BatchPayment(Base):
     amount_currency: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     exchange_rate: Mapped[Decimal] = mapped_column(
         Numeric(15, 6), nullable=False, comment="Курс платежа, зафиксирован вручную"
+    )
+    category: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="invoice", comment="invoice или risk"
     )
     comment: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

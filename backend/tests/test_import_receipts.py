@@ -146,7 +146,7 @@ def test_filled_receipt_is_not_touched(client: TestClient, login) -> None:
             "batch_number": "ИТ-5",
             "batch_date": "2026-10-08",
             "currency": "RUB",
-            "items": [{"product_code": "ТОВ1", "quantity": "5", "total_invoice_currency": "500"}],
+            "items": [{"product_code": "ТОВ1", "quantity": "5", "unit_price_currency": "100"}],
         },
     )
     assert created.status_code == 201, created.text
@@ -177,7 +177,7 @@ def test_draft_is_filled_and_then_skipped_by_reupload(client: TestClient) -> Non
             "batch_date": "2026-10-13",
             "currency": "RUB",
             "comment": "заполнено",
-            "items": [{"product_code": "ТОВ1", "quantity": "2", "total_invoice_currency": "200"}],
+            "items": [{"product_code": "ТОВ1", "quantity": "2", "unit_price_currency": "100"}],
         },
     )
     assert filled.status_code == 200, filled.text
@@ -228,7 +228,7 @@ def test_draft_can_be_saved_without_items_but_manual_receipt_cannot(
             "batch_number": "Р-2",
             "batch_date": "2026-10-08",
             "currency": "RUB",
-            "items": [{"product_code": "ТОВ2", "quantity": "1", "total_invoice_currency": "10"}],
+            "items": [{"product_code": "ТОВ2", "quantity": "1", "unit_price_currency": "10"}],
         },
     )
     batch_id = created.json()["id"]
@@ -309,4 +309,3 @@ def test_drafts_are_kept_in_database_with_source_1c(
     assert stored.source == "1c"
     assert stored.batch_type == "purchase"
     assert stored.supplier == "Фирма"
-    assert stored.total_invoice_value == 0

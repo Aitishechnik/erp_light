@@ -20,6 +20,7 @@ from app.services.batch_service import (
     batch_finance,
     create_batch,
     delete_batch,
+    expense_rates,
     latest_snapshots,
     load_batch,
     load_batches,
@@ -39,7 +40,9 @@ def _out(db: DbSession, batch: Batch) -> BatchOut:
     """Поступление с себестоимостью: платежи по своим курсам + текущий курс остатка."""
     snaps = latest_snapshots(db, [item.id for item in batch.items])
     finance, rate_row = batch_finance(db, batch)
-    return serialize_batch(batch, snaps, finance=finance, rate_row=rate_row)
+    return serialize_batch(
+        batch, snaps, finance=finance, rate_row=rate_row, rates=expense_rates(db, batch)
+    )
 
 
 def _require_items(payload: BatchCreate, batch: Batch | None = None) -> None:

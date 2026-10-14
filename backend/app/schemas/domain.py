@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -38,33 +39,47 @@ class ProductUpdate(BaseModel):
 
 
 class BatchExpenseCreate(BaseModel):
-    expense_date: date | None = Field(
-        default=None, description="Дата платежа; будущая дата — это план, в расчёт пока не идёт"
-    )
-    amount_rub: Decimal = Field(description="Сумма расхода в рублях, входит в себестоимость")
+    """Общий расход на партию: название, валюта (только руб./usd) и сумма."""
+
     description: str = ""
+    currency: Literal["RUB", "USD"] = Field(
+        default="RUB", description="Валюта расхода: только RUB или USD"
+    )
+    amount_currency: Decimal = Field(ge=0, description="Сумма расхода в его валюте")
 
 
 class BatchItemCreate(BaseModel):
+    """Строка партии: товар, количество, цена за единицу и надбавки."""
+
     product_code: str = Field(min_length=1, max_length=64)
     product_name: str | None = None
     product_kind: str = "goods"
     unit: str = "шт"
     quantity: Decimal = Field(gt=0)
-    total_invoice_currency: Decimal = Field(ge=0)
+    unit_price_currency: Decimal = Field(
+        default=Decimal("0"), ge=0, description="Стоимость единицы в валюте партии"
+    )
+    duty_percent: Decimal = Field(default=Decimal("0"), ge=0, le=100, description="Пошлина, %")
+    vat_percent: Decimal = Field(default=Decimal("22"), ge=0, le=100, description="НДС, %")
+    risk_unit_currency: Decimal = Field(
+        default=Decimal("0"), ge=0, description="Risk за единицу в валюте партии"
+    )
 
 
 class BatchPaymentCreate(BaseModel):
-    """Валютный платёж: закрывает инвойсную стоимость, курс фиксируется вручную."""
+    """Валютный платёж: закрывает инвойс или Risk, курс фиксируется вручную."""
 
     payment_date: date
     amount_currency: Decimal = Field(gt=0)
     exchange_rate: Decimal = Field(gt=0, description="Курс платежа, фиксируется навсегда")
+    category: Literal["invoice", "risk"] = Field(
+        default="invoice", description="Какой валютный долг закрывает платёж"
+    )
     comment: str | None = Field(default=None, max_length=255)
 
 
 class BatchCreate(BaseModel):
-    """Поступление партии: шапка, строки и доп. расходы.
+    """Поступление партии: шапка, строки, общие расходы и валютные платежи.
 
     Строки может не быть только у черновика из выгрузки 1С — правила проверяет API
     (`batches.post_batch` / `batches.put_batch`), а не схема.
@@ -77,7 +92,6 @@ class BatchCreate(BaseModel):
     supplier: str | None = Field(
         default=None, description="Наименование, если поставщик не из справочника"
     )
-    total_invoice_value: Decimal | None = Field(default=None, ge=0)
     current_exchange_rate: Decimal | None = Field(
         default=None, gt=0, description="Если не указан, берётся курс ЦБ на дату"
     )
@@ -85,10 +99,10 @@ class BatchCreate(BaseModel):
     comment: str | None = None
     items: list[BatchItemCreate] = Field(default_factory=list)
     payments: list[BatchPaymentCreate] = Field(
-        default=[], description="Валютные платежи по инвойсу"
+        default=[], description="Валютные платежи по инвойсу и по Risk"
     )
     expenses: list[BatchExpenseCreate] = Field(
-        default=[], description="Рублёвые платежи (доп. расходы)"
+        default=[], description="Общие расходы на партию (руб. или usd)"
     )
 
 
@@ -98,37 +112,43 @@ class BatchPaymentOut(BaseModel):
     amount_currency: Decimal
     exchange_rate: Decimal
     amount_rub: Decimal
+    category: str
     comment: str | None
 
 
 class BatchExpenseOut(BaseModel):
     id: uuid.UUID
-    expense_date: date
-    amount_rub: Decimal
     description: str
-    is_planned: bool = Field(description="Дата ещё не наступила — пока только план")
+    currency: str
+    amount_currency: Decimal
+    amount_rub: Decimal = Field(description="Сумма в рублях: для usd — по курсу ЦБ на сегодня")
 
 
 class BatchFinanceOut(BaseModel):
+    """Итог партии: курсы категорий, расходы, пошлины и себестоимость."""
+
     invoice_total_currency: Decimal
-    total_paid_currency: Decimal
-    total_paid_rub: Decimal
-    additional_expenses_rub: Decimal
-    remaining_payment_currency: Decimal
-    exchange_rate: Decimal = Field(description="Курс, по которому оценена незакрытая часть")
+    risk_total_currency: Decimal
+    exchange_rate: Decimal = Field(description="Курс ЦБ, по которому оценены незакрытые остатки")
     rate_date: date | None = Field(default=None, description="Дата курса ЦБ")
     rate_updated_at: datetime | None = Field(default=None, description="Когда курс обновлялся")
-    planned_payments_currency: Decimal = Field(
-        default=Decimal("0"), description="Валюта платежей с будущей датой (план)"
-    )
-    planned_payments_rub: Decimal = Field(
-        default=Decimal("0"), description="Рубли по будущим валютным платежам (план)"
-    )
-    planned_expenses_rub: Decimal = Field(
-        default=Decimal("0"), description="Рублёвые платежи с будущей датой (план)"
-    )
+    invoice_paid_currency: Decimal
+    invoice_paid_rub: Decimal
+    invoice_remaining_currency: Decimal
+    invoice_rate: Decimal = Field(description="Фактический курс инвойса: платежи + остаток по ЦБ")
+    risk_paid_currency: Decimal
+    risk_paid_rub: Decimal
+    risk_remaining_currency: Decimal
+    risk_rate: Decimal = Field(description="Фактический курс Risk")
+    planned_invoice_currency: Decimal = Field(default=Decimal("0"))
+    planned_invoice_rub: Decimal = Field(default=Decimal("0"))
+    planned_risk_currency: Decimal = Field(default=Decimal("0"))
+    planned_risk_rub: Decimal = Field(default=Decimal("0"))
+    expenses_rub: Decimal = Field(default=Decimal("0"), description="Общие расходы, ₽")
+    duty_rub: Decimal = Field(default=Decimal("0"), description="Пошлина по строкам, ₽")
+    vat_rub: Decimal = Field(default=Decimal("0"), description="НДС по строкам, ₽")
     effective_rate: Decimal = Field(
-        default=Decimal("0"), description="Фактический курс партии: себестоимость / инвойс"
+        default=Decimal("0"), description="Курс инвойса — он виден в списке поступлений"
     )
     final_cost_rub: Decimal
 
@@ -140,7 +160,16 @@ class BatchItemOut(BaseModel):
     product_kind: str
     unit: str
     quantity: Decimal
-    total_invoice_currency: Decimal
+    unit_price_currency: Decimal
+    duty_percent: Decimal
+    vat_percent: Decimal
+    risk_unit_currency: Decimal
+    invoice_currency: Decimal
+    risk_currency: Decimal
+    duty_rub: Decimal
+    vat_rub: Decimal
+    risk_rub: Decimal
+    expenses_rub: Decimal
     item_total_rub: Decimal
     unit_cost: Decimal
     quantity_on_hand: Decimal

@@ -166,8 +166,9 @@ def test_draft_gets_items_from_file(client: TestClient, db_session: Session) -> 
     assert item["product_code"] == "ТОВ395561"
     assert item["product_name"] == "Грецкий орех сушеный, вес"
     assert item["quantity"] == "20000.000"
-    # Финансовая часть не трогается: суммы строк и себестоимость нулевые.
-    assert item["total_invoice_currency"] == "0.00"
+    # Финансовая часть не трогается: цена строки нулевая, себестоимость нулевая.
+    assert item["unit_price_currency"] == "0.0000"
+    assert item["invoice_currency"] == "0.00"
     assert batch["finance"]["invoice_total_currency"] == "0.00"
     assert batch["finance"]["final_cost_rub"] == "0.00"
 
@@ -335,7 +336,7 @@ def test_payments_block_replacement(client: TestClient) -> None:
             "batch_number": "Р-1",
             "batch_date": "2026-10-08",
             "currency": "RUB",
-            "items": [{"product_code": "ТОВ1", "quantity": "5", "total_invoice_currency": "500"}],
+            "items": [{"product_code": "ТОВ1", "quantity": "5", "unit_price_currency": "100"}],
             "payments": [
                 {
                     "payment_date": "2026-10-08",
