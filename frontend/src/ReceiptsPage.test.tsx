@@ -51,6 +51,8 @@ function batch(overrides: Partial<Batch> = {}): Batch {
     source: 'manual',
     comment: null,
     created_at: '2026-10-08T10:00:00Z',
+    customs_date: null,
+    customs_rate: null,
     finance: {
       invoice_total_currency: '1000.00',
       risk_total_currency: '0.00',
@@ -99,6 +101,8 @@ function batch(overrides: Partial<Batch> = {}): Batch {
         duty_percent: '0.0000',
         vat_percent: '0.0000',
         risk_unit_currency: '0.0000',
+        duty_fixed_rub: null,
+        vat_fixed_rub: null,
         invoice_currency: '1000.00',
         risk_currency: '0.00',
         duty_rub: '0.00',
@@ -385,6 +389,8 @@ describe('ReceiptsPage — план и лимит', () => {
           duty_percent: '5.0000',
           vat_percent: '22.0000',
           risk_unit_currency: '3.0000',
+          duty_fixed_rub: null,
+          vat_fixed_rub: null,
           invoice_currency: '124000.00',
           risk_currency: '60000.00',
           duty_rub: '0.00',
@@ -568,6 +574,8 @@ describe('ReceiptsPage — позиции из файла «Партия»', () 
           duty_percent: '0.0000',
           vat_percent: '22.0000',
           risk_unit_currency: '0.0000',
+          duty_fixed_rub: null,
+          vat_fixed_rub: null,
           invoice_currency: '0.00',
           risk_currency: '0.00',
           duty_rub: '0.00',
@@ -688,5 +696,165 @@ describe('ReceiptsPage — позиции из файла «Партия»', () 
     await user.click(screen.getByRole('button', { name: 'Загрузить позиции из 1С' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('не найдена')
+  })
+})
+
+/** Партия с пошлиной и НДС в строках — на ней видно фиксацию таможни. */
+function taxedBatch(overrides: Partial<Batch> = {}): Batch {
+  const [item] = batch().items
+  if (!item) throw new Error('у партии нет строк')
+  return batch({
+    items: [{ ...item, duty_percent: '5.0000', vat_percent: '22.0000' }],
+    ...overrides,
+  })
+}
+
+/** Растаможенная партия: проценты заменены фиксом, курс таможни 80. */
+function clearedBatch(overrides: Partial<Batch> = {}): Batch {
+  const base = taxedBatch()
+  const [item] = base.items
+  if (!item) throw new Error('у партии нет строк')
+  return taxedBatch({
+    customs_date: '2026-10-20',
+    customs_rate: '80',
+    items: [{ ...item, duty_fixed_rub: '4100.00', vat_fixed_rub: '18480.00' }],
+    finance: { ...base.finance, duty_rub: '4100.00', vat_rub: '18480.00' },
+    ...overrides,
+  })
+}
+
+const DIRECTOR_USER: SessionUser = {
+  id: 'u2',
+  login: 'purchase',
+  full_name: 'Директор по закупкам',
+  role: 'purchase_director',
+  role_title: 'Директор по закупкам',
+}
+
+/** Тело запроса по фрагменту URL: мок пишет все вызовы fetch. */
+function callInit(fragment: string): { method?: string; body?: string } {
+  const mock = fetch as unknown as {
+    mock: { calls: [RequestInfo | URL, { method?: string; body?: unknown }?][] }
+  }
+  const call = mock.mock.calls.find(([input]) => String(input).includes(fragment))
+  return { method: call?.[1]?.method, body: String(call?.[1]?.body ?? '') }
+}
+
+describe('ReceiptsPage — растаможка партии', () => {
+  it('перед фиксацией показывает курс и суммы и шлёт правку', async () => {
+    const user = userEvent.setup()
+    mockApi({
+      '/api/v1/batches/b1/customs': { body: clearedBatch() },
+      ...routes({ '/api/v1/batches': { body: [taxedBatch()] } }),
+    })
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    await user.click(screen.getByTestId('customs-start'))
+
+    // Курс подставляется из ЦБ на дату растаможки (в моке — 90,5).
+    await waitFor(() => {
+      expect(screen.getByLabelText('Курс растаможки')).toHaveValue('90.5')
+    })
+    // Пошлина 5 % × 10 шт × 90,5 = 4 525 ₽, НДС 23,1 $ × 10 × 90,5 = 20 905,50 ₽.
+    expect(screen.getByTestId('customs-duty-total')).toHaveTextContent('4 525,00')
+    expect(screen.getByTestId('customs-vat-total')).toHaveTextContent('20 905,50')
+
+    // Курс правят руками — суммы пересчитываются по строкам.
+    await user.clear(screen.getByLabelText('Курс растаможки'))
+    await user.type(screen.getByLabelText('Курс растаможки'), '80')
+    expect(screen.getByTestId('customs-duty-total')).toHaveTextContent('4 000,00')
+    expect(screen.getByTestId('customs-vat-total')).toHaveTextContent('18 480,00')
+
+    // И сам итог тоже правят: в таможне бывает своя сумма.
+    await user.clear(screen.getByLabelText('Пошлина партии, ₽'))
+    await user.type(screen.getByLabelText('Пошлина партии, ₽'), '4100')
+    expect(screen.getByTestId('customs-sum')).toHaveTextContent('22 580,00')
+
+    await user.click(screen.getByTestId('customs-confirm'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('customs-badge')).toBeInTheDocument()
+    })
+    const sent = JSON.parse(callInit('/customs').body ?? '{}') as Record<string, string>
+    expect(callInit('/customs').method).toBe('POST')
+    expect(sent.rate).toBe('80')
+    expect(sent.duty_rub).toBe('4100')
+    expect(sent.vat_rub).toBe('18480')
+
+    // Карточка перешла в режим фикса: проценты заменены рублями.
+    expect(screen.getByTestId('item-duty-i0')).toHaveTextContent('4 100,00')
+    expect(screen.getByTestId('item-vat-i0')).toHaveTextContent('18 480,00')
+    expect(screen.queryByLabelText('Пошлина i0')).toBeNull()
+    expect(screen.queryByLabelText('НДС i0')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Добавить строку' })).toBeNull()
+    // Строк в таблице не убрать: «Убрать» остался только у платежей и расходов.
+    expect(
+      within(screen.getByTestId('receipt-items')).queryByRole('button', { name: 'Убрать' }),
+    ).toBeNull()
+
+    // Живой расчёт берёт фикс: 1000 $ × 84 + 4 100 + 18 480 = 106 580 ₽.
+    expect(screen.getByTestId('receipt-total')).toHaveTextContent('106 580,00')
+    expect(screen.getByTestId('unit-cost-i0')).toHaveTextContent('10 658,00')
+  })
+
+  it('отменить растаможку может только директор по закупкам', async () => {
+    const user = userEvent.setup()
+    mockApi({
+      '/api/v1/batches/b1/customs': { body: taxedBatch() },
+      ...routes({ '/api/v1/batches': { body: [clearedBatch()] } }),
+    })
+    render(<ReceiptsPage user={IMPORT_USER} />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    expect(screen.getByTestId('customs-badge')).toBeInTheDocument()
+    // Менеджер по закупкам видит статус, но не отменяет фиксацию.
+    expect(screen.queryByTestId('customs-cancel')).toBeNull()
+    expect(screen.queryByTestId('customs-start')).toBeNull()
+  })
+
+  it('директор снимает фиксацию — проценты возвращаются в строки', async () => {
+    const user = userEvent.setup()
+    mockApi({
+      '/api/v1/batches/b1/customs': { body: taxedBatch() },
+      ...routes({ '/api/v1/batches': { body: [clearedBatch()] } }),
+    })
+    render(<ReceiptsPage user={DIRECTOR_USER} />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    await user.click(screen.getByTestId('customs-cancel'))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('customs-badge')).toBeNull()
+    })
+    expect(callInit('/customs').method).toBe('DELETE')
+    expect(screen.getByLabelText('Пошлина i0')).toHaveValue('5')
+    expect(screen.getByLabelText('НДС i0')).toHaveValue('22')
+  })
+
+  it('несохранённое поступление растаможить нельзя', async () => {
+    const user = userEvent.setup()
+    mockApi(routes())
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(screen.getByRole('button', { name: 'Добавить поступление' }))
+
+    expect(screen.getByTestId('customs-start')).toBeDisabled()
+    expect(screen.getByTestId('customs-need-save')).toHaveTextContent(
+      'после сохранения поступления',
+    )
+  })
+
+  it('в списке за день и календаре видно, что партия растаможена', async () => {
+    mockApi(routes({ '/api/v1/batches': { body: [clearedBatch()] } }))
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    expect(screen.getByTestId('clearance-badge')).toBeInTheDocument()
+    expect(screen.getByTestId(`day-cleared-${TODAY}`)).toHaveTextContent('растаможено: 1')
   })
 })

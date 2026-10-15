@@ -117,6 +117,10 @@ export type BatchItem = {
   duty_percent: string
   vat_percent: string
   risk_unit_currency: string
+  /** Пошлина строки, ₽: фикс после растаможки, до неё — null. */
+  duty_fixed_rub: string | null
+  /** НДС строки, ₽: фикс после растаможки, до неё — null. */
+  vat_fixed_rub: string | null
   invoice_currency: string
   risk_currency: string
   duty_rub: string
@@ -183,6 +187,10 @@ export type Batch = {
   source: string
   comment: string | null
   created_at: string
+  /** Дата растаможки; null — партия ещё не растаможена. */
+  customs_date: string | null
+  /** Курс, по которому зафиксированы пошлина и НДС. */
+  customs_rate: string | null
   finance: BatchFinance
   payments: BatchPayment[]
   expenses: BatchExpense[]
@@ -414,6 +422,26 @@ export function updateBatch(batchId: string, payload: BatchIn): Promise<Batch> {
 
 export function deleteBatch(batchId: string): Promise<void> {
   return request<void>(`/api/v1/batches/${batchId}`, { method: 'DELETE' })
+}
+
+/** Растаможка: дата, курс фиксации и (необязательно) правка итогов вручную. */
+export type CustomsIn = {
+  customs_date: string
+  rate: string
+  duty_rub?: string | null
+  vat_rub?: string | null
+}
+
+export function applyCustoms(batchId: string, payload: CustomsIn): Promise<Batch> {
+  return request<Batch>(`/api/v1/batches/${batchId}/customs`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+/** Отмена растаможки: проценты пошлины и НДС возвращаются в строки. */
+export function cancelCustoms(batchId: string): Promise<Batch> {
+  return request<Batch>(`/api/v1/batches/${batchId}/customs`, { method: 'DELETE' })
 }
 
 /** Курс валюты: без даты — последний доступный (он же для незакрытой части). */

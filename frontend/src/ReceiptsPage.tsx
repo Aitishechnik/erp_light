@@ -1,8 +1,10 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  applyCustoms,
   type Batch,
   type BatchIn,
   type Counterparty,
+  cancelCustoms,
   createBatch,
   deleteBatch,
   type ExpenseCurrency,
@@ -43,6 +45,10 @@ type ItemDraft = {
   vat: string
   /** Risk за единицу в валюте партии. */
   risk: string
+  /** Пошлина строки, ₽: фикс после растаможки (вместо процента). */
+  dutyRub: string
+  /** НДС строки, ₽: фикс после растаможки (вместо процента). */
+  vatRub: string
 }
 
 /** Ключ сравнения: регистр, «ё» и лишние пробелы не важны. */
@@ -93,6 +99,21 @@ type Draft = {
   expenses: ExpenseDraft[]
   /** Черновик из выгрузки 1С: позиций ещё нет, сохранять без них можно. */
   isDraft: boolean
+  /** Дата растаможки; пусто — партия не растаможена. */
+  customsDate: string
+  /** Курс, по которому зафиксированы пошлина и НДС. */
+  customsRate: string
+}
+
+/** Черновик окна подтверждения растаможки: дата, курс и правимые итоги. */
+type CustomsDraft = {
+  date: string
+  rate: string
+  /** Пошлина партии, ₽ — считается по строкам, но правится вручную. */
+  duty: string
+  /** НДС партии, ₽ — так же. */
+  vat: string
+  hint: string | null
 }
 
 const WEEKDAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс']
@@ -260,21 +281,35 @@ function liveCost(draft: Draft, usdRate: number | null): LiveCost {
   let dutyRub = 0
   let vatRub = 0
   const fullTotal = invoiceTotal + riskTotal
+  // Растаможенная партия: пошлина и НДС — фикс в рублях, курс их не трогает.
+  const cleared = draft.customsDate !== ''
   for (const item of draft.items) {
     const row = rows.find((candidate) => candidate.key === item.key)
     const quantity = row?.quantity ?? 0
     const price = row?.price ?? 0
     const riskUnit = row?.riskUnit ?? 0
-    const dutyUnit = (price * number(item.duty)) / 100
-    const vatUnit = ((price + dutyUnit) * number(item.vat)) / 100
-    const baseUnit = (price + dutyUnit + vatUnit) * invoice.rate + riskUnit * risk.rate
     const share = fullTotal > 0 ? ((row?.invoice ?? 0) + (row?.risk ?? 0)) / fullTotal : 0
     // Сервер округляет долю расходов и сумму строки до копейки — повторяем,
     // чтобы живой расчёт совпадал с сохранённым.
     const expensesItem = round2(expensesRub * share)
-    const rowTotal = round2(baseUnit * quantity + expensesItem)
-    dutyRub += dutyUnit * quantity * invoice.rate
-    vatRub += vatUnit * quantity * invoice.rate
+    let rowTotal: number
+    if (cleared) {
+      // Как на сервере: товар по курсу инвойса, Risk по своему, таможня — фиксом.
+      const dutyItem = number(item.dutyRub)
+      const vatItem = number(item.vatRub)
+      const goodsRub = round2(round2(price * quantity) * invoice.rate)
+      const riskRub = round2(round2(riskUnit * quantity) * risk.rate)
+      rowTotal = round2(goodsRub + dutyItem + vatItem + riskRub + expensesItem)
+      dutyRub += dutyItem
+      vatRub += vatItem
+    } else {
+      const dutyUnit = (price * number(item.duty)) / 100
+      const vatUnit = ((price + dutyUnit) * number(item.vat)) / 100
+      const baseUnit = (price + dutyUnit + vatUnit) * invoice.rate + riskUnit * risk.rate
+      rowTotal = round2(baseUnit * quantity + expensesItem)
+      dutyRub += dutyUnit * quantity * invoice.rate
+      vatRub += vatUnit * quantity * invoice.rate
+    }
     itemTotal[item.key] = rowTotal
     unit[item.key] = quantity > 0 ? round2(rowTotal / quantity) : 0
   }
@@ -326,6 +361,8 @@ function draftFrom(batch: Batch): Draft {
       duty: trim(item.duty_percent),
       vat: trim(item.vat_percent),
       risk: trim(item.risk_unit_currency),
+      dutyRub: item.duty_fixed_rub === null ? '' : trim(item.duty_fixed_rub),
+      vatRub: item.vat_fixed_rub === null ? '' : trim(item.vat_fixed_rub),
     })),
     payments: batch.payments.map((payment, index) => ({
       key: `p${index}`,
@@ -342,6 +379,8 @@ function draftFrom(batch: Batch): Draft {
       amount: trim(expense.amount_currency),
     })),
     isDraft,
+    customsDate: batch.customs_date ?? '',
+    customsRate: batch.customs_rate === null ? '' : trim(batch.customs_rate),
   }
 }
 
@@ -365,11 +404,15 @@ function emptyDraft(day: string): Draft {
         duty: '0',
         vat: '22',
         risk: '0',
+        dutyRub: '',
+        vatRub: '',
       },
     ],
     payments: [],
     expenses: [],
     isDraft: false,
+    customsDate: '',
+    customsRate: '',
   }
 }
 
@@ -386,6 +429,8 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   const [itemsHint, setItemsHint] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  /** Окно подтверждения растаможки: дата, курс и правимые итоги. */
+  const [customs, setCustoms] = useState<CustomsDraft | null>(null)
   /** Курс ЦБ на сегодня для расходов в usd: без даты — последний доступный. */
   const [usdRate, setUsdRate] = useState<string | null>(null)
   const itemsInput = useRef<HTMLInputElement>(null)
@@ -394,6 +439,8 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   const keyCounter = useRef(1)
   const nextKey = (prefix: string) => `${prefix}new${keyCounter.current++}`
   const mayLoadItems = !user || ITEM_IMPORT_ROLES.includes(user.role)
+  // Отмена растаможки — директору по закупкам (как решено в контракте, §4).
+  const mayCancelCustoms = !user || user.role === 'purchase_director'
 
   const reload = useCallback(async () => {
     const first = `${month}-01`
@@ -454,6 +501,8 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   const dayBatches = byDay.get(day) ?? []
   const cost = draft ? liveCost(draft, usdRate === null ? null : number(usdRate)) : null
   const hasRisk = (cost?.risk.total ?? 0) > 0
+  /** Партия растаможена: пошлина и НДС — фикс в рублях, строки только для чтения. */
+  const cleared = (draft?.customsDate ?? '') !== ''
 
   const shiftMonth = (delta: number) => {
     const base = monthStart(month)
@@ -468,6 +517,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
     setError(null)
     setItemsFile(null)
     setItemsHint(null)
+    setCustoms(null)
     setDraft(emptyDraft(target))
   }
 
@@ -476,6 +526,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
     setError(null)
     setItemsFile(null)
     setItemsHint(null)
+    setCustoms(null)
     setDraft(draftFrom(batch))
   }
 
@@ -518,6 +569,133 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
       )
     } catch (err) {
       setRateHint(errorMessage(err))
+    }
+  }
+
+  /**
+   * Итоги растаможки по строкам: пошлина и НДС партии в рублях по курсу фиксации.
+   * Округление как на сервере — валютная сумма строки, потом умножение на курс.
+   */
+  const customsTotals = (source: Draft, rate: number): { duty: number; vat: number } => {
+    let duty = 0
+    let vat = 0
+    for (const item of source.items) {
+      const quantity = number(item.quantity)
+      const price = number(item.price)
+      const dutyUnit = (price * number(item.duty)) / 100
+      const vatUnit = ((price + dutyUnit) * number(item.vat)) / 100
+      duty += round2(round2(dutyUnit * quantity) * rate)
+      vat += round2(round2(vatUnit * quantity) * rate)
+    }
+    return { duty: round2(duty), vat: round2(vat) }
+  }
+
+  const batchCurrencyRate = (source: Draft) =>
+    source.currency.trim().toUpperCase() === 'RUB' ? 1 : number(source.rate) || 1
+
+  /** Открыть окно растаможки: дата — сегодня, курс — ЦБ на эту дату (если доступен). */
+  const openCustoms = async () => {
+    if (!draft?.id) return
+    const start = iso(new Date())
+    const fallbackRate = batchCurrencyRate(draft)
+    const totals = customsTotals(draft, fallbackRate)
+    setError(null)
+    setCustoms({
+      date: start,
+      rate: trim(String(fallbackRate)),
+      duty: String(totals.duty),
+      vat: String(totals.vat),
+      hint: null,
+    })
+    try {
+      const row = await fetchRate(draft.currency.trim().toUpperCase() || 'RUB', start)
+      const rate = number(row.rate) || 1
+      const cbr = customsTotals(draft, rate)
+      setCustoms((current) =>
+        current === null
+          ? current
+          : {
+              ...current,
+              rate: trim(row.rate),
+              duty: String(cbr.duty),
+              vat: String(cbr.vat),
+              hint:
+                row.source === 'base'
+                  ? 'Рубль — курс 1'
+                  : `Курс ЦБ на ${start}: ${trim(row.rate)} ₽ за 1 ${row.code}`,
+            },
+      )
+    } catch (err) {
+      setCustoms((current) =>
+        current === null
+          ? current
+          : { ...current, hint: `${errorMessage(err)} — введите курс вручную` },
+      )
+    }
+  }
+
+  /** Курс в окне растаможки правят руками — итоги пересчитываем по строкам. */
+  const changeCustomsRate = (value: string) => {
+    if (!draft || !customs) return
+    const totals = customsTotals(draft, number(value))
+    setCustoms({ ...customs, rate: value, duty: String(totals.duty), vat: String(totals.vat) })
+  }
+
+  /** Кнопка «Курс ЦБ на дату»: запросить курс выбранного дня и пересчитать итоги. */
+  const refillCustomsRate = async () => {
+    if (!draft || !customs) return
+    try {
+      const row = await fetchRate(draft.currency.trim().toUpperCase() || 'RUB', customs.date)
+      const rate = number(row.rate) || 1
+      const totals = customsTotals(draft, rate)
+      setCustoms({
+        ...customs,
+        rate: trim(row.rate),
+        duty: String(totals.duty),
+        vat: String(totals.vat),
+        hint:
+          row.source === 'base'
+            ? 'Рубль — курс 1'
+            : `Курс ЦБ на ${customs.date}: ${trim(row.rate)} ₽ за 1 ${row.code}`,
+      })
+    } catch (err) {
+      setCustoms({ ...customs, hint: `${errorMessage(err)} — введите курс вручную` })
+    }
+  }
+
+  const submitCustoms = async () => {
+    if (!draft?.id || !customs) return
+    setBusy(true)
+    setError(null)
+    try {
+      const batch = await applyCustoms(draft.id, {
+        customs_date: customs.date,
+        rate: customs.rate.replace(',', '.') || '0',
+        duty_rub: customs.duty.replace(',', '.') || '0',
+        vat_rub: customs.vat.replace(',', '.') || '0',
+      })
+      setDraft(draftFrom(batch))
+      setCustoms(null)
+      await reload()
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const dropCustoms = async () => {
+    if (!draft?.id) return
+    setBusy(true)
+    setError(null)
+    try {
+      const batch = await cancelCustoms(draft.id)
+      setDraft(draftFrom(batch))
+      await reload()
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -652,6 +830,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                   (sum, batch) => sum + Number(batch.finance.final_cost_rub),
                   0,
                 )
+                const clearedCount = rows.filter((batch) => batch.customs_date).length
                 return (
                   <td
                     key={cell.date}
@@ -673,6 +852,14 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                       {rows.length > 0 ? (
                         <>
                           <span className="badge status-filling">поступлений: {rows.length}</span>
+                          {clearedCount > 0 ? (
+                            <span
+                              className="badge status-clearance"
+                              data-testid={`day-cleared-${cell.date}`}
+                            >
+                              растаможено: {clearedCount}
+                            </span>
+                          ) : null}
                           {/* У черновиков из 1С позиций ещё нет: нулевая себестоимость — не итог дня. */}
                           {total > 0 ? (
                             <span className="calendar-sum">{formatMoney(String(total))} ₽</span>
@@ -725,6 +912,16 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                       <span className="badge status-draft" data-testid="draft-badge">
                         {' '}
                         черновик
+                      </span>
+                    ) : null}
+                    {batch.customs_date ? (
+                      <span
+                        className="badge status-clearance"
+                        data-testid="clearance-badge"
+                        title={`Растаможена ${batch.customs_date}`}
+                      >
+                        {' '}
+                        растаможена
                       </span>
                     ) : null}
                   </td>
@@ -876,10 +1073,10 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                   Кол-во
                 </th>
                 <th scope="col" className="num">
-                  Пошлина, %
+                  Пошлина, {cleared ? '₽' : '%'}
                 </th>
                 <th scope="col" className="num">
-                  НДС, %
+                  НДС, {cleared ? '₽' : '%'}
                 </th>
                 <th scope="col" className="num">
                   Risk, {currencyLabel(draft.currency)}
@@ -897,110 +1094,146 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
               {draft.items.map((item) => (
                 <tr key={item.key}>
                   <td>
-                    <input
-                      aria-label={`Товар ${item.key}`}
-                      list="receipt-products"
-                      placeholder="название товара"
-                      value={item.title}
-                      onChange={(event) => {
-                        // В поле — название; код под полем всегда тот, что уйдёт на сервер.
-                        const title = event.target.value
-                        const found = findProduct(products, title)
-                        setDraft({
-                          ...draft,
-                          items: draft.items.map((row) =>
-                            row.key === item.key ? { ...row, title, code: found?.code ?? '' } : row,
-                          ),
-                        })
-                      }}
-                    />
-                    {item.code ? (
-                      <span className="unit" data-testid={`product-code-${item.key}`}>
-                        код {item.code}
-                      </span>
-                    ) : item.title.trim() ? (
-                      <span
-                        className="unit product-missing"
-                        data-testid={`product-missing-${item.key}`}
-                      >
-                        нет в справочнике — строка не сохранится
-                      </span>
-                    ) : null}
+                    {cleared ? (
+                      <>
+                        <span data-testid={`item-title-${item.key}`}>{item.title}</span>
+                        {item.code ? (
+                          <span className="unit" data-testid={`product-code-${item.key}`}>
+                            код {item.code}
+                          </span>
+                        ) : null}
+                      </>
+                    ) : (
+                      <>
+                        <input
+                          aria-label={`Товар ${item.key}`}
+                          list="receipt-products"
+                          placeholder="название товара"
+                          value={item.title}
+                          onChange={(event) => {
+                            // В поле — название; код под полем всегда тот, что уйдёт на сервер.
+                            const title = event.target.value
+                            const found = findProduct(products, title)
+                            setDraft({
+                              ...draft,
+                              items: draft.items.map((row) =>
+                                row.key === item.key
+                                  ? { ...row, title, code: found?.code ?? '' }
+                                  : row,
+                              ),
+                            })
+                          }}
+                        />
+                        {item.code ? (
+                          <span className="unit" data-testid={`product-code-${item.key}`}>
+                            код {item.code}
+                          </span>
+                        ) : item.title.trim() ? (
+                          <span
+                            className="unit product-missing"
+                            data-testid={`product-missing-${item.key}`}
+                          >
+                            нет в справочнике — строка не сохранится
+                          </span>
+                        ) : null}
+                      </>
+                    )}
                   </td>
                   <td className="num">
-                    <input
-                      className="cell"
-                      aria-label={`Стоимость за ед. ${item.key}`}
-                      value={item.price}
-                      onChange={(event) =>
-                        setDraft({
-                          ...draft,
-                          items: draft.items.map((row) =>
-                            row.key === item.key ? { ...row, price: event.target.value } : row,
-                          ),
-                        })
-                      }
-                    />
+                    {cleared ? (
+                      <span data-testid={`item-price-${item.key}`}>{item.price}</span>
+                    ) : (
+                      <input
+                        className="cell"
+                        aria-label={`Стоимость за ед. ${item.key}`}
+                        value={item.price}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            items: draft.items.map((row) =>
+                              row.key === item.key ? { ...row, price: event.target.value } : row,
+                            ),
+                          })
+                        }
+                      />
+                    )}
                   </td>
                   <td className="num">
-                    <input
-                      className="cell"
-                      aria-label={`Количество ${item.key}`}
-                      value={item.quantity}
-                      onChange={(event) =>
-                        setDraft({
-                          ...draft,
-                          items: draft.items.map((row) =>
-                            row.key === item.key ? { ...row, quantity: event.target.value } : row,
-                          ),
-                        })
-                      }
-                    />
+                    {cleared ? (
+                      <span data-testid={`item-quantity-${item.key}`}>{item.quantity}</span>
+                    ) : (
+                      <input
+                        className="cell"
+                        aria-label={`Количество ${item.key}`}
+                        value={item.quantity}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            items: draft.items.map((row) =>
+                              row.key === item.key ? { ...row, quantity: event.target.value } : row,
+                            ),
+                          })
+                        }
+                      />
+                    )}
+                  </td>
+                  <td className="num" data-testid={`item-duty-${item.key}`}>
+                    {cleared ? (
+                      // После растаможки в колонке — зафиксированные рубли, а не процент.
+                      formatMoney(item.dutyRub || '0')
+                    ) : (
+                      <input
+                        className="cell"
+                        aria-label={`Пошлина ${item.key}`}
+                        value={item.duty}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            items: draft.items.map((row) =>
+                              row.key === item.key ? { ...row, duty: event.target.value } : row,
+                            ),
+                          })
+                        }
+                      />
+                    )}
+                  </td>
+                  <td className="num" data-testid={`item-vat-${item.key}`}>
+                    {cleared ? (
+                      formatMoney(item.vatRub || '0')
+                    ) : (
+                      <input
+                        className="cell"
+                        aria-label={`НДС ${item.key}`}
+                        value={item.vat}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            items: draft.items.map((row) =>
+                              row.key === item.key ? { ...row, vat: event.target.value } : row,
+                            ),
+                          })
+                        }
+                      />
+                    )}
                   </td>
                   <td className="num">
-                    <input
-                      className="cell"
-                      aria-label={`Пошлина ${item.key}`}
-                      value={item.duty}
-                      onChange={(event) =>
-                        setDraft({
-                          ...draft,
-                          items: draft.items.map((row) =>
-                            row.key === item.key ? { ...row, duty: event.target.value } : row,
-                          ),
-                        })
-                      }
-                    />
-                  </td>
-                  <td className="num">
-                    <input
-                      className="cell"
-                      aria-label={`НДС ${item.key}`}
-                      value={item.vat}
-                      onChange={(event) =>
-                        setDraft({
-                          ...draft,
-                          items: draft.items.map((row) =>
-                            row.key === item.key ? { ...row, vat: event.target.value } : row,
-                          ),
-                        })
-                      }
-                    />
-                  </td>
-                  <td className="num">
-                    <input
-                      className="cell"
-                      aria-label={`Risk ${item.key}`}
-                      value={item.risk}
-                      onChange={(event) =>
-                        setDraft({
-                          ...draft,
-                          items: draft.items.map((row) =>
-                            row.key === item.key ? { ...row, risk: event.target.value } : row,
-                          ),
-                        })
-                      }
-                    />
+                    {cleared ? (
+                      <span data-testid={`item-risk-${item.key}`}>{item.risk}</span>
+                    ) : (
+                      <input
+                        className="cell"
+                        aria-label={`Risk ${item.key}`}
+                        value={item.risk}
+                        onChange={(event) =>
+                          setDraft({
+                            ...draft,
+                            items: draft.items.map((row) =>
+                              row.key === item.key ? { ...row, risk: event.target.value } : row,
+                            ),
+                          })
+                        }
+                      />
+                    )}
                   </td>
                   <td className="num" data-testid={`unit-cost-${item.key}`}>
                     {formatMoney(String(cost?.unit[item.key] ?? 0))}
@@ -1009,18 +1242,20 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                     {formatMoney(String(cost?.itemTotal[item.key] ?? 0))}
                   </td>
                   <td>
-                    <button
-                      type="button"
-                      className="mini"
-                      onClick={() =>
-                        setDraft({
-                          ...draft,
-                          items: draft.items.filter((row) => row.key !== item.key),
-                        })
-                      }
-                    >
-                      Убрать
-                    </button>
+                    {cleared ? null : (
+                      <button
+                        type="button"
+                        className="mini"
+                        onClick={() =>
+                          setDraft({
+                            ...draft,
+                            items: draft.items.filter((row) => row.key !== item.key),
+                          })
+                        }
+                      >
+                        Убрать
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -1034,30 +1269,162 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
             ))}
           </datalist>
           <div className="toolbar">
-            <button
-              type="button"
-              onClick={() =>
-                setDraft({
-                  ...draft,
-                  items: [
-                    ...draft.items,
-                    {
-                      key: nextKey('i'),
-                      title: '',
-                      code: '',
-                      quantity: '',
-                      price: '',
-                      duty: '0',
-                      vat: '22',
-                      risk: '0',
-                    },
-                  ],
-                })
-              }
-            >
-              Добавить строку
-            </button>
+            {cleared ? null : (
+              <button
+                type="button"
+                onClick={() =>
+                  setDraft({
+                    ...draft,
+                    items: [
+                      ...draft.items,
+                      {
+                        key: nextKey('i'),
+                        title: '',
+                        code: '',
+                        quantity: '',
+                        price: '',
+                        duty: '0',
+                        vat: '22',
+                        risk: '0',
+                        dutyRub: '',
+                        vatRub: '',
+                      },
+                    ],
+                  })
+                }
+              >
+                Добавить строку
+              </button>
+            )}
+            {draft.customsDate === '' ? (
+              <button
+                type="button"
+                className="primary"
+                data-testid="customs-start"
+                disabled={busy || !draft.id || draft.items.length === 0}
+                onClick={() => void openCustoms()}
+              >
+                Растаможен
+              </button>
+            ) : (
+              <>
+                <span className="badge status-clearance" data-testid="customs-badge">
+                  растаможена {draft.customsDate}
+                  {draft.customsRate ? ` · курс ${trim(draft.customsRate)}` : ''}
+                </span>
+                {mayCancelCustoms ? (
+                  <button
+                    type="button"
+                    data-testid="customs-cancel"
+                    disabled={busy}
+                    onClick={() => void dropCustoms()}
+                  >
+                    Отменить растаможку
+                  </button>
+                ) : null}
+              </>
+            )}
           </div>
+          {draft.customsDate === '' && !draft.id ? (
+            <p className="hint" data-testid="customs-need-save">
+              Растаможка доступна после сохранения поступления.
+            </p>
+          ) : null}
+          {cleared ? (
+            <p className="hint" data-testid="customs-hint">
+              Таможня пройдена {draft.customsDate}: пошлина и НДС зафиксированы в рублях по курсу{' '}
+              {trim(draft.customsRate)} и больше не пересчитываются. Строки изменить нельзя —
+              сначала отмените растаможку.
+            </p>
+          ) : null}
+
+          {customs ? (
+            <div className="customs-box" data-testid="customs-box">
+              <h3 className="section-title">Растаможка: проверьте курс и суммы</h3>
+              <div className="toolbar">
+                <label className="field">
+                  Дата растаможки
+                  <input
+                    type="date"
+                    aria-label="Дата растаможки"
+                    value={customs.date}
+                    onChange={(event) => setCustoms({ ...customs, date: event.target.value })}
+                  />
+                </label>
+                <label className="field">
+                  Курс фиксации, ₽
+                  <input
+                    aria-label="Курс растаможки"
+                    value={customs.rate}
+                    onChange={(event) => changeCustomsRate(event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  Пошлина, ₽
+                  <input
+                    className="cell"
+                    aria-label="Пошлина партии, ₽"
+                    value={customs.duty}
+                    onChange={(event) => setCustoms({ ...customs, duty: event.target.value })}
+                  />
+                </label>
+                <label className="field">
+                  НДС, ₽
+                  <input
+                    className="cell"
+                    aria-label="НДС партии, ₽"
+                    value={customs.vat}
+                    onChange={(event) => setCustoms({ ...customs, vat: event.target.value })}
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void refillCustomsRate()}
+                  data-testid="customs-rate"
+                >
+                  Курс ЦБ на дату
+                </button>
+              </div>
+              {customs.hint ? (
+                <p className="hint" data-testid="customs-rate-hint">
+                  {customs.hint}
+                </p>
+              ) : (
+                <p className="hint">Курс и суммы можно исправить до подтверждения.</p>
+              )}
+              <p className="hint" data-testid="customs-total">
+                Итог: пошлина{' '}
+                <strong data-testid="customs-duty-total">
+                  {formatMoney(customs.duty || '0')} ₽
+                </strong>{' '}
+                · НДС{' '}
+                <strong data-testid="customs-vat-total">{formatMoney(customs.vat || '0')} ₽</strong>{' '}
+                · всего{' '}
+                <strong data-testid="customs-sum">
+                  {formatMoney(String(number(customs.duty) + number(customs.vat)))} ₽
+                </strong>
+              </p>
+              <p className="hint">
+                Итог распределится по строкам пропорционально их пошлине: сумма строк в точности
+                равна введённой. После подтверждения проценты в строках заменятся этими рублями.
+              </p>
+              <div className="toolbar">
+                <button
+                  type="button"
+                  className="primary"
+                  data-testid="customs-confirm"
+                  disabled={busy || number(customs.rate) <= 0}
+                  onClick={() => void submitCustoms()}
+                >
+                  Подтвердить растаможку
+                </button>
+                <button type="button" disabled={busy} onClick={() => setCustoms(null)}>
+                  Отмена
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <h2 className="section-title">Общие расходы (на партию)</h2>
           <p className="hint">
@@ -1502,7 +1869,14 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
             >
               Сохранить
             </button>
-            <button type="button" disabled={busy} onClick={() => setDraft(null)}>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setCustoms(null)
+                setDraft(null)
+              }}
+            >
               Отмена
             </button>
             {draft.id ? (

@@ -68,6 +68,8 @@ const RECEIPT = {
   source: 'manual',
   comment: null,
   created_at: '2026-10-08T10:00:00Z',
+  customs_date: null,
+  customs_rate: null,
   finance: {
     invoice_total_currency: '1000.00',
     risk_total_currency: '0.00',
@@ -106,6 +108,8 @@ const RECEIPT = {
       duty_percent: '0.0000',
       vat_percent: '0.0000',
       risk_unit_currency: '0.0000',
+      duty_fixed_rub: null,
+      vat_fixed_rub: null,
       invoice_currency: '1000.00',
       risk_currency: '0.00',
       duty_rub: '0.00',
@@ -551,6 +555,68 @@ test('пошлина, Risk и общие расходы считаются в к
   expect(body.items[0]?.risk_unit_currency).toBe('1')
 })
 
+test('растаможка партии: проценты превращаются в фиксированные рубли', async ({ page }) => {
+  const today = new Date().toISOString().slice(0, 10)
+  const taxed = {
+    ...RECEIPT,
+    batch_date: today,
+    items: [{ ...RECEIPT.items[0], duty_percent: '5.0000', vat_percent: '22.0000' }],
+  }
+  const cleared = {
+    ...taxed,
+    customs_date: today,
+    customs_rate: '80',
+    items: [{ ...taxed.items[0], duty_fixed_rub: '4000.00', vat_fixed_rub: '18480.00' }],
+  }
+  const sent: Record<string, unknown>[] = []
+  await mockSession(page)
+  await page.route('**/api/v1/batches**', (route) => {
+    if (route.request().url().endsWith('/customs')) {
+      sent.push(route.request().postDataJSON() as Record<string, unknown>)
+      return route.fulfill({ json: cleared })
+    }
+    // После растаможки список за день тоже показывает пометку — как на сервере.
+    return route.fulfill({ json: [sent.length > 0 ? cleared : taxed] })
+  })
+  await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  // Курс на дату растаможки приходит с query — шаблон с «**» его тоже ловит.
+  await page.route('**/api/v1/rates/USD**', (route) =>
+    route.fulfill({
+      json: { code: 'USD', rate_date: today, rate: '90.5000', nominal: 1, source: 'cbr' },
+    }),
+  )
+
+  await page.goto('/')
+  await openSection(page, 'Закупки', 'Поступления')
+  await page.getByTestId('day-receipt-b1').getByRole('button', { name: 'Открыть' }).click()
+  await page.getByTestId('customs-start').click()
+
+  // Курс подставляется из ЦБ на дату растаможки: 50 $ × 90,5 = 4 525 ₽ пошлины.
+  await expect(page.getByLabel('Курс растаможки')).toHaveValue('90.5')
+  await expect(page.getByTestId('customs-duty-total')).toHaveText('4 525,00 ₽')
+  await expect(page.getByTestId('customs-vat-total')).toHaveText('20 905,50 ₽')
+
+  // Курс правят на таможенный — суммы пересчитываются по строкам.
+  await page.getByLabel('Курс растаможки').fill('80')
+  await expect(page.getByTestId('customs-duty-total')).toHaveText('4 000,00 ₽')
+  await expect(page.getByTestId('customs-vat-total')).toHaveText('18 480,00 ₽')
+  await page.getByTestId('customs-confirm').click()
+
+  await expect(page.getByTestId('customs-badge')).toBeVisible()
+  await expect(page.getByTestId('item-duty-i0')).toHaveText('4 000,00')
+  await expect(page.getByTestId('item-vat-i0')).toHaveText('18 480,00')
+  // Проценты в строках исчезли: вместо полей — зафиксированные рубли.
+  await expect(page.getByLabel('Пошлина i0')).toHaveCount(0)
+  await expect(page.getByLabel('НДС i0')).toHaveCount(0)
+  // Строка календаря тоже помечена.
+  await expect(page.getByTestId('clearance-badge')).toBeVisible()
+
+  expect(sent[0]?.rate).toBe('80')
+  expect(sent[0]?.duty_rub).toBe('4000')
+  expect(sent[0]?.vat_rub).toBe('18480')
+})
+
 test('закупщик грузит позиции партии из файла 1С в черновик', async ({ page }) => {
   const today = new Date().toISOString().slice(0, 10)
   const draft = {
@@ -583,6 +649,8 @@ test('закупщик грузит позиции партии из файла 
         duty_percent: '0.0000',
         vat_percent: '22.0000',
         risk_unit_currency: '0.0000',
+        duty_fixed_rub: null,
+        vat_fixed_rub: null,
         invoice_currency: '0.00',
         risk_currency: '0.00',
         duty_rub: '0.00',
