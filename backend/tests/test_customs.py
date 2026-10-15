@@ -173,6 +173,14 @@ def test_customs_locks_items_but_not_expenses(
     assert locked.status_code == 400, locked.text
     assert "строки изменить нельзя" in locked.json()["detail"]
 
+    # Валюта — база фикса: её смена тоже запрещена.
+    currency = client.put(
+        f"/api/v1/batches/{batch['id']}",
+        json=_payload(currency="EUR"),
+    )
+    assert currency.status_code == 400, currency.text
+    assert "валюту изменить нельзя" in currency.json()["detail"]
+
     expenses = client.put(
         f"/api/v1/batches/{batch['id']}",
         json=_payload(

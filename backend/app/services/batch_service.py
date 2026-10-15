@@ -42,6 +42,8 @@ ZERO = Decimal("0.00")
 
 #: Отказ при правке строк растаможенной партии (его же повторяет `customs_service`).
 ITEMS_LOCKED = "Партия растаможена: строки изменить нельзя. Сначала отмените растаможку"
+#: Валюта — база, от которой считались фикс-суммы таможни: после растаможки она тоже неизменна.
+CURRENCY_LOCKED = "Партия растаможена: валюту изменить нельзя. Сначала отмените растаможку"
 
 
 def latest_snapshots(db: Session, item_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, StockSnapshot]:
@@ -418,6 +420,9 @@ def update_batch(db: Session, batch_id: uuid.UUID, payload: BatchCreate) -> Batc
     cleared = batch.customs_date is not None
     if cleared and not _same_items(batch, payload):
         raise ValueError(ITEMS_LOCKED)
+    if cleared and payload.currency.strip().upper() != batch.currency.strip().upper():
+        # Фикс таможни посчитан в валюте партии: смена валюты обесценила бы эти суммы.
+        raise ValueError(CURRENCY_LOCKED)
     check_payments_limit(payload)
     supplier_id, supplier_name = _resolve_supplier(db, payload)
     rate = _resolve_batch_rate(db, payload)

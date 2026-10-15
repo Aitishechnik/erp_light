@@ -1006,6 +1006,8 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
               <input
                 aria-label="Валюта"
                 value={draft.currency}
+                // Фикс таможни посчитан в валюте партии — после растаможки её не меняем.
+                disabled={cleared}
                 onChange={(event) => setDraft({ ...draft, currency: event.target.value })}
               />
             </label>

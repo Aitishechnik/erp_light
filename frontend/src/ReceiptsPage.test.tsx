@@ -793,6 +793,8 @@ describe('ReceiptsPage — растаможка партии', () => {
     expect(
       within(screen.getByTestId('receipt-items')).queryByRole('button', { name: 'Убрать' }),
     ).toBeNull()
+    // Валюта — база фикса: в растаможенной партии поле заблокировано.
+    expect(screen.getByLabelText('Валюта')).toBeDisabled()
 
     // Живой расчёт берёт фикс: 1000 $ × 84 + 4 100 + 18 480 = 106 580 ₽.
     expect(screen.getByTestId('receipt-total')).toHaveTextContent('106 580,00')
