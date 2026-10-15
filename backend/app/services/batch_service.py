@@ -40,6 +40,9 @@ from app.services.cost import (
 
 ZERO = Decimal("0.00")
 
+#: Отказ при правке строк растаможенной партии (его же повторяет `customs_service`).
+ITEMS_LOCKED = "Партия растаможена: строки изменить нельзя. Сначала отмените растаможку"
+
 
 def latest_snapshots(db: Session, item_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, StockSnapshot]:
     """Самый свежий снимок остатка по каждой строке партии."""
@@ -172,6 +175,8 @@ def serialize_batch(
                 duty_percent=item.duty_percent,
                 vat_percent=item.vat_percent,
                 risk_unit_currency=item.risk_unit_currency,
+                duty_fixed_rub=item.duty_fixed_rub,
+                vat_fixed_rub=item.vat_fixed_rub,
                 invoice_currency=cost.invoice_currency,
                 risk_currency=cost.risk_currency,
                 duty_rub=cost.duty_rub,
@@ -219,6 +224,8 @@ def serialize_batch(
         source=batch.source,
         comment=batch.comment,
         created_at=batch.created_at,
+        customs_date=batch.customs_date,
+        customs_rate=batch.customs_rate,
         finance=BatchFinanceOut(
             invoice_total_currency=finance.invoice_total_currency,
             risk_total_currency=finance.risk_total_currency,
@@ -290,9 +297,11 @@ def check_payments_limit(payload: BatchCreate) -> None:
             )
 
 
-def _items_expenses_payments(db: Session, batch: Batch, payload: BatchCreate) -> None:
+def _items_expenses_payments(
+    db: Session, batch: Batch, payload: BatchCreate, *, with_items: bool = True
+) -> None:
     """Наполнить партию строками, общими расходами и валютными платежами."""
-    for item in payload.items:
+    for item in payload.items if with_items else []:
         product = _resolve_product(
             db, item.product_code, item.product_name, item.product_kind, item.unit
         )
@@ -368,11 +377,47 @@ def create_batch(db: Session, payload: BatchCreate) -> Batch:
     return loaded
 
 
+def _same_items(batch: Batch, payload: BatchCreate) -> bool:
+    """Совпадают ли строки запроса с сохранёнными (для растаможенной партии)."""
+    if len(batch.items) != len(payload.items):
+        return False
+    stored = {item.product.code: item for item in batch.items}
+    for row in payload.items:
+        item = stored.get(row.product_code)
+        if item is None:
+            return False
+        saved = (
+            item.quantity,
+            item.unit_price_currency,
+            item.duty_percent,
+            item.vat_percent,
+            item.risk_unit_currency,
+        )
+        new = (
+            row.quantity,
+            row.unit_price_currency,
+            row.duty_percent,
+            row.vat_percent,
+            row.risk_unit_currency,
+        )
+        if saved != new:
+            return False
+    return True
+
+
 def update_batch(db: Session, batch_id: uuid.UUID, payload: BatchCreate) -> Batch | None:
-    """Правка поступления: строки и расходы заменяются целиком."""
+    """Правка поступления: строки и расходы заменяются целиком.
+
+    У растаможенной партии строки неизменны: снятая фиксация пошлины и НДС
+    перестала бы соответствовать товару, поэтому правка — только через
+    отмену растаможки.
+    """
     batch = load_batch(db, batch_id)
     if batch is None:
         return None
+    cleared = batch.customs_date is not None
+    if cleared and not _same_items(batch, payload):
+        raise ValueError(ITEMS_LOCKED)
     check_payments_limit(payload)
     supplier_id, supplier_name = _resolve_supplier(db, payload)
     rate = _resolve_batch_rate(db, payload)
@@ -384,14 +429,15 @@ def update_batch(db: Session, batch_id: uuid.UUID, payload: BatchCreate) -> Batc
     batch.current_exchange_rate = rate
     batch.comment = payload.comment
 
-    for item in list(batch.items):
-        db.delete(item)
+    if not cleared:
+        for item in list(batch.items):
+            db.delete(item)
     for expense in list(batch.expenses):
         db.delete(expense)
     for payment in list(batch.payments):
         db.delete(payment)
     db.flush()
-    _items_expenses_payments(db, batch, payload)
+    _items_expenses_payments(db, batch, payload, with_items=not cleared)
     db.commit()
     return load_batch(db, batch_id)
 

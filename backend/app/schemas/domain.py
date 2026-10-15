@@ -106,6 +106,23 @@ class BatchCreate(BaseModel):
     )
 
 
+class BatchCustomsIn(BaseModel):
+    """Растаможка: дата, курс фиксации и (необязательно) правка итогов вручную.
+
+    Итоги считаются по процентам строк и курсу; если пришла своя сумма — она
+    распределяется по строкам, а не подменяет расчёт процентов.
+    """
+
+    customs_date: date = Field(description="Дата таможенной очистки (не дата прихода)")
+    rate: Decimal = Field(gt=0, description="Курс на дату растаможки, фиксируется навсегда")
+    duty_rub: Decimal | None = Field(
+        default=None, ge=0, description="Пошлина, ₽: пусто — считать по процентам строк"
+    )
+    vat_rub: Decimal | None = Field(
+        default=None, ge=0, description="НДС, ₽: пусто — считать по процентам строк"
+    )
+
+
 class BatchPaymentOut(BaseModel):
     id: uuid.UUID
     payment_date: date
@@ -165,6 +182,12 @@ class BatchItemOut(BaseModel):
     duty_percent: Decimal
     vat_percent: Decimal
     risk_unit_currency: Decimal
+    duty_fixed_rub: Decimal | None = Field(
+        default=None, description="Пошлина строки, ₽: фикс после растаможки, иначе пусто"
+    )
+    vat_fixed_rub: Decimal | None = Field(
+        default=None, description="НДС строки, ₽: фикс после растаможки, иначе пусто"
+    )
     invoice_currency: Decimal
     risk_currency: Decimal
     duty_rub: Decimal
@@ -187,6 +210,12 @@ class BatchOut(BaseModel):
     source: str
     comment: str | None
     created_at: datetime
+    customs_date: date | None = Field(
+        default=None, description="Дата растаможки; пусто — партия не растаможена"
+    )
+    customs_rate: Decimal | None = Field(
+        default=None, description="Курс, по которому зафиксированы пошлина и НДС"
+    )
     finance: BatchFinanceOut
     payments: list[BatchPaymentOut]
     expenses: list[BatchExpenseOut]

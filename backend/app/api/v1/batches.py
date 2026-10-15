@@ -13,10 +13,11 @@ from app.api.deps import CurrentUser, DbSession, require_roles
 from app.api.v1.imports import session_out
 from app.models.auth import ROLE_IMPORT_MANAGER, ROLE_PURCHASE_DIRECTOR, User
 from app.models.domain import Batch
-from app.schemas.domain import BatchCreate, BatchOut
+from app.schemas.domain import BatchCreate, BatchCustomsIn, BatchOut
 from app.schemas.imports import BatchImportOut
 from app.services import batch_import_service
 from app.services.batch_service import (
+    ITEMS_LOCKED,
     batch_finance,
     create_batch,
     delete_batch,
@@ -28,12 +29,15 @@ from app.services.batch_service import (
     update_batch,
 )
 from app.services.currency_service import RateError
+from app.services.customs_service import apply_customs, cancel_customs
 from app.services.import_service import ImportDataError
 
 router = APIRouter(tags=["batches"])
 
 # Заводить и править поступления могут закупки; смотрят все вошедшие.
 Writer = Annotated[User, Depends(require_roles(ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER))]
+# Отмена растаможки — только директор по закупкам.
+Director = Annotated[User, Depends(require_roles(ROLE_PURCHASE_DIRECTOR))]
 
 
 def _out(db: DbSession, batch: Batch) -> BatchOut:
@@ -138,6 +142,32 @@ def remove_batch(batch_id: uuid.UUID, user: Writer, db: DbSession) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.post("/batches/{batch_id}/customs", response_model=BatchOut)
+def post_customs(
+    batch_id: uuid.UUID, payload: BatchCustomsIn, user: Writer, db: DbSession
+) -> BatchOut:
+    """Растаможка: пошлина и НДС строк превращаются в фикс по курсу на дату."""
+    try:
+        batch = apply_customs(db, batch_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    if batch is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Поступление не найдено")
+    return _out(db, batch)
+
+
+@router.delete("/batches/{batch_id}/customs", response_model=BatchOut)
+def delete_customs(batch_id: uuid.UUID, user: Director, db: DbSession) -> BatchOut:
+    """Отмена растаможки: в строках снова действуют проценты пошлины и НДС."""
+    try:
+        batch = cancel_customs(db, batch_id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    if batch is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Поступление не найдено")
+    return _out(db, batch)
+
+
 @router.post("/batches/{batch_id}/import-items", response_model=BatchImportOut)
 def import_batch_items(
     batch_id: uuid.UUID,
@@ -153,6 +183,8 @@ def import_batch_items(
     batch = load_batch(db, batch_id)
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Поступление не найдено")
+    if batch.customs_date is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, ITEMS_LOCKED)
     if batch.payments:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,

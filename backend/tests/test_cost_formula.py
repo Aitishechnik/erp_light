@@ -16,6 +16,9 @@ from app.services.cost import (
     CategoryPayments,
     ItemInput,
     calculate_finance,
+    customs_lines,
+    customs_totals_rub,
+    split_fixed_rub,
 )
 
 
@@ -242,3 +245,68 @@ def test_expenses_are_shared_by_full_currency_value() -> None:
     # Расходы поделены пополам — по 1000 ₽ на строку.
     assert finance.items[0].expenses_rub == Decimal("1000.00")
     assert finance.items[1].expenses_rub == Decimal("1000.00")
+
+
+def test_customs_totals_match_percent_formula_at_fixing_rate() -> None:
+    """Итог растаможки по курсу фиксации равен прежнему расчёту по процентам.
+
+    100 шт по 10 $, пошлина 5 %, НДС 22 %: пошлина 0,5 $ × 100 × 80 = 4 000 ₽,
+    НДС 2,31 $ × 100 × 80 = 18 480 ₽.
+    """
+    items = [
+        ItemInput(
+            unit_price_currency=Decimal("10"),
+            quantity=Decimal("100"),
+            duty_percent=Decimal("5"),
+            vat_percent=Decimal("22"),
+        )
+    ]
+    duty, vat = customs_totals_rub(customs_lines(items), Decimal("80"))
+    assert (duty, vat) == (Decimal("4000.00"), Decimal("18480.00"))
+    # Та же пара, что даёт формула по процентам при курсе растаможки.
+    finance = calculate_finance(items, cbr_rate=Decimal("80"))
+    assert (duty, vat) == (finance.duty_rub, finance.vat_rub)
+
+
+def test_customs_fixes_duty_and_vat_forever() -> None:
+    """После растаможки пошлина и НДС — фикс в рублях: курс их больше не меняет.
+
+    Строка: 100 шт по 10 $, пошлина 5 %, НДС 22 %, Risk 1 $/шт; растаможка по 80.
+    Меняется только курс остатка — товар и Risk дорожают, таможня нет.
+    """
+    item = ItemInput(
+        unit_price_currency=Decimal("10"),
+        quantity=Decimal("100"),
+        duty_percent=Decimal("5"),
+        vat_percent=Decimal("22"),
+        risk_unit_currency=Decimal("1"),
+        duty_fixed_rub=Decimal("4000.00"),
+        vat_fixed_rub=Decimal("18480.00"),
+    )
+    at_90 = calculate_finance([item], cbr_rate=Decimal("90"))
+    # 1000 $ × 90 + 4 000 + 18 480 + 100 $ × 90 = 121 480 ₽.
+    assert (at_90.duty_rub, at_90.vat_rub) == (Decimal("4000.00"), Decimal("18480.00"))
+    assert at_90.final_cost_rub == Decimal("121480.00")
+    assert at_90.items[0].unit_cost == Decimal("1214.80")
+
+    at_95 = calculate_finance([item], cbr_rate=Decimal("95"))
+    assert (at_95.duty_rub, at_95.vat_rub) == (Decimal("4000.00"), Decimal("18480.00"))
+    # 1000 $ × 95 + 4 000 + 18 480 + 100 $ × 95 = 126 980 ₽.
+    assert at_95.final_cost_rub == Decimal("126980.00")
+
+
+def test_split_fixed_rub_keeps_total_exact() -> None:
+    """Раскладка итога по строкам не теряет и не добавляет копейки."""
+    shares = split_fixed_rub(Decimal("100.00"), [Decimal("1"), Decimal("1"), Decimal("1")])
+    assert shares == [Decimal("33.34"), Decimal("33.33"), Decimal("33.33")]
+    assert sum(shares) == Decimal("100.00")
+
+    tiny = split_fixed_rub(Decimal("0.03"), [Decimal("1")] * 5)
+    assert sum(tiny) == Decimal("0.03")
+    assert all(value >= 0 for value in tiny)
+
+    # Все веса нулевые — делим поровну, а не падаем.
+    assert split_fixed_rub(Decimal("10.00"), [Decimal("0"), Decimal("0")]) == [
+        Decimal("5.00"),
+        Decimal("5.00"),
+    ]

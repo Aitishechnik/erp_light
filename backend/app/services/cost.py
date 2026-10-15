@@ -65,6 +65,13 @@ class ItemInput:
     duty_percent: Decimal = ZERO
     vat_percent: Decimal = ZERO
     risk_unit_currency: Decimal = ZERO
+    duty_fixed_rub: Decimal | None = None
+    vat_fixed_rub: Decimal | None = None
+
+    @property
+    def is_customs_cleared(self) -> bool:
+        """Растаможена ли строка: пошлина и НДС пришли фиксом в рублях."""
+        return self.duty_fixed_rub is not None and self.vat_fixed_rub is not None
 
     @property
     def invoice_currency(self) -> Decimal:
@@ -208,17 +215,27 @@ def calculate_finance(
     for item in items:
         duty_unit = item.unit_price_currency * item.duty_percent / HUNDRED
         vat_unit = (item.unit_price_currency + duty_unit) * item.vat_percent / HUNDRED
-        base_unit_rub = (
-            item.unit_price_currency + duty_unit + vat_unit
-        ) * invoice_finance.rate + item.risk_unit_currency * risk_finance.rate
         share = item.full_currency / full_total if full_total > 0 else ZERO
         expenses_item_rub = q2(expenses_rub * share)
-        item_total_rub = q2(base_unit_rub * item.quantity + expenses_item_rub)
-        unit_cost = q2(item_total_rub / item.quantity) if item.quantity != 0 else ZERO
-
-        duty_item_rub = q2(duty_unit * item.quantity * invoice_finance.rate)
-        vat_item_rub = q2(vat_unit * item.quantity * invoice_finance.rate)
         risk_item_rub = q2(item.risk_unit_currency * item.quantity * risk_finance.rate)
+
+        if item.is_customs_cleared:
+            # Партия растаможена: пошлина и НДС — фикс в рублях, курс их не трогает.
+            assert item.duty_fixed_rub is not None and item.vat_fixed_rub is not None
+            duty_item_rub = q2(item.duty_fixed_rub)
+            vat_item_rub = q2(item.vat_fixed_rub)
+            goods_rub = q2(item.invoice_currency * invoice_finance.rate)
+            base_rub = goods_rub + duty_item_rub + vat_item_rub + risk_item_rub
+            item_total_rub = q2(base_rub + expenses_item_rub)
+        else:
+            base_unit_rub = (
+                item.unit_price_currency + duty_unit + vat_unit
+            ) * invoice_finance.rate + item.risk_unit_currency * risk_finance.rate
+            item_total_rub = q2(base_unit_rub * item.quantity + expenses_item_rub)
+            duty_item_rub = q2(duty_unit * item.quantity * invoice_finance.rate)
+            vat_item_rub = q2(vat_unit * item.quantity * invoice_finance.rate)
+
+        unit_cost = q2(item_total_rub / item.quantity) if item.quantity != 0 else ZERO
         duty_rub += duty_item_rub
         vat_rub += vat_item_rub
         costs.append(
@@ -249,6 +266,65 @@ def calculate_finance(
         final_cost_rub=q2(sum((cost.item_total_rub for cost in costs), ZERO)),
         items=tuple(costs),
     )
+
+
+@dataclass(frozen=True)
+class CustomsLine:
+    """Строка при растаможке: валютные надбавки и база распределения правки.
+
+    ``duty_currency`` и ``vat_currency`` — пошлина и НДС строки в валюте партии,
+    ``invoice_currency`` — инвойсная стоимость строки (по ней делим итог, если
+    пошлины по процентам нет вовсе).
+    """
+
+    duty_currency: Decimal
+    vat_currency: Decimal
+    invoice_currency: Decimal
+
+
+def customs_lines(items: Sequence[ItemInput]) -> list[CustomsLine]:
+    """Валютные пошлина и НДС по строкам — основа фикса при растаможке."""
+    lines: list[CustomsLine] = []
+    for item in items:
+        duty_unit = item.unit_price_currency * item.duty_percent / HUNDRED
+        vat_unit = (item.unit_price_currency + duty_unit) * item.vat_percent / HUNDRED
+        lines.append(
+            CustomsLine(
+                duty_currency=q2(duty_unit * item.quantity),
+                vat_currency=q2(vat_unit * item.quantity),
+                invoice_currency=item.invoice_currency,
+            )
+        )
+    return lines
+
+
+def customs_totals_rub(lines: Sequence[CustomsLine], rate: Decimal) -> tuple[Decimal, Decimal]:
+    """Пошлина и НДС партии в рублях по курсу на дату растаможки."""
+    duty = sum((q2(line.duty_currency * rate) for line in lines), ZERO)
+    vat = sum((q2(line.vat_currency * rate) for line in lines), ZERO)
+    return q2(duty), q2(vat)
+
+
+def split_fixed_rub(total: Decimal, weights: Sequence[Decimal]) -> list[Decimal]:
+    """Разложить рублёвый итог по строкам пропорционально весам.
+
+    Считаем в копейках и раздаём остаток по крупнейшим дробным частям, поэтому
+    сумма строк в точности равна итогу — даже когда итог поправили руками.
+    """
+    if not weights:
+        return []
+    cents = int(q2(total) * 100)
+    positive = [weight if weight > 0 else ZERO for weight in weights]
+    base = sum(positive, ZERO)
+    if base <= 0:
+        positive = [ONE] * len(weights)
+        base = Decimal(len(weights))
+    exact = [Decimal(cents) * weight / base for weight in positive]
+    whole = [int(value) for value in exact]
+    order = sorted(range(len(weights)), key=lambda index: exact[index] - whole[index], reverse=True)
+    for index in order[: cents - sum(whole)]:
+        whole[index] += 1
+    return [Decimal(value) / HUNDRED for value in whole]
 
 
 def payments_by_category(
@@ -311,6 +387,8 @@ def items_from_batch(batch: Batch) -> list[ItemInput]:
             duty_percent=item.duty_percent,
             vat_percent=item.vat_percent,
             risk_unit_currency=item.risk_unit_currency,
+            duty_fixed_rub=item.duty_fixed_rub,
+            vat_fixed_rub=item.vat_fixed_rub,
         )
         for item in batch.items
     ]

@@ -95,6 +95,14 @@ class Batch(Base):
         nullable=True,
         comment="Курс валюты контракта к рублю на дату оценки (для RUB = 1)",
     )
+    customs_date: Mapped[date | None] = mapped_column(
+        Date, nullable=True, comment="Дата растаможки; пусто — партия не растаможена"
+    )
+    customs_rate: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 6),
+        nullable=True,
+        comment="Курс на дату растаможки: по нему зафиксированы пошлина и НДС",
+    )
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -119,6 +127,11 @@ class BatchItem(Base):
     ``unit_price_currency × quantity``. Пошлину и НДС считаем в валюте партии
     (проценты от цены), Risk — отдельная валютная надбавка за единицу; в рубли
     всё переводится по курсу своей категории (см. ``services/cost.py``).
+
+    После растаможки проценты заменяются фиксом: ``duty_fixed_rub`` и
+    ``vat_fixed_rub`` — суммы в рублях, посчитанные по курсу на дату растаможки.
+    Пока фикс заполнен, проценты в расчёте не участвуют (они остаются в базе,
+    чтобы вернуться при отмене растаможки).
     """
 
     __tablename__ = "batch_items"
@@ -154,6 +167,16 @@ class BatchItem(Base):
         nullable=False,
         default=Decimal("0.0000"),
         comment="Risk за единицу в валюте партии",
+    )
+    duty_fixed_rub: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 2),
+        nullable=True,
+        comment="Пошлина строки, ₽: фикс на дату растаможки (пусто — считаем по проценту)",
+    )
+    vat_fixed_rub: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 2),
+        nullable=True,
+        comment="НДС строки, ₽: фикс на дату растаможки (пусто — считаем по проценту)",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
