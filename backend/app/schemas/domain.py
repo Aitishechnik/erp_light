@@ -147,8 +147,9 @@ class BatchFinanceOut(BaseModel):
     expenses_rub: Decimal = Field(default=Decimal("0"), description="Общие расходы, ₽")
     duty_rub: Decimal = Field(default=Decimal("0"), description="Пошлина по строкам, ₽")
     vat_rub: Decimal = Field(default=Decimal("0"), description="НДС по строкам, ₽")
-    effective_rate: Decimal = Field(
-        default=Decimal("0"), description="Курс инвойса — он виден в списке поступлений"
+    average_rate: Decimal = Field(
+        default=Decimal("0"),
+        description="Средний курс партии по инвойсу и Risk — виден в списке поступлений",
     )
     final_cost_rub: Decimal
 

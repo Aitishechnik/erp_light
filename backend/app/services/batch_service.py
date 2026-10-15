@@ -240,7 +240,7 @@ def serialize_batch(
             expenses_rub=finance.expenses_rub,
             duty_rub=finance.duty_rub,
             vat_rub=finance.vat_rub,
-            effective_rate=finance.effective_rate,
+            average_rate=finance.average_rate,
             final_cost_rub=finance.final_cost_rub,
         ),
         payments=payments,

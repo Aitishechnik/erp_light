@@ -164,6 +164,8 @@ type LiveCost = {
   invoice: CategoryTotals
   risk: CategoryTotals
   cbrRate: number
+  /** Средний курс партии по инвойсу и Risk — как в списке поступлений. */
+  averageRate: number
   expensesRub: number
   dutyRub: number
   vatRub: number
@@ -177,6 +179,11 @@ type LiveCost = {
 /** Округление денег до копейки (HALF_UP, как на сервере). */
 function round2(value: number): number {
   return Math.round(value * 100) / 100
+}
+
+/** Округление курса до шести знаков — так он хранится на сервере. */
+function round6(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000
 }
 
 /** Сумма одного общего расхода в рублях: рубли как есть, usd — по курсу ЦБ на сегодня. */
@@ -213,7 +220,7 @@ function categoryTotals(
   // Курс на сервере хранится с шестью знаками — повторяем то же округление,
   // иначе живой расчёт разойдётся с сохранённым на копейку.
   const exact = total > 0 ? (paidRub + remaining * cbrRate) / total : 0
-  const rate = Math.round(exact * 1_000_000) / 1_000_000
+  const rate = round6(exact)
   return { total, paidCurrency, paidRub, remaining, rate, plannedCurrency, plannedRub }
 }
 
@@ -275,10 +282,16 @@ function liveCost(draft: Draft, usdRate: number | null): LiveCost {
   let total = 0
   for (const item of draft.items) total += itemTotal[item.key] ?? 0
 
+  // Средний курс партии — по обоим валютным долгам, взвешенно по их суммам.
+  const debts = invoiceTotal + riskTotal
+  const averageRate =
+    debts > 0 ? round6((invoice.rate * invoiceTotal + risk.rate * riskTotal) / debts) : 0
+
   return {
     invoice,
     risk,
     cbrRate,
+    averageRate,
     expensesRub,
     dutyRub,
     vatRub,
@@ -718,7 +731,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                   <td>{batch.supplier ?? '—'}</td>
                   <td>{batch.items.length}</td>
                   <td>{batch.currency}</td>
-                  <td className="num">{isDraft ? '—' : trim(batch.finance.effective_rate)}</td>
+                  <td className="num">{isDraft ? '—' : trim(batch.finance.average_rate)}</td>
                   <td className="num">
                     {isDraft ? '—' : formatMoney(batch.finance.final_cost_rub)}
                   </td>
@@ -1461,12 +1474,19 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
           ) : null}
           <div className="toolbar">
             <span className="hint">
-              Курс инвойса:{' '}
+              Средний курс:{' '}
+              <strong data-testid="receipt-average-rate">
+                {formatRate(cost?.averageRate ?? 0)}
+              </strong>{' '}
+              · курс инвойса:{' '}
               <strong data-testid="receipt-effective">{formatRate(cost?.invoice.rate ?? 0)}</strong>
               {hasRisk ? (
                 <>
                   {' '}
-                  · курс Risk: <strong>{formatRate(cost?.risk.rate ?? 0)}</strong>
+                  · курс Risk:{' '}
+                  <strong data-testid="receipt-risk-rate">
+                    {formatRate(cost?.risk.rate ?? 0)}
+                  </strong>
                 </>
               ) : null}{' '}
               · себестоимость:{' '}

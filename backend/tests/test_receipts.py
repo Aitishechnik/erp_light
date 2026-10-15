@@ -637,7 +637,7 @@ def test_payment_equal_to_invoice_is_allowed(
     assert Decimal(response.json()["finance"]["invoice_remaining_currency"]) == Decimal("0.00")
 
 
-def test_effective_rate_is_weighted_average(
+def test_average_rate_is_weighted_average(
     client: TestClient, login, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Пример: 5000 $ по 110, 1000 $ по 115, остаток 4000 $ по курсу ЦБ 85 → 100,50."""
@@ -655,5 +655,43 @@ def test_effective_rate_is_weighted_average(
     assert Decimal(finance["invoice_paid_rub"]) == Decimal("665000.00")
     assert Decimal(finance["invoice_remaining_currency"]) == Decimal("4000.00")
     assert Decimal(finance["final_cost_rub"]) == Decimal("1005000.00")
-    assert Decimal(finance["effective_rate"]) == Decimal("100.500000")
+    assert Decimal(finance["average_rate"]) == Decimal("100.500000")
     assert Decimal(finance["exchange_rate"]) == Decimal("85")
+
+
+def test_average_rate_counts_risk_payments(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Инвойс 124 000 $ по 88 и Risk 60 000 $ по 91 → средний курс 88,978261.
+
+    Раньше в списке поступлений показывался только курс инвойса (88), из-за чего
+    риск-платежи в средний курс не попадали.
+    """
+    login("purchase")
+    _no_network(monkeypatch)
+    created = client.post(
+        "/api/v1/batches",
+        json=_payload(
+            current_exchange_rate="90",
+            items=[
+                _item(
+                    quantity="20000",
+                    unit_price_currency="6.2",
+                    risk_unit_currency="3",
+                    duty_percent="0",
+                )
+            ],
+            expenses=[],
+            payments=[
+                _payment("124000", "88"),
+                _payment("60000", "91", category="risk"),
+            ],
+        ),
+    )
+    assert created.status_code == 201, created.text
+    finance = created.json()["finance"]
+    assert Decimal(finance["invoice_rate"]) == Decimal("88.000000")
+    assert Decimal(finance["risk_rate"]) == Decimal("91.000000")
+    assert Decimal(finance["average_rate"]) == Decimal("88.978261")
+    assert Decimal(finance["invoice_total_currency"]) == Decimal("124000.00")
+    assert Decimal(finance["risk_total_currency"]) == Decimal("60000.00")

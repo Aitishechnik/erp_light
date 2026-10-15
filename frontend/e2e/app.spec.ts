@@ -89,7 +89,7 @@ const RECEIPT = {
     expenses_rub: '0.00',
     duty_rub: '0.00',
     vat_rub: '0.00',
-    effective_rate: '90.000000',
+    average_rate: '90.000000',
     final_cost_rub: '90000.00',
   },
   payments: [],
@@ -531,6 +531,9 @@ test('пошлина, Risk и общие расходы считаются в к
   await payRow.getByLabel(/Курс платежа/).fill('100')
   await expect(payRow).toContainText('1 000,00')
   await expect(page.getByTestId('receipt-total')).toHaveText('100 500,00 ₽')
+  // Средний курс — по инвойсу и Risk: (90 × 1000 + 100 × 10) ÷ 1010 = 90,099.
+  await expect(page.getByTestId('receipt-average-rate')).toHaveText('90.099')
+  await expect(page.getByTestId('receipt-risk-rate')).toHaveText('100')
 
   await page.getByRole('button', { name: 'Сохранить' }).click()
   await expect(page.getByTestId('receipt-form')).toHaveCount(0)
@@ -562,7 +565,7 @@ test('закупщик грузит позиции партии из файла 
       invoice_total_currency: '0.00',
       invoice_remaining_currency: '0.00',
       invoice_rate: '0.000000',
-      effective_rate: '0.000000',
+      average_rate: '0.000000',
       final_cost_rub: '0.00',
     },
   }

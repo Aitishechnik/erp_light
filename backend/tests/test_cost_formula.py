@@ -182,6 +182,47 @@ def test_planned_payments_are_not_counted() -> None:
     assert finance.final_cost_rub == Decimal("90000.00")
 
 
+def test_average_rate_weighs_invoice_and_risk() -> None:
+    """Средний курс партии — по обеим категориям, а не только по инвойсу.
+
+    Инвойс 124 000 $ закрыт по 88, Risk 60 000 $ — по 91:
+    (124 000 × 88 + 60 000 × 91) ÷ 184 000 = 88,978261.
+    """
+    finance = calculate_finance(
+        [
+            ItemInput(
+                unit_price_currency=Decimal("6.2"),
+                quantity=Decimal("20000"),
+                risk_unit_currency=Decimal("3"),
+            )
+        ],
+        cbr_rate=Decimal("90"),
+        invoice=CategoryPayments(paid_currency=Decimal("124000"), paid_rub=Decimal("10912000")),
+        risk=CategoryPayments(paid_currency=Decimal("60000"), paid_rub=Decimal("5460000")),
+    )
+    assert finance.invoice.rate == Decimal("88.000000")
+    assert finance.risk.rate == Decimal("91.000000")
+    assert finance.average_rate == Decimal("88.978261")
+
+
+def test_average_rate_without_debts_is_cbr_rate() -> None:
+    """Пустая партия не делит на ноль, а без платежей средний курс равен курсу ЦБ."""
+    empty = calculate_finance([], cbr_rate=Decimal("90"))
+    assert empty.average_rate == Decimal("0.00")
+
+    finance = calculate_finance(
+        [
+            ItemInput(
+                unit_price_currency=Decimal("10"),
+                quantity=Decimal("1"),
+                risk_unit_currency=Decimal("1"),
+            )
+        ],
+        cbr_rate=Decimal("90"),
+    )
+    assert finance.average_rate == Decimal("90.000000")
+
+
 def test_expenses_are_shared_by_full_currency_value() -> None:
     """Общие расходы делятся по полной стоимости строки: инвойс + Risk."""
     finance = calculate_finance(

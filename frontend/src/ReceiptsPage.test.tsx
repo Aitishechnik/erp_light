@@ -72,7 +72,7 @@ function batch(overrides: Partial<Batch> = {}): Batch {
       expenses_rub: '0.00',
       duty_rub: '0.00',
       vat_rub: '0.00',
-      effective_rate: '84.000000',
+      average_rate: '84.000000',
       final_cost_rub: '84000.00',
     },
     payments: [
@@ -346,7 +346,7 @@ describe('ReceiptsPage — план и лимит', () => {
     expect(sent).toContain('Фундук 145600')
   })
 
-  it('в списке за день показывается фактический курс партии', async () => {
+  it('в списке за день показывается средний курс партии', async () => {
     mockApi(
       routes({
         '/api/v1/batches': {
@@ -355,7 +355,7 @@ describe('ReceiptsPage — план и лимит', () => {
               finance: {
                 ...batch().finance,
                 exchange_rate: '85',
-                effective_rate: '100.500000',
+                average_rate: '100.500000',
               },
             }),
           ],
@@ -367,6 +367,81 @@ describe('ReceiptsPage — план и лимит', () => {
     const list = await screen.findByTestId('day-receipts')
     expect(list).toHaveTextContent('100.5')
     expect(list).not.toHaveTextContent('85')
+  })
+
+  it('средний курс партии учитывает платежи по Risk', async () => {
+    const user = userEvent.setup()
+    // Инвойс 124 000 $ по 88 и Risk 60 000 $ по 91 → 88,978261.
+    const withRisk = batch({
+      items: [
+        {
+          id: 'i1',
+          product_code: 'ТОВ1',
+          product_name: 'Арахис в глазури',
+          product_kind: 'finished',
+          unit: 'кг',
+          quantity: '20000.000',
+          unit_price_currency: '6.2000',
+          duty_percent: '5.0000',
+          vat_percent: '22.0000',
+          risk_unit_currency: '3.0000',
+          invoice_currency: '124000.00',
+          risk_currency: '60000.00',
+          duty_rub: '0.00',
+          vat_rub: '0.00',
+          risk_rub: '0.00',
+          expenses_rub: '0.00',
+          item_total_rub: '0.00',
+          unit_cost: '0.00',
+          quantity_on_hand: '20000.000',
+        },
+      ],
+      payments: [
+        {
+          id: 'pay1',
+          payment_date: TODAY,
+          amount_currency: '124000.00',
+          exchange_rate: '88',
+          amount_rub: '10912000.00',
+          category: 'invoice',
+          comment: null,
+        },
+        {
+          id: 'pay2',
+          payment_date: TODAY,
+          amount_currency: '60000.00',
+          exchange_rate: '91',
+          amount_rub: '5460000.00',
+          category: 'risk',
+          comment: null,
+        },
+      ],
+      finance: {
+        ...batch().finance,
+        invoice_total_currency: '124000.00',
+        risk_total_currency: '60000.00',
+        invoice_paid_currency: '124000.00',
+        invoice_paid_rub: '10912000.00',
+        invoice_remaining_currency: '0.00',
+        invoice_rate: '88.000000',
+        risk_paid_currency: '60000.00',
+        risk_paid_rub: '5460000.00',
+        risk_remaining_currency: '0.00',
+        risk_rate: '91.000000',
+        average_rate: '88.978261',
+      },
+    })
+    mockApi(routes({ '/api/v1/batches': { body: [withRisk] } }))
+    render(<ReceiptsPage />)
+
+    const list = await screen.findByTestId('day-receipts')
+    expect(list).toHaveTextContent('88.978261')
+
+    await user.click(within(list).getByRole('button', { name: 'Открыть' }))
+    // Средний курс — 88,9783; рядом видно, из чего он собран.
+    expect(screen.getByTestId('receipt-average-rate')).toHaveTextContent('88.9783')
+    expect(screen.getByTestId('receipt-effective')).toHaveTextContent('88')
+    expect(screen.getByTestId('receipt-risk-rate')).toHaveTextContent('91')
   })
 })
 
@@ -463,7 +538,7 @@ function draftBatch(overrides: Partial<Batch> = {}): Batch {
       invoice_paid_rub: '0.00',
       invoice_remaining_currency: '0.00',
       invoice_rate: '0.000000',
-      effective_rate: '0.000000',
+      average_rate: '0.000000',
       final_cost_rub: '0.00',
     },
     ...overrides,

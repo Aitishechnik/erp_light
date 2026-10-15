@@ -149,7 +149,8 @@ export type BatchFinance = {
   expenses_rub: string
   duty_rub: string
   vat_rub: string
-  effective_rate: string
+  /** Средний курс партии по инвойсу и Risk — он виден в списке поступлений. */
+  average_rate: string
   final_cost_rub: string
 }
 

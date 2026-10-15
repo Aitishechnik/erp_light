@@ -146,9 +146,21 @@ class BatchFinance:
         return self.risk.total_currency
 
     @property
-    def effective_rate(self) -> Decimal:
-        """Фактический курс партии по инвойсу — он виден в списке поступлений."""
-        return self.invoice.rate
+    def average_rate(self) -> Decimal:
+        """Средний курс партии по всем валютным долгам — он виден в списке поступлений.
+
+        Взвешиваем по суммам категорий: инвойс и Risk закрываются своими платежами,
+        поэтому курс каждой категории входит в средний со своим весом. Пример:
+        инвойс 124 000 $ по 88 и Risk 60 000 $ по 91 → 88,978261.
+        """
+        total = self.invoice.total_currency + self.risk.total_currency
+        if total == 0:
+            return ZERO
+        rub = (
+            self.invoice.rate * self.invoice.total_currency
+            + self.risk.rate * self.risk.total_currency
+        )
+        return q6(rub / total)
 
 
 def _category(
