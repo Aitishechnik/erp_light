@@ -134,6 +134,12 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/** Адреса всех запросов, которые сделала страница. */
+function fetchUrls(): string[] {
+  const mock = fetch as unknown as { mock: { calls: unknown[][] } }
+  return mock.mock.calls.map((call) => String(call[0]))
+}
+
 function bodies(): string[] {
   const mock = fetch as unknown as { mock: { calls: unknown[][] } }
   return mock.mock.calls.map((call) =>
@@ -233,6 +239,26 @@ describe('ReceiptsPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('уже существует')
   })
 
+  it('подписывает курс остатка: ЦБ с датой или введён вручную', async () => {
+    const user = userEvent.setup()
+    mockApi(routes())
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    // Карточка пришла с курсом ЦБ — видно и курс, и его дату.
+    expect(screen.getByTestId('receipt-cbr-rate')).toHaveTextContent(
+      /актуальному курсу ЦБ на 08.10.2026 — 90 ₽ за 1 USD/,
+    )
+
+    const rate = screen.getByLabelText('Курс')
+    await user.clear(rate)
+    await user.type(rate, '100')
+    expect(screen.getByTestId('receipt-cbr-rate')).toHaveTextContent(
+      /введён вручную — 100 ₽ за 1 USD/,
+    )
+  })
+
   it('запрашивает курс ЦБ по кнопке', async () => {
     const user = userEvent.setup()
     mockApi(
@@ -259,7 +285,15 @@ describe('ReceiptsPage', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Курс')).toHaveValue('91.2500')
     })
-    expect(screen.getByText(/Курс ЦБ/)).toBeInTheDocument()
+    expect(screen.getByText(/Актуальный курс ЦБ/)).toBeInTheDocument()
+    // Дата поступления в запрос курса не попадает: курс остатка — всегда актуальный.
+    const urls = fetchUrls()
+    const rateCall = urls.find((url) => url.includes('/api/v1/rates/USD'))
+    expect(rateCall).not.toContain('date=')
+    // И в карточке видно, каким курсом и на какую дату оценён остаток.
+    expect(screen.getByTestId('receipt-cbr-rate')).toHaveTextContent(
+      /актуальному курсу ЦБ на 08.10.2026 — 91.25 ₽ за 1 USD/,
+    )
   })
 })
 
@@ -849,6 +883,36 @@ describe('ReceiptsPage — растаможка партии', () => {
     expect(screen.getByTestId('customs-need-save')).toHaveTextContent(
       'после сохранения поступления',
     )
+  })
+
+  it('курс на дату растаможки подтягивается сам при смене даты', async () => {
+    const user = userEvent.setup()
+    mockApi({
+      // Конкретный маршрут — раньше общего: мок берёт первое совпадение.
+      '/api/v1/rates/USD?date=2026-10-08': {
+        body: { code: 'USD', rate_date: '2026-10-08', rate: '84.9048', nominal: 1, source: 'cbr' },
+      },
+      ...routes({ '/api/v1/batches': { body: [taxedBatch()] } }),
+    })
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    await user.click(screen.getByTestId('customs-start'))
+    // По умолчанию дата растаможки — сегодня, курс ЦБ на неё (в моке 90,5).
+    await waitFor(() => {
+      expect(screen.getByLabelText('Курс растаможки')).toHaveValue('90.5')
+    })
+
+    fireEvent.change(screen.getByLabelText('Дата растаможки'), {
+      target: { value: '2026-10-08' },
+    })
+    // Курс подтянулся сам, итоги пересчитаны по нему: 50 $ × 84,9048 и 231 $ × 84,9048.
+    await waitFor(() => {
+      expect(screen.getByLabelText('Курс растаможки')).toHaveValue('84.9048')
+    })
+    expect(screen.getByTestId('customs-duty-total')).toHaveTextContent('4 245,24')
+    expect(screen.getByTestId('customs-vat-total')).toHaveTextContent('19 613,01')
   })
 
   it('растаможка и её отмена ждут сохранения карточки', async () => {

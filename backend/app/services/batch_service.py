@@ -342,13 +342,16 @@ def _items_expenses_payments(
 
 
 def _resolve_batch_rate(db: Session, payload: BatchCreate) -> Decimal | None:
-    """Курс партии. У черновика без позиций и платежей считать нечего — курс не нужен."""
+    """Курс для незакрытого остатка. У черновика без позиций и платежей его не считаем.
+
+    Дата поступления на курс не влияет: остаток оценивается по актуальному курсу ЦБ.
+    Курс на прошлую дату задаётся только растаможкой.
+    """
     if not payload.items and not payload.payments:
         return payload.current_exchange_rate
     return currency_service.resolve_rate(
         db,
         currency=payload.currency,
-        day=payload.batch_date,
         provided=payload.current_exchange_rate,
         allow_fetch=payload.auto_rate,
     )

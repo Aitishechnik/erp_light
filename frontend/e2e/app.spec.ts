@@ -581,11 +581,19 @@ test('растаможка партии: проценты превращаютс
   await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [] }))
   await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
   // Курс на дату растаможки приходит с query — шаблон с «**» его тоже ловит.
-  await page.route('**/api/v1/rates/USD**', (route) =>
-    route.fulfill({
-      json: { code: 'USD', rate_date: today, rate: '90.5000', nominal: 1, source: 'cbr' },
-    }),
-  )
+  // ЦБ отвечает своим курсом на каждую дату: остаток — актуальный, таможня — на свою дату.
+  await page.route('**/api/v1/rates/USD**', (route) => {
+    const day = new URL(route.request().url()).searchParams.get('date')
+    return route.fulfill({
+      json: {
+        code: 'USD',
+        rate_date: day ?? today,
+        rate: day === '2026-10-08' ? '84.9048' : '90.5000',
+        nominal: 1,
+        source: 'cbr',
+      },
+    })
+  })
 
   await page.goto('/')
   await openSection(page, 'Закупки', 'Поступления')
@@ -596,6 +604,12 @@ test('растаможка партии: проценты превращаютс
   await expect(page.getByLabel('Курс растаможки')).toHaveValue('90.5')
   await expect(page.getByTestId('customs-duty-total')).toHaveText('4 525,00 ₽')
   await expect(page.getByTestId('customs-vat-total')).toHaveText('20 905,50 ₽')
+
+  // Сменили дату растаможки — курс ЦБ на неё подтянулся сам, суммы пересчитались.
+  await page.getByLabel('Дата растаможки').fill('2026-10-08')
+  await expect(page.getByLabel('Курс растаможки')).toHaveValue('84.9048')
+  await expect(page.getByTestId('customs-duty-total')).toHaveText('4 245,24 ₽')
+  await expect(page.getByTestId('customs-vat-total')).toHaveText('19 613,01 ₽')
 
   // Курс правят на таможенный — суммы пересчитываются по строкам.
   await page.getByLabel('Курс растаможки').fill('80')

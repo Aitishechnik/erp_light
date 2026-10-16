@@ -198,9 +198,14 @@ def get_rate(db: Session, code: str, day: date, *, allow_fetch: bool = True) -> 
 
 
 def resolve_rate(
-    db: Session, *, currency: str, day: date, provided: Decimal | None, allow_fetch: bool = True
+    db: Session, *, currency: str, provided: Decimal | None, allow_fetch: bool = True
 ) -> Decimal:
-    """Курс партии: явный, иначе последний доступный (ЦБ), иначе ошибка."""
+    """Курс незакрытого остатка партии: явный, иначе последний доступный (ЦБ).
+
+    Дата поступления здесь не участвует: остаток всегда оценивается по актуальному
+    курсу (последний доступный день). Курс на дату в прошлом задаётся только при
+    растаможке — там он фиксируется на дату очистки.
+    """
     code = (currency or BASE_CURRENCY).strip().upper()
     if provided is not None and provided > 0:
         return provided

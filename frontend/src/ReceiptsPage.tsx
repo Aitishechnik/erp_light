@@ -103,6 +103,11 @@ type Draft = {
   customsDate: string
   /** Курс, по которому зафиксированы пошлина и НДС. */
   customsRate: string
+  /**
+   * Дата курса ЦБ, которым оценён незакрытый остаток (пусто — курс введён вручную).
+   * Курс остатка — всегда актуальный: дата поступления на него не влияет.
+   */
+  rateDate: string
 }
 
 /** Черновик окна подтверждения растаможки: дата, курс и правимые итоги. */
@@ -145,6 +150,13 @@ function monthDays(month: string): { date: string; inMonth: boolean }[] {
     if (cell.inMonth) lastInMonth = index
   })
   return days.slice(0, lastInMonth + 1)
+}
+
+/** «2026-10-16» → «16.10.2026»: дата курса ЦБ в подписи карточки. */
+function ruDate(value: string | null | undefined): string {
+  if (!value) return '—'
+  const [year, month, day] = value.split('-')
+  return year && month && day ? `${day}.${month}.${year}` : value
 }
 
 /** Курс показываем с четырьмя знаками: 100.4619 вместо 100.46191999999999. */
@@ -350,6 +362,7 @@ function draftFrom(batch: Batch): Draft {
     // У черновика из 1С позиций нет — курс брать неоткуда. Оставляем пустым,
     // чтобы случайный курс не попал в себестоимость, когда добавят товар.
     rate: isDraft ? '' : trim(batch.finance.exchange_rate),
+    rateDate: isDraft ? '' : (batch.finance.rate_date ?? ''),
     comment: batch.comment ?? '',
     items: batch.items.map((item, index) => ({
       key: `i${index}`,
@@ -393,6 +406,8 @@ function emptyDraft(day: string): Draft {
     supplierId: '',
     supplierText: '',
     rate: '1',
+    // Курс ещё не выбирали: подпись покажет «введён вручную», пока не нажмут «Курс ЦБ».
+    rateDate: '',
     comment: '',
     items: [
       {
@@ -431,6 +446,7 @@ function snapshot(source: Draft): string {
     supplierId: source.supplierId,
     supplierText: source.supplierText.trim(),
     rate: source.rate.replace(',', '.'),
+    rateDate: source.rateDate,
     comment: source.comment,
     items: source.items.map((row) => [
       row.code,
@@ -603,16 +619,22 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
     }
   }
 
+  /**
+   * «Обновить курс ЦБ» — курс для незакрытого остатка.
+   *
+   * Берём **актуальный** курс (последний доступный день), а не курс на дату
+   * поступления: дата в прошлом задаёт только растаможку.
+   */
   const fillRate = async () => {
     if (!draft) return
     setRateHint(null)
     try {
-      const rate = await fetchRate(draft.currency.trim().toUpperCase() || 'RUB', draft.date)
-      setDraft({ ...draft, rate: rate.rate })
+      const rate = await fetchRate(draft.currency.trim().toUpperCase() || 'RUB')
+      setDraft({ ...draft, rate: rate.rate, rateDate: rate.rate_date ?? '' })
       setRateHint(
         rate.source === 'base'
           ? 'Рубль — курс 1'
-          : `Курс ЦБ на ${draft.date}: ${rate.rate} ₽ за 1 ${rate.code}`,
+          : `Актуальный курс ЦБ на ${ruDate(rate.rate_date)}: ${rate.rate} ₽ за 1 ${rate.code}`,
       )
     } catch (err) {
       setRateHint(errorMessage(err))
@@ -640,6 +662,40 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   const batchCurrencyRate = (source: Draft) =>
     source.currency.trim().toUpperCase() === 'RUB' ? 1 : number(source.rate) || 1
 
+  /**
+   * Курс ЦБ на выбранную дату растаможки: подтягиваем сами при смене даты и по кнопке.
+   *
+   * Здесь дата в прошлом уместна — именно ею фиксируются пошлина и НДС.
+   */
+  const loadCustomsRate = async (day: string) => {
+    if (!draft || !day) return
+    try {
+      const row = await fetchRate(draft.currency.trim().toUpperCase() || 'RUB', day)
+      const rate = number(row.rate) || 1
+      setCustoms((current) => {
+        // Пока ходили в ЦБ, дату могли сменить: применяем ответ только к своей дате.
+        if (current === null || current.date !== day) return current
+        const totals = customsTotals(draft, rate)
+        return {
+          ...current,
+          rate: trim(row.rate),
+          duty: String(totals.duty),
+          vat: String(totals.vat),
+          hint:
+            row.source === 'base'
+              ? 'Рубль — курс 1'
+              : `Курс ЦБ на ${ruDate(day)}: ${trim(row.rate)} ₽ за 1 ${row.code}`,
+        }
+      })
+    } catch (err) {
+      setCustoms((current) =>
+        current === null || current.date !== day
+          ? current
+          : { ...current, hint: `${errorMessage(err)} — введите курс вручную` },
+      )
+    }
+  }
+
   /** Открыть окно растаможки: дата — сегодня, курс — ЦБ на эту дату (если доступен). */
   const openCustoms = async () => {
     if (!draft?.id) return
@@ -654,31 +710,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
       vat: String(totals.vat),
       hint: null,
     })
-    try {
-      const row = await fetchRate(draft.currency.trim().toUpperCase() || 'RUB', start)
-      const rate = number(row.rate) || 1
-      const cbr = customsTotals(draft, rate)
-      setCustoms((current) =>
-        current === null
-          ? current
-          : {
-              ...current,
-              rate: trim(row.rate),
-              duty: String(cbr.duty),
-              vat: String(cbr.vat),
-              hint:
-                row.source === 'base'
-                  ? 'Рубль — курс 1'
-                  : `Курс ЦБ на ${start}: ${trim(row.rate)} ₽ за 1 ${row.code}`,
-            },
-      )
-    } catch (err) {
-      setCustoms((current) =>
-        current === null
-          ? current
-          : { ...current, hint: `${errorMessage(err)} — введите курс вручную` },
-      )
-    }
+    await loadCustomsRate(start)
   }
 
   /** Курс в окне растаможки правят руками — итоги пересчитываем по строкам. */
@@ -686,28 +718,6 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
     if (!draft || !customs) return
     const totals = customsTotals(draft, number(value))
     setCustoms({ ...customs, rate: value, duty: String(totals.duty), vat: String(totals.vat) })
-  }
-
-  /** Кнопка «Курс ЦБ на дату»: запросить курс выбранного дня и пересчитать итоги. */
-  const refillCustomsRate = async () => {
-    if (!draft || !customs) return
-    try {
-      const row = await fetchRate(draft.currency.trim().toUpperCase() || 'RUB', customs.date)
-      const rate = number(row.rate) || 1
-      const totals = customsTotals(draft, rate)
-      setCustoms({
-        ...customs,
-        rate: trim(row.rate),
-        duty: String(totals.duty),
-        vat: String(totals.vat),
-        hint:
-          row.source === 'base'
-            ? 'Рубль — курс 1'
-            : `Курс ЦБ на ${customs.date}: ${trim(row.rate)} ₽ за 1 ${row.code}`,
-      })
-    } catch (err) {
-      setCustoms({ ...customs, hint: `${errorMessage(err)} — введите курс вручную` })
-    }
   }
 
   const submitCustoms = async () => {
@@ -834,6 +844,21 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
       setBusy(false)
     }
   }
+
+  /**
+   * Подпись под шапкой: каким курсом оценён незакрытый остаток.
+   * Курс остатка — актуальный ЦБ; с даты поступления он не берётся.
+   */
+  const rateCaption = (() => {
+    if (!draft) return ''
+    const code = draft.currency.trim().toUpperCase() || 'RUB'
+    if (code === 'RUB') return 'Рубль — курс 1'
+    if (number(draft.rate) <= 0) return 'Курс остатка не задан — нажмите «Обновить курс ЦБ».'
+    const value = `${formatRate(number(draft.rate))} ₽ за 1 ${code}`
+    return draft.rateDate
+      ? `Незакрытый остаток оценивается по актуальному курсу ЦБ на ${ruDate(draft.rateDate)} — ${value}: дата поступления на курс не влияет.`
+      : `Курс остатка введён вручную — ${value} (например, когда ЦБ недоступен).`
+  })()
 
   return (
     <section>
@@ -1069,7 +1094,10 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
               <input
                 aria-label="Курс"
                 value={draft.rate}
-                onChange={(event) => setDraft({ ...draft, rate: event.target.value })}
+                onChange={(event) =>
+                  // Курс вписан руками — дата курса ЦБ больше не применима.
+                  setDraft({ ...draft, rate: event.target.value, rateDate: '' })
+                }
               />
             </label>
             <button type="button" onClick={() => void fillRate()}>
@@ -1086,6 +1114,10 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
             </label>
           </div>
           {rateHint ? <p className="hint">{rateHint}</p> : null}
+          {/* Каким курсом и на какую дату оценён незакрытый остаток. */}
+          <p className="hint" data-testid="receipt-cbr-rate">
+            {rateCaption}
+          </p>
 
           {draft.id && mayLoadItems ? (
             <div className="toolbar" data-testid="batch-items-import">
@@ -1411,7 +1443,12 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                     type="date"
                     aria-label="Дата растаможки"
                     value={customs.date}
-                    onChange={(event) => setCustoms({ ...customs, date: event.target.value })}
+                    onChange={(event) => {
+                      const day = event.target.value
+                      setCustoms({ ...customs, date: day })
+                      // Курс ЦБ на дату растаможки — сразу, без отдельного нажатия.
+                      void loadCustomsRate(day)
+                    }}
                   />
                 </label>
                 <label className="field">
@@ -1443,7 +1480,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => void refillCustomsRate()}
+                  onClick={() => void loadCustomsRate(customs.date)}
                   data-testid="customs-rate"
                 >
                   Курс ЦБ на дату

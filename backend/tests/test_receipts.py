@@ -140,6 +140,35 @@ def test_unknown_currency_without_network(
     assert "введите вручную" in response.json()["detail"]
 
 
+def test_batch_rate_ignores_arrival_date(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Дата поступления в прошлом не задаёт курс остатка — берём актуальный курс ЦБ.
+
+    ЦБ отдаёт на 08.10.2026 курс 90,5, а на сегодня — 83,76. Поступление задним числом
+    всё равно оценивается по актуальному курсу: курс на прошлую дату нужен только
+    растаможке.
+    """
+    login("purchase")
+    today = date.today()
+
+    def fake_fetch(day: date) -> currency_service.CbrRates:
+        rate = Decimal("83.7600") if day == today else Decimal("90.5000")
+        return currency_service.CbrRates(rate_date=day, rates={"USD": (1, rate)})
+
+    monkeypatch.setattr(currency_service, "fetch_cbr_rates", fake_fetch)
+    created = client.post(
+        "/api/v1/batches",
+        json=_payload(batch_date=DAY, current_exchange_rate=None, auto_rate=True),
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert Decimal(body["finance"]["exchange_rate"]) == Decimal("83.76")
+    assert body["finance"]["rate_date"] == today.isoformat()
+    # 1000 $ по актуальному курсу + 500 ₽ доставки — а не по курсу дня поступления.
+    assert Decimal(body["finance"]["final_cost_rub"]) == Decimal("84260.00")
+
+
 def test_receipt_takes_rate_from_cbr(
     client: TestClient, login, supplier: Counterparty, monkeypatch: pytest.MonkeyPatch
 ) -> None:
