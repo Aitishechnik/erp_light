@@ -416,12 +416,51 @@ function emptyDraft(day: string): Draft {
   }
 }
 
+/**
+ * Слепок карточки — то, что уйдёт на сервер при сохранении.
+ *
+ * Растаможка и её отмена считают суммы по **сохранённым** строкам, поэтому
+ * несохранённые правки в карточке нужно поймать до нажатия кнопки: сравниваем
+ * текущий слепок с тем, что пришло с сервера.
+ */
+function snapshot(source: Draft): string {
+  return JSON.stringify({
+    number: source.number.trim(),
+    date: source.date,
+    currency: source.currency.trim().toUpperCase(),
+    supplierId: source.supplierId,
+    supplierText: source.supplierText.trim(),
+    rate: source.rate.replace(',', '.'),
+    comment: source.comment,
+    items: source.items.map((row) => [
+      row.code,
+      row.quantity,
+      row.price,
+      row.duty,
+      row.vat,
+      row.risk,
+      row.dutyRub,
+      row.vatRub,
+    ]),
+    payments: source.payments.map((row) => [
+      row.date,
+      row.amount,
+      row.rate,
+      row.category,
+      row.comment,
+    ]),
+    expenses: source.expenses.map((row) => [row.description, row.currency, row.amount]),
+  })
+}
+
 export function ReceiptsPage({ user }: { user?: SessionUser }) {
   const today = iso(new Date())
   const [month, setMonth] = useState(today.slice(0, 7))
   const [batches, setBatches] = useState<Batch[]>([])
   const [day, setDay] = useState(today)
   const [draft, setDraft] = useState<Draft | null>(null)
+  /** Слепок сохранённой карточки: по нему видно, есть ли несохранённые правки. */
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null)
   const [suppliers, setSuppliers] = useState<Counterparty[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [rateHint, setRateHint] = useState<string | null>(null)
@@ -503,6 +542,8 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   const hasRisk = (cost?.risk.total ?? 0) > 0
   /** Партия растаможена: пошлина и НДС — фикс в рублях, строки только для чтения. */
   const cleared = (draft?.customsDate ?? '') !== ''
+  /** В карточке есть правки, которых нет на сервере: таможню считать ещё не по чему. */
+  const dirty = draft !== null && savedSnapshot !== null && snapshot(draft) !== savedSnapshot
 
   const shiftMonth = (delta: number) => {
     const base = monthStart(month)
@@ -518,7 +559,9 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
     setItemsFile(null)
     setItemsHint(null)
     setCustoms(null)
-    setDraft(emptyDraft(target))
+    const fresh = emptyDraft(target)
+    setDraft(fresh)
+    setSavedSnapshot(snapshot(fresh))
   }
 
   const startEdit = (batch: Batch) => {
@@ -527,7 +570,9 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
     setItemsFile(null)
     setItemsHint(null)
     setCustoms(null)
-    setDraft(draftFrom(batch))
+    const fresh = draftFrom(batch)
+    setDraft(fresh)
+    setSavedSnapshot(snapshot(fresh))
   }
 
   /**
@@ -541,7 +586,9 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
     setItemsHint(null)
     try {
       const result = await uploadBatchItems(draft.id, itemsFile)
-      setDraft(draftFrom(result.batch))
+      const fresh = draftFrom(result.batch)
+      setDraft(fresh)
+      setSavedSnapshot(snapshot(fresh))
       setItemsFile(null)
       if (itemsInput.current) itemsInput.current.value = ''
       const replaced = result.report.rows_updated
@@ -674,7 +721,9 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
         duty_rub: customs.duty.replace(',', '.') || '0',
         vat_rub: customs.vat.replace(',', '.') || '0',
       })
-      setDraft(draftFrom(batch))
+      const fresh = draftFrom(batch)
+      setDraft(fresh)
+      setSavedSnapshot(snapshot(fresh))
       setCustoms(null)
       await reload()
     } catch (err) {
@@ -690,7 +739,9 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
     setError(null)
     try {
       const batch = await cancelCustoms(draft.id)
-      setDraft(draftFrom(batch))
+      const fresh = draftFrom(batch)
+      setDraft(fresh)
+      setSavedSnapshot(snapshot(fresh))
       await reload()
     } catch (err) {
       setError(errorMessage(err))
@@ -760,6 +811,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
         await createBatch(payload)
       }
       setDraft(null)
+      setSavedSnapshot(null)
       await reload()
     } catch (err) {
       setError(errorMessage(err))
@@ -774,6 +826,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
     try {
       await deleteBatch(draft.id)
       setDraft(null)
+      setSavedSnapshot(null)
       await reload()
     } catch (err) {
       setError(errorMessage(err))
@@ -1303,7 +1356,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                 type="button"
                 className="primary"
                 data-testid="customs-start"
-                disabled={busy || !draft.id || draft.items.length === 0}
+                disabled={busy || dirty || !draft.id || draft.items.length === 0}
                 onClick={() => void openCustoms()}
               >
                 Растаможен
@@ -1318,7 +1371,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                   <button
                     type="button"
                     data-testid="customs-cancel"
-                    disabled={busy}
+                    disabled={busy || dirty}
                     onClick={() => void dropCustoms()}
                   >
                     Отменить растаможку
@@ -1327,6 +1380,14 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
               </>
             )}
           </div>
+          {dirty ? (
+            // Таможня считает суммы по сохранённым строкам: с несохранёнными правками
+            // карточка после растаможки вернулась бы к состоянию на сервере.
+            <p className="hint" data-testid="customs-dirty">
+              В карточке есть несохранённые изменения. Сначала сохраните поступление — потом
+              растаможка посчитает суммы по сохранённым строкам.
+            </p>
+          ) : null}
           {draft.customsDate === '' && !draft.id ? (
             <p className="hint" data-testid="customs-need-save">
               Растаможка доступна после сохранения поступления.

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Batch, Counterparty, Product, SessionUser } from './api'
@@ -849,6 +849,29 @@ describe('ReceiptsPage — растаможка партии', () => {
     expect(screen.getByTestId('customs-need-save')).toHaveTextContent(
       'после сохранения поступления',
     )
+  })
+
+  it('растаможка и её отмена ждут сохранения карточки', async () => {
+    const user = userEvent.setup()
+    mockApi(routes({ '/api/v1/batches': { body: [clearedBatch()] } }))
+    render(<ReceiptsPage user={DIRECTOR_USER} />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    expect(screen.getByTestId('customs-cancel')).toBeEnabled()
+    expect(screen.queryByTestId('customs-dirty')).toBeNull()
+
+    // Правка, которой нет на сервере: суммы таможни считались бы не по этим данным.
+    fireEvent.change(screen.getByLabelText('Дата поступления'), {
+      target: { value: '2026-10-05' },
+    })
+    expect(screen.getByTestId('customs-dirty')).toHaveTextContent('несохранённые изменения')
+    expect(screen.getByTestId('customs-cancel')).toBeDisabled()
+
+    // Вернули как было — фиксация снова доступна.
+    fireEvent.change(screen.getByLabelText('Дата поступления'), { target: { value: TODAY } })
+    expect(screen.queryByTestId('customs-dirty')).toBeNull()
+    expect(screen.getByTestId('customs-cancel')).toBeEnabled()
   })
 
   it('в списке за день и календаре видно, что партия растаможена', async () => {
