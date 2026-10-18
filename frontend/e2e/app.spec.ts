@@ -425,7 +425,7 @@ test('поступление заводится в календаре, себе�
   await page.getByRole('button', { name: 'Добавить поступление' }).click()
   await page.getByLabel('Номер поступления').fill('P-500')
   await page.getByLabel('Валюта').fill('USD')
-  await page.getByLabel('Курс').fill('90')
+  await page.getByLabel('Курс', { exact: true }).fill('90')
   await page.getByLabel('Товар i0').fill('SKU-1')
   await page.getByLabel('Количество i0').fill('10')
   await page.getByLabel('Стоимость за ед. i0').fill('100')
@@ -437,6 +437,7 @@ test('поступление заводится в календаре, себе�
   await expect(page.getByTestId('unit-cost-i0')).toHaveText('9 000,00')
 
   // Валютный платёж закрывает часть инвойса по своему курсу и не переоценивается.
+  await page.getByRole('tab', { name: 'Платежи' }).click()
   await page.getByRole('button', { name: 'Добавить валютный платёж' }).click()
   await page.getByLabel('Сумма платежа pnew1').fill('600')
   await page.getByLabel('Курс платежа pnew1').fill('80')
@@ -508,7 +509,7 @@ test('пошлина, Risk и общие расходы считаются в к
   await page.getByRole('button', { name: 'Добавить поступление' }).click()
   await page.getByLabel('Номер поступления').fill('P-600')
   await page.getByLabel('Валюта').fill('USD')
-  await page.getByLabel('Курс').fill('90')
+  await page.getByLabel('Курс', { exact: true }).fill('90')
   await page.getByLabel('Товар i0').fill('SKU-1')
   await page.getByLabel('Количество i0').fill('10')
   await page.getByLabel('Стоимость за ед. i0').fill('100')
@@ -523,6 +524,7 @@ test('пошлина, Risk и общие расходы считаются в к
   await expect(page.getByTestId('receipt-duty')).toContainText('4 500,00')
 
   // Общий расход в рублях входит в себестоимость целиком.
+  await page.getByRole('tab', { name: 'Общие расходы' }).click()
   await page.getByRole('button', { name: 'Добавить расход' }).click()
   await page.getByLabel('Расход enew1').fill('Доставка')
   await page.getByLabel('Сумма расхода enew1').fill('5000')
@@ -530,6 +532,7 @@ test('пошлина, Risk и общие расходы считаются в к
   await expect(page.getByTestId('receipt-total')).toHaveText('100 400,00 ₽')
 
   // Платёж категории Risk закрывает Risk по своему курсу.
+  await page.getByRole('tab', { name: 'Платежи' }).click()
   await page.getByRole('button', { name: 'Добавить валютный платёж' }).click()
   const payRow = page.locator('[data-testid="receipt-payments"] tbody tr').first()
   await payRow.getByLabel(/Категория платежа/).selectOption('risk')
@@ -636,7 +639,8 @@ test('растаможка партии: проценты превращаютс
   // Проценты в строках исчезли: вместо полей — зафиксированные рубли.
   await expect(page.getByLabel('Пошлина i0')).toHaveCount(0)
   await expect(page.getByLabel('НДС i0')).toHaveCount(0)
-  // Строка календаря тоже помечена.
+  // Строка календаря тоже помечена — возвращаемся к списку.
+  await page.getByTestId('receipt-back').click()
   await expect(page.getByTestId('clearance-badge')).toBeVisible()
 
   expect(sent[0]?.rate).toBe('80')

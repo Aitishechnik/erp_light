@@ -622,14 +622,17 @@ button.primary:disabled,
   border-radius: 0.6rem;
 }
 
+/* Карточка партии — отдельный экран документа: секции стопкой, подвал внизу. */
 .receipt-form {
-  margin-top: 1.5rem;
-  padding: 1rem;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 0.6rem;
-  /* Карточка широкая: её таблицы прокручиваются внутри, страница не «уезжает». */
-  overflow-x: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: calc(100vh - 7rem);
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
 }
 
 /* Колонки карточки — по содержимому, но поля не сжимаются в нечитаемое. */
@@ -674,4 +677,683 @@ button.primary:disabled,
 
 .customs-box .toolbar {
   align-items: flex-end;
+}
+
+/* ── Экран документа партии: шапка, паспорт, KPI, вкладки ─────────────── */
+
+.doc-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.doc-crumbs .sep {
+  color: #c3c8d0;
+}
+
+.doc-crumbs strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.receipt-doc .back-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.receipt-doc .back-link:hover {
+  color: var(--accent);
+}
+
+/* Кнопки в карточке: без них браузер рисует свои «серые» кнопки. */
+.receipt-doc button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.receipt-doc button:hover:not(:disabled) {
+  background: #f9fafb;
+}
+
+.receipt-doc button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.receipt-doc button.primary:hover:not(:disabled) {
+  background: #1a63d3;
+}
+
+.receipt-doc button.primary:disabled {
+  border-color: #a9c6f5;
+  background: #a9c6f5;
+  color: #fff;
+}
+
+.receipt-doc button.mini {
+  padding: 0.15rem 0.45rem;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.receipt-doc button.mini:hover:not(:disabled) {
+  background: #f1f3f5;
+  color: var(--text);
+}
+
+.receipt-doc button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.receipt-doc button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 1px;
+}
+
+.doc-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.doc-header-main {
+  min-width: 0;
+}
+
+.doc-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 4px 0 2px;
+}
+
+/* Номер партии правится прямо в заголовке — без отдельного поля «Номер». */
+.doc-title-input {
+  min-width: 6ch;
+  max-width: 100%;
+  margin-left: -0.35rem;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 1.625rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.doc-title-input:hover {
+  border-color: var(--border);
+  background: #fff;
+}
+
+.doc-title-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: #fff;
+}
+
+.doc-header-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+  padding-top: 1.4rem;
+}
+
+.status-source {
+  background: #f1f3f5;
+  color: var(--muted);
+}
+
+/* Паспорт партии: дата, поставщик, валюта, курс и комментарий. */
+.doc-passport {
+  display: grid;
+  grid-template-columns: 10rem minmax(15rem, 1.6fr) 6rem 13rem;
+  gap: 10px 14px;
+  padding: 12px 16px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.doc-passport .field {
+  font-size: 11.5px;
+  min-width: 0;
+}
+
+.receipt-doc .doc-passport .field input,
+.receipt-doc .doc-passport .field select {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+}
+
+.doc-passport .doc-comment {
+  grid-column: 1 / -1;
+}
+
+.receipt-doc .doc-passport .field textarea {
+  width: 100%;
+  min-width: 0;
+}
+
+.rate-row {
+  display: flex;
+  gap: 6px;
+}
+
+.rate-row .mini {
+  white-space: nowrap;
+}
+
+.doc-rate-caption {
+  margin: -4px 2px 0;
+}
+
+/* Шесть главных цифр партии: крупно, до всех деталей. */
+.kpis {
+  display: grid;
+  grid-template-columns: 1.2fr repeat(5, 1fr);
+  gap: 10px;
+}
+
+.kpi {
+  min-width: 0;
+  padding: 10px 14px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.kpi-primary {
+  border-color: color-mix(in srgb, var(--accent) 35%, white);
+  background: linear-gradient(180deg, #f5f9ff, #fff);
+}
+
+.kpi-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.kpi-value {
+  display: block;
+  font-size: 1.2rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: #98a2b3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kpi-sub b {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* Вкладки примыкают к панели — как одна карточка. */
+.doc-tabs-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.receipt-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 8px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 0.75rem 0.75rem 0 0;
+}
+
+.receipt-tabs .tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: -1px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.receipt-tabs .tab:hover {
+  color: var(--text);
+}
+
+.receipt-tabs .tab.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.tab-count {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #f1f3f5;
+  color: #475467;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.receipt-tabs .tab.active .tab-count {
+  background: #eaf1fe;
+  color: var(--accent);
+}
+
+.doc-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+
+.doc-tabs-panel .doc-card {
+  border-top: 0;
+  border-radius: 0 0 0.75rem 0.75rem;
+}
+
+.doc-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 16px;
+  background: #fcfcfd;
+  border-bottom: 1px solid var(--border);
+}
+
+.doc-card-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.doc-card-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.doc-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--border);
+  background: #fcfcfd;
+}
+
+.doc-toolbar-label {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.file-pick {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.7rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.5rem;
+  background: #fff;
+  font-size: 0.8rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.file-pick:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.file-pick:focus-within {
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 1px;
+}
+
+.receipt-doc .doc-toolbar .file-pick input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.receipt-doc .doc-toolbar .file-pick-name {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.doc-inline-hint {
+  margin: 8px 16px 12px;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.doc-card-foot {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  text-align: right;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.doc-card-foot strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Закрытие долга: суммы рядом с таблицей платежей, а не простынёй подписей. */
+.closing {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  padding: 16px;
+  background: #fcfcfd;
+  border-top: 1px solid var(--border);
+}
+
+.closing-group {
+  padding: 6px 14px 8px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+}
+
+.closing-group h3 {
+  margin: 6px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.closed-empty {
+  margin: 6px 0 8px;
+  font-size: 12.5px;
+}
+
+.closing-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 12px;
+  padding: 5px 0;
+  border-bottom: 1px dashed #eef0f3;
+  font-size: 12.5px;
+}
+
+.closing-row span:first-child {
+  color: var(--muted);
+}
+
+.closing-row strong {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.closing-row .muted {
+  grid-column: 1 / -1;
+  font-size: 11.5px;
+  text-align: right;
+}
+
+.closing-row:last-child {
+  border-bottom: 0;
+}
+
+/* Таможня: факты без простыни подписей. */
+.customs-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.customs-facts strong {
+  display: block;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* «Из чего сложилась себестоимость»: полоса долей и разбор по слагаемым. */
+.cost-summary {
+  display: grid;
+  grid-template-columns: 18rem minmax(0, 1fr);
+  gap: 26px;
+  padding: 16px;
+}
+
+.cost-total strong {
+  display: block;
+  margin: 2px 0 4px;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.cost-bar {
+  display: flex;
+  height: 16px;
+  margin-top: 18px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #eef1f5;
+}
+
+.cost-bar span {
+  height: 100%;
+  min-width: 3px;
+}
+
+.cost-bar span + span {
+  border-left: 1px solid #fff;
+}
+
+.cost-legend {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.cost-legend-item {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  column-gap: 5px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.cost-legend-item i {
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 2px;
+}
+
+.cost-legend-name {
+  white-space: nowrap;
+}
+
+.cost-legend-item b {
+  grid-column: 2;
+  color: var(--text);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cost-legend-item small {
+  grid-column: 2;
+  color: #98a2b3;
+  font-size: 10.5px;
+}
+
+.cost-lines th,
+.cost-lines td {
+  padding: 9px 16px;
+}
+
+/* Подвал карточки: себестоимость и сохранение всегда под рукой. */
+.doc-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: auto;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: 0 -6px 20px rgba(16, 24, 40, 0.06);
+}
+
+.doc-footer-total .kpi-label {
+  margin-bottom: 0;
+}
+
+.doc-footer-total strong {
+  font-size: 1.2rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.doc-footer-note {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Окно растаможки — модальное: карточка за ним видна, но не правится. */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(16, 24, 40, 0.45);
+}
+
+.customs-box.modal {
+  width: min(56rem, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  margin: 0;
+  background: #fff;
+  box-shadow: 0 24px 60px rgba(16, 24, 40, 0.25);
+}
+
+@media (max-width: 1200px) {
+  .kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .doc-passport {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .closing {
+    grid-template-columns: 1fr;
+  }
+  .cost-summary {
+    grid-template-columns: 1fr;
+  }
+  .cost-legend {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Поля таблиц — «тихие»: рамка появляется только при наведении и фокусе. */
+.receipt-doc .doc-card .receipt-items td input,
+.receipt-doc .doc-card .receipt-expenses td input,
+.receipt-doc .doc-card .receipt-payments td input {
+  border-color: transparent;
+  background: transparent;
+}
+
+.receipt-doc .doc-card .receipt-items td input:hover:not(:disabled),
+.receipt-doc .doc-card .receipt-expenses td input:hover:not(:disabled),
+.receipt-doc .doc-card .receipt-payments td input:hover:not(:disabled) {
+  border-color: var(--border);
+  background: #fff;
+}
+
+.receipt-doc .doc-card .receipt-items td input:focus,
+.receipt-doc .doc-card .receipt-expenses td input:focus,
+.receipt-doc .doc-card .receipt-payments td input:focus {
+  border-color: var(--accent);
+  background: #fff;
+}
+
+.receipt-doc .doc-card .receipt-items td input:disabled,
+.receipt-doc .doc-card .receipt-expenses td input:disabled,
+.receipt-doc .doc-card .receipt-payments td input:disabled {
+  border-color: transparent;
+  background: #f5f6f8;
+}
+
+.rate-row button {
+  padding: 0.3rem 0.55rem;
+  font-size: 0.8rem;
+}
+
+/* 1440-экран: карточка должна помещаться целиком, а не прятать «Сумму» за прокруткой. */
+@media (max-width: 1500px) {
+  .receipt-items td input,
+  .receipt-payments td input,
+  .receipt-expenses td input {
+    min-width: 3.6rem;
+  }
+  .receipt-items th,
+  .receipt-items td {
+    padding-left: 0.45rem;
+    padding-right: 0.45rem;
+  }
 }

@@ -172,12 +172,15 @@ describe('ReceiptsPage', () => {
     })
     await user.click(screen.getByRole('button', { name: 'Открыть' }))
 
+    // Цена единицы — во вкладке «Позиции».
+    expect(screen.getByTestId('receipt-total')).toHaveTextContent('84 000,00')
+    expect(screen.getByTestId('unit-cost-i0')).toHaveTextContent('8 400,00')
+
     // 600 $ закрыты по курсу платежа 80 (48 000 ₽), остаток 400 $ по 90 = 36 000 ₽.
+    await user.click(screen.getByRole('tab', { name: 'Платежи' }))
     expect(screen.getByTestId('receipt-paid')).toHaveTextContent('600,00')
     expect(screen.getByTestId('receipt-remaining')).toHaveTextContent('400,00')
     expect(screen.getByTestId('payment-rub-p0')).toHaveTextContent('48 000,00')
-    expect(screen.getByTestId('receipt-total')).toHaveTextContent('84 000,00')
-    expect(screen.getByTestId('unit-cost-i0')).toHaveTextContent('8 400,00')
 
     const rate = screen.getByLabelText('Курс')
     await user.clear(rate)
@@ -185,7 +188,9 @@ describe('ReceiptsPage', () => {
 
     // Переоценилась только незакрытая часть: 48 000 + 400 × 100 = 88 000 ₽.
     expect(screen.getByTestId('receipt-total')).toHaveTextContent('88 000,00')
+    await user.click(screen.getByRole('tab', { name: 'Позиции' }))
     expect(screen.getByTestId('unit-cost-i0')).toHaveTextContent('8 800,00')
+    await user.click(screen.getByRole('tab', { name: 'Платежи' }))
     expect(screen.getByTestId('payment-rub-p0')).toHaveTextContent('48 000,00')
   })
 
@@ -330,6 +335,7 @@ describe('ReceiptsPage — план и лимит', () => {
     await user.clear(screen.getByLabelText('НДС i0'))
     await user.type(screen.getByLabelText('НДС i0'), '0')
 
+    await user.click(screen.getByRole('tab', { name: 'Платежи' }))
     await user.click(screen.getByRole('button', { name: 'Добавить валютный платёж' }))
     const pay = screen.getByTestId('receipt-payments').querySelector('tbody tr')
     expect(pay).not.toBeNull()
@@ -355,6 +361,7 @@ describe('ReceiptsPage — план и лимит', () => {
     await user.type(screen.getByLabelText('Товар i0'), 'ТОВ1')
     await user.type(screen.getByLabelText('Количество i0'), '10')
     await user.type(screen.getByLabelText('Стоимость за ед. i0'), '100')
+    await user.click(screen.getByRole('tab', { name: 'Платежи' }))
     await user.click(screen.getByRole('button', { name: 'Добавить валютный платёж' }))
     await user.type(screen.getByLabelText('Сумма платежа pnew1'), '1500')
     await user.type(screen.getByLabelText('Курс платежа pnew1'), '80')
@@ -535,6 +542,7 @@ describe('ReceiptsPage — пошлина, НДС, Risk и общие расхо
 
     await screen.findByTestId('receipts-calendar')
     await user.click(screen.getByRole('button', { name: 'Добавить поступление' }))
+    await user.click(screen.getByRole('tab', { name: 'Общие расходы' }))
     await user.click(screen.getByRole('button', { name: 'Добавить расход' }))
 
     await user.type(screen.getByLabelText('Расход enew1'), 'Доставка')
@@ -546,6 +554,7 @@ describe('ReceiptsPage — пошлина, НДС, Risk и общие расхо
     expect(screen.getByTestId('receipt-expenses-rub')).toHaveTextContent('9 050,00')
 
     // Строка 10 шт × 100 ₽ (партия в рублях, курс 1) + НДС 22 % + расход 9 050 ₽.
+    await user.click(screen.getByRole('tab', { name: 'Позиции' }))
     await user.type(screen.getByLabelText('Товар i0'), 'ТОВ1')
     await user.type(screen.getByLabelText('Стоимость за ед. i0'), '100')
     await user.type(screen.getByLabelText('Количество i0'), '10')
@@ -560,15 +569,36 @@ describe('ReceiptsPage — пошлина, НДС, Risk и общие расхо
 
     await screen.findByTestId('receipts-calendar')
     await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    await user.click(screen.getByRole('tab', { name: 'Платежи' }))
 
-    const category = screen.getByLabelText('Категория платежа p0')
+    let category = screen.getByLabelText('Категория платежа p0')
     expect(within(category).getByRole('option', { name: 'Инвойс' })).toBeInTheDocument()
     expect(within(category).queryByRole('option', { name: 'Risk' })).toBeNull()
 
     // Появился Risk в строке — появился и выбор категории платежа.
+    await user.click(screen.getByRole('tab', { name: 'Позиции' }))
     await user.clear(screen.getByLabelText('Risk i0'))
     await user.type(screen.getByLabelText('Risk i0'), '1')
+    await user.click(screen.getByRole('tab', { name: 'Платежи' }))
+    category = screen.getByLabelText('Категория платежа p0')
     expect(within(category).getByRole('option', { name: 'Risk' })).toBeInTheDocument()
+  })
+
+  it('во вкладке «Себестоимость» видно, из чего сложилась сумма', async () => {
+    const user = userEvent.setup()
+    mockApi(routes())
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    await user.click(screen.getByRole('tab', { name: 'Себестоимость' }))
+
+    const panel = screen.getByRole('tabpanel', { name: 'Себестоимость' })
+    expect(screen.getByTestId('cost-total')).toHaveTextContent('84 000,00 ₽')
+    // Единственное слагаемое — инвойс: 1 000 $ по курсу 84 = 84 000 ₽.
+    expect(panel).toHaveTextContent('1 000,00 USD × курс 84')
+    expect(panel).toHaveTextContent('100 %')
+    expect(panel).toHaveTextContent('84 000,00 ₽')
   })
 })
 
