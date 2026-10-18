@@ -194,7 +194,8 @@ select {
 }
 
 input:disabled,
-select:disabled {
+select:disabled,
+textarea:disabled {
   background: #f3f4f6;
   color: var(--muted);
 }
@@ -204,10 +205,6 @@ button.primary {
   border-color: var(--accent);
   color: #fff;
   font-weight: 600;
-}
-
-button.primary:disabled {
-  opacity: 0.6;
 }
 
 .login-screen {
@@ -392,6 +389,27 @@ button.primary,
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
+  font-weight: 600;
+}
+
+/* Неактивные кнопки должны читаться как неактивные: пока открыто окно растаможки,
+   кнопки карточки за ним заблокированы, и «Сохранить» не должно звать нажать себя.
+   Стоит после .toolbar button.primary — иначе акцентный фон перебивает это правило. */
+button:disabled,
+.toolbar button:disabled {
+  cursor: not-allowed;
+  color: var(--muted);
+  background: #f3f4f6;
+  border-color: var(--border);
+}
+
+button.primary:disabled,
+.toolbar button.primary:disabled,
+.login-card button.primary:disabled {
+  opacity: 1;
+  background: #cbd5e3;
+  border-color: #cbd5e3;
+  color: #46505f;
   font-weight: 600;
 }
 
@@ -647,4 +665,8 @@ button.primary,
 
 .receipt-items .product-missing {
   color: #b42318;
+}
+
+.customs-box .toolbar {
+  align-items: flex-end;
 }
