@@ -480,7 +480,9 @@ test('поступление заводится в календаре, себе�
   await expect(page.getByTestId('receipt-total')).toHaveText('88 000,00 ₽')
 
   await page.getByRole('button', { name: 'Сохранить' }).click()
-  await expect(page.getByTestId('receipt-form')).toHaveCount(0)
+  // Карточка остаётся открытой и показывает сохранённое поступление.
+  await expect(page.getByTestId('receipt-saved')).toBeVisible()
+  await expect(page.getByTestId('receipt-form')).toBeVisible()
 })
 
 test('пошлина, Risk и общие расходы считаются в карточке партии', async ({ page }) => {
@@ -540,7 +542,9 @@ test('пошлина, Risk и общие расходы считаются в к
   await expect(page.getByTestId('receipt-risk-rate')).toHaveText('100')
 
   await page.getByRole('button', { name: 'Сохранить' }).click()
-  await expect(page.getByTestId('receipt-form')).toHaveCount(0)
+  // Карточка остаётся открытой и показывает сохранённое поступление.
+  await expect(page.getByTestId('receipt-saved')).toBeVisible()
+  await expect(page.getByTestId('receipt-form')).toBeVisible()
 
   const body = posted[0] as {
     payments: { category: string }[]

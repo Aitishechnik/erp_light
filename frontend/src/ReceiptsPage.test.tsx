@@ -191,7 +191,13 @@ describe('ReceiptsPage', () => {
 
   it('создаёт поступление и отправляет строки с товаром', async () => {
     const user = userEvent.setup()
-    mockApi(routes({ '/api/v1/batches': { body: [batch()] } }))
+    mockApi({
+      'POST /api/v1/batches': {
+        status: 201,
+        body: batch({ id: 'b2', batch_number: 'P-200' }),
+      },
+      ...routes({ '/api/v1/batches': { body: [batch()] } }),
+    })
     render(<ReceiptsPage />)
 
     await screen.findByTestId('receipts-calendar')
@@ -217,6 +223,12 @@ describe('ReceiptsPage', () => {
     expect(sent).toContain('"quantity":"5"')
     expect(sent).toContain('"unit_price_currency":"50"')
     expect(sent).toContain('"vat_percent":"22"')
+
+    // Карточка не закрывается: после сохранения в ней уже сохранённая партия,
+    // и «Растаможен» доступен сразу — таможня работает по сохранённым строкам.
+    expect(screen.getByTestId('receipt-form')).toBeInTheDocument()
+    expect(screen.getByTestId('receipt-saved')).toHaveTextContent('Поступление сохранено')
+    expect(screen.getByTestId('customs-start')).toBeEnabled()
   })
 
   it('показывает ошибку сервера при сохранении', async () => {
@@ -355,7 +367,10 @@ describe('ReceiptsPage — план и лимит', () => {
   it('черновик из 1С помечен в календаре и сохраняется без позиций', async () => {
     const user = userEvent.setup()
     const draft = draftBatch({ comment: 'Фундук 145600 + сбор 32980' })
-    mockApi(routes({ '/api/v1/batches': { body: [draft] } }))
+    mockApi({
+      'PUT /api/v1/batches': { body: draft },
+      ...routes({ '/api/v1/batches': { body: [draft] } }),
+    })
     render(<ReceiptsPage />)
 
     const badge = await screen.findByTestId('draft-badge')
@@ -377,8 +392,10 @@ describe('ReceiptsPage — план и лимит', () => {
     await user.click(screen.getByRole('button', { name: 'Сохранить' }))
 
     await waitFor(() => {
-      expect(screen.queryByTestId('receipt-form')).toBeNull()
+      expect(screen.getByTestId('receipt-saved')).toBeInTheDocument()
     })
+    // Карточка осталась открытой: после сохранения в ней то, что записал сервер.
+    expect(screen.getByTestId('receipt-form')).toBeInTheDocument()
     const sent = bodies().find((body) => body.includes('ИТ-00000388')) ?? ''
     expect(sent).toContain('"items":[]')
     expect(sent).toContain('Фундук 145600')
@@ -980,5 +997,37 @@ describe('ReceiptsPage — растаможка партии', () => {
     )
     expect(screen.getByLabelText('Количество i0')).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Сохранить' })).toBeEnabled()
+  })
+
+  it('после сохранения карточка остаётся открытой — можно сразу растамаживать', async () => {
+    const user = userEvent.setup()
+    mockApi({
+      'PUT /api/v1/batches': { body: taxedBatch() },
+      ...routes({ '/api/v1/batches': { body: [taxedBatch()] } }),
+    })
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+
+    // Поменяли процент в строке — растаможка ждёт сохранения.
+    await user.clear(screen.getByLabelText('Пошлина i0'))
+    await user.type(screen.getByLabelText('Пошлина i0'), '7')
+    expect(screen.getByTestId('customs-start')).toBeDisabled()
+    expect(screen.getByTestId('customs-dirty')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('receipt-saved')).toHaveTextContent('Поступление сохранено')
+    })
+    // Карточка не закрылась, правок нет, растаможка снова доступна.
+    expect(screen.getByTestId('receipt-form')).toBeInTheDocument()
+    expect(screen.queryByTestId('customs-dirty')).toBeNull()
+    expect(screen.getByTestId('customs-start')).toBeEnabled()
+
+    // Пометка «сохранено» исчезает, как только карточку снова поправили.
+    await user.clear(screen.getByLabelText('Пошлина i0'))
+    await user.type(screen.getByLabelText('Пошлина i0'), '8')
+    expect(screen.queryByTestId('receipt-saved')).toBeNull()
   })
 })

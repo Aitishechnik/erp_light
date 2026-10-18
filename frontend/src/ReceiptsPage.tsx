@@ -477,6 +477,8 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   const [draft, setDraft] = useState<Draft | null>(null)
   /** Слепок сохранённой карточки: по нему видно, есть ли несохранённые правки. */
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null)
+  /** Пометка «сохранено»: карточка после сохранения остаётся открытой. */
+  const [savedHint, setSavedHint] = useState<string | null>(null)
   const [suppliers, setSuppliers] = useState<Counterparty[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [rateHint, setRateHint] = useState<string | null>(null)
@@ -584,6 +586,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
     const fresh = emptyDraft(target)
     setDraft(fresh)
     setSavedSnapshot(snapshot(fresh))
+    setSavedHint(null)
   }
 
   const startEdit = (batch: Batch) => {
@@ -595,6 +598,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
     const fresh = draftFrom(batch)
     setDraft(fresh)
     setSavedSnapshot(snapshot(fresh))
+    setSavedHint(null)
   }
 
   /**
@@ -611,6 +615,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
       const fresh = draftFrom(result.batch)
       setDraft(fresh)
       setSavedSnapshot(snapshot(fresh))
+      setSavedHint(null)
       setItemsFile(null)
       if (itemsInput.current) itemsInput.current.value = ''
       const replaced = result.report.rows_updated
@@ -826,13 +831,13 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
     setBusy(true)
     setError(null)
     try {
-      if (draft.id) {
-        await updateBatch(draft.id, payload)
-      } else {
-        await createBatch(payload)
-      }
-      setDraft(null)
-      setSavedSnapshot(null)
+      const saved = draft.id ? await updateBatch(draft.id, payload) : await createBatch(payload)
+      // Карточка не закрывается, а показывает то, что записал сервер: сразу видно
+      // результат и можно переходить к растаможке — она работает по сохранённым строкам.
+      const fresh = draftFrom(saved)
+      setDraft(fresh)
+      setSavedSnapshot(snapshot(fresh))
+      setSavedHint('Поступление сохранено')
       await reload()
     } catch (err) {
       setError(errorMessage(err))
@@ -848,6 +853,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
       await deleteBatch(draft.id)
       setDraft(null)
       setSavedSnapshot(null)
+      setSavedHint(null)
       await reload()
     } catch (err) {
       setError(errorMessage(err))
@@ -1038,6 +1044,11 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
           <h2 className="section-title">
             {draft.id ? `Поступление ${draft.number}` : 'Новое поступление'}
           </h2>
+          {savedHint && !dirty ? (
+            <p className="hint saved" data-testid="receipt-saved">
+              {savedHint}
+            </p>
+          ) : null}
           {draft.isDraft ? (
             <p className="hint" data-testid="draft-hint">
               Черновик из выгрузки 1С: заполнены номер, дата, поставщик и комментарий. Загрузите
