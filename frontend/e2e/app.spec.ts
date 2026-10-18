@@ -604,6 +604,10 @@ test('растаможка партии: проценты превращаютс
   await expect(page.getByLabel('Курс растаможки')).toHaveValue('90.5')
   await expect(page.getByTestId('customs-duty-total')).toHaveText('4 525,00 ₽')
   await expect(page.getByTestId('customs-vat-total')).toHaveText('20 905,50 ₽')
+  // Видно, из каких процентов строк посчитаны суммы.
+  await expect(page.getByTestId('customs-percents')).toContainText('пошлина 5 %')
+  await expect(page.getByTestId('customs-percents')).toContainText('НДС 22 %')
+  await expect(page.getByTestId('customs-manual')).toHaveCount(0)
 
   // Сменили дату растаможки — курс ЦБ на неё подтянулся сам, суммы пересчитались.
   await page.getByLabel('Дата растаможки').fill('2026-10-08')
@@ -615,6 +619,11 @@ test('растаможка партии: проценты превращаютс
   await page.getByLabel('Курс растаможки').fill('80')
   await expect(page.getByTestId('customs-duty-total')).toHaveText('4 000,00 ₽')
   await expect(page.getByTestId('customs-vat-total')).toHaveText('18 480,00 ₽')
+  // Правка итога руками: окно предупреждает, что проценты строк не изменятся.
+  await page.getByLabel('Пошлина партии, ₽').fill('4100')
+  await expect(page.getByTestId('customs-manual')).toContainText('пошлина +100,00 ₽')
+  await page.getByLabel('Пошлина партии, ₽').fill('4000')
+  await expect(page.getByTestId('customs-manual')).toHaveCount(0)
   await page.getByTestId('customs-confirm').click()
 
   await expect(page.getByTestId('customs-badge')).toBeVisible()

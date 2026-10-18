@@ -118,6 +118,9 @@ type CustomsDraft = {
   duty: string
   /** НДС партии, ₽ — так же. */
   vat: string
+  /** Итоги по процентам строк при текущем курсе — с ними сверяем ручную правку. */
+  autoDuty: number
+  autoVat: number
   hint: string | null
 }
 
@@ -162,6 +165,11 @@ function ruDate(value: string | null | undefined): string {
 /** Курс показываем с четырьмя знаками: 100.4619 вместо 100.46191999999999. */
 function formatRate(value: number): string {
   return trim(value.toFixed(4))
+}
+
+/** Ручная правка итога со знаком: «+1 000,00 ₽», «−250,00 ₽». */
+function signedMoney(delta: number): string {
+  return `${delta > 0 ? '+' : '−'}${formatMoney(String(Math.abs(delta)))} ₽`
 }
 
 /** «5000.00» → «5000», «90.000000» → «90»: в полях ввода лишние нули не нужны. */
@@ -469,6 +477,17 @@ function snapshot(source: Draft): string {
   })
 }
 
+/**
+ * Проценты пошлины (НДС) по строкам — для окна растаможки.
+ *
+ * Показываем их рядом с итогами: пошлина у товаров разная, а нулевая в строке
+ * иначе остаётся незамеченной до подтверждения.
+ */
+function percentList(source: Draft, field: 'duty' | 'vat'): string {
+  const values = source.items.map((item) => `${trim(item[field] || '0')} %`)
+  return [...new Set(values)].join(' и ')
+}
+
 export function ReceiptsPage({ user }: { user?: SessionUser }) {
   const today = iso(new Date())
   const [month, setMonth] = useState(today.slice(0, 7))
@@ -560,6 +579,14 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   const cleared = (draft?.customsDate ?? '') !== ''
   /** В карточке есть правки, которых нет на сервере: таможню считать ещё не по чему. */
   const dirty = draft !== null && savedSnapshot !== null && snapshot(draft) !== savedSnapshot
+  // Окно растаможки: насколько введённые итоги отличаются от расчёта по процентам строк.
+  const customsDutyDelta = customs ? round2(number(customs.duty) - customs.autoDuty) : 0
+  const customsVatDelta = customs ? round2(number(customs.vat) - customs.autoVat) : 0
+  const customsEdited = Math.abs(customsDutyDelta) >= 0.01 || Math.abs(customsVatDelta) >= 0.01
+  const customsEdits = [
+    Math.abs(customsDutyDelta) < 0.01 ? null : `пошлина ${signedMoney(customsDutyDelta)}`,
+    Math.abs(customsVatDelta) < 0.01 ? null : `НДС ${signedMoney(customsVatDelta)}`,
+  ].filter((row): row is string => row !== null)
 
   const shiftMonth = (delta: number) => {
     const base = monthStart(month)
@@ -681,6 +708,8 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
           rate: trim(row.rate),
           duty: String(totals.duty),
           vat: String(totals.vat),
+          autoDuty: totals.duty,
+          autoVat: totals.vat,
           hint:
             row.source === 'base'
               ? 'Рубль — курс 1'
@@ -708,6 +737,8 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
       rate: trim(String(fallbackRate)),
       duty: String(totals.duty),
       vat: String(totals.vat),
+      autoDuty: totals.duty,
+      autoVat: totals.vat,
       hint: null,
     })
     await loadCustomsRate(start)
@@ -717,7 +748,14 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   const changeCustomsRate = (value: string) => {
     if (!draft || !customs) return
     const totals = customsTotals(draft, number(value))
-    setCustoms({ ...customs, rate: value, duty: String(totals.duty), vat: String(totals.vat) })
+    setCustoms({
+      ...customs,
+      rate: value,
+      duty: String(totals.duty),
+      vat: String(totals.vat),
+      autoDuty: totals.duty,
+      autoVat: totals.vat,
+    })
   }
 
   const submitCustoms = async () => {
@@ -1505,6 +1543,23 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                   {formatMoney(String(number(customs.duty) + number(customs.vat)))} ₽
                 </strong>
               </p>
+              <p className="hint" data-testid="customs-percents">
+                По процентам строк: пошлина {percentList(draft, 'duty')} →{' '}
+                <strong data-testid="customs-auto-duty">
+                  {formatMoney(String(customs.autoDuty))} ₽
+                </strong>{' '}
+                · НДС {percentList(draft, 'vat')} →{' '}
+                <strong data-testid="customs-auto-vat">
+                  {formatMoney(String(customs.autoVat))} ₽
+                </strong>
+              </p>
+              {customsEdited ? (
+                <p className="hint warn" data-testid="customs-manual">
+                  Суммы поправлены вручную: {customsEdits.join(', ')}. В партию запишутся эти суммы,
+                  а проценты строк останутся прежними — «Отменить растаможку» вернёт расчёт по
+                  процентам.
+                </p>
+              ) : null}
               <p className="hint">
                 Итог распределится по строкам пропорционально их пошлине: сумма строк в точности
                 равна введённой. После подтверждения проценты в строках заменятся этими рублями.

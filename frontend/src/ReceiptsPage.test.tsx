@@ -946,4 +946,54 @@ describe('ReceiptsPage — растаможка партии', () => {
     expect(screen.getByTestId('clearance-badge')).toBeInTheDocument()
     expect(screen.getByTestId(`day-cleared-${TODAY}`)).toHaveTextContent('растаможено: 1')
   })
+
+  it('показывает проценты строк и предупреждает, когда суммы правят руками', async () => {
+    const user = userEvent.setup()
+    mockApi(routes({ '/api/v1/batches': { body: [taxedBatch()] } }))
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    await user.click(screen.getByTestId('customs-start'))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Курс растаможки')).toHaveValue('90.5')
+    })
+    // Видно, из каких процентов посчитаны суммы до подтверждения.
+    expect(screen.getByTestId('customs-percents')).toHaveTextContent('пошлина 5 %')
+    expect(screen.getByTestId('customs-percents')).toHaveTextContent('НДС 22 %')
+    expect(screen.getByTestId('customs-auto-duty')).toHaveTextContent('4 525,00')
+    expect(screen.getByTestId('customs-auto-vat')).toHaveTextContent('20 905,50')
+    expect(screen.queryByTestId('customs-manual')).toBeNull()
+
+    // Правка итога руками: предупреждаем, что проценты строк не изменятся.
+    await user.clear(screen.getByLabelText('Пошлина партии, ₽'))
+    await user.type(screen.getByLabelText('Пошлина партии, ₽'), '5000')
+    expect(screen.getByTestId('customs-manual')).toHaveTextContent('пошлина +475,00 ₽')
+
+    // Вернули расчётное значение — предупреждение ушло.
+    await user.clear(screen.getByLabelText('Пошлина партии, ₽'))
+    await user.type(screen.getByLabelText('Пошлина партии, ₽'), '4525')
+    expect(screen.queryByTestId('customs-manual')).toBeNull()
+  })
+
+  it('нулевая пошлина в строках видна в окне растаможки', async () => {
+    const user = userEvent.setup()
+    const [item] = batch().items
+    if (!item) throw new Error('у партии нет строк')
+    mockApi(
+      routes({ '/api/v1/batches': { body: [batch({ items: [{ ...item, duty_percent: '0' }] })] } }),
+    )
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    await user.click(screen.getByTestId('customs-start'))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Курс растаможки')).toHaveValue('90.5')
+    })
+    expect(screen.getByTestId('customs-percents')).toHaveTextContent('пошлина 0 %')
+    expect(screen.getByTestId('customs-auto-duty')).toHaveTextContent('0,00')
+  })
 })

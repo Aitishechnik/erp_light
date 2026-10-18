@@ -129,6 +129,15 @@ body {
   margin: 0 0 1rem;
 }
 
+/* Ручная правка итогов растаможки: цветом отделяем от обычных подсказок. */
+.hint.warn {
+  color: #b54708;
+  background: #fffaeb;
+  border: 1px solid #fedf89;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+}
+
 .error {
   color: #b42318;
   background: #fef3f2;
