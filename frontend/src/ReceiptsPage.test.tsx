@@ -147,6 +147,16 @@ function bodies(): string[] {
   )
 }
 
+/** Открыть партию из списка дня: карточка списка — сама кнопка. */
+async function openBatch(user: ReturnType<typeof userEvent.setup>, id = 'b1') {
+  await user.click(screen.getByTestId(`day-receipt-${id}`))
+}
+
+/** Раскрыть секцию карточки (Позиции, Платежи, Общие расходы, Таможня, Себестоимость). */
+async function openSection(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(screen.getByRole('button', { name }))
+}
+
 describe('ReceiptsPage', () => {
   it('показывает поступления в календаре и списком за день', async () => {
     mockApi(routes())
@@ -154,12 +164,37 @@ describe('ReceiptsPage', () => {
 
     expect(await screen.findByTestId('receipts-calendar')).toBeInTheDocument()
     await waitFor(() => {
-      expect(screen.getByTestId(`day-${TODAY}`)).toHaveTextContent('поступлений: 1')
+      expect(screen.getByTestId(`day-dot-${TODAY}`)).toBeInTheDocument()
     })
-    expect(screen.getByTestId(`day-${TODAY}`)).toHaveTextContent('84 000,00 ₽')
+    expect(screen.getByTestId('rail-day')).toHaveTextContent('1 поступление')
     const list = await screen.findByTestId('day-receipts')
     expect(list).toHaveTextContent('P-100')
     expect(list).toHaveTextContent('Импорт Трейд')
+    expect(list).toHaveTextContent('84 000,00 ₽')
+  })
+
+  it('под календарём — только поступления выбранного дня', async () => {
+    const user = userEvent.setup()
+    // Второй день берём в том же месяце, что и сегодняшний.
+    const otherDay = TODAY.endsWith('-10') ? `${TODAY.slice(0, 7)}-11` : `${TODAY.slice(0, 7)}-10`
+    const second = batch({
+      id: 'b2',
+      batch_number: 'P-200',
+      batch_date: otherDay,
+      supplier: 'Второй поставщик',
+    })
+    mockApi(routes({ '/api/v1/batches': { body: [batch(), second] } }))
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('day-receipt-b1')
+    expect(screen.getByTestId('day-receipts')).toHaveTextContent('P-100')
+    expect(screen.getByTestId('day-receipts')).not.toHaveTextContent('P-200')
+
+    await user.click(screen.getByTestId(`day-${otherDay}`))
+    expect(await screen.findByTestId('day-receipt-b2')).toBeInTheDocument()
+    // Поступления другого дня в список не попадают.
+    expect(screen.queryByTestId('day-receipt-b1')).toBeNull()
+    expect(screen.getByTestId('rail-day')).toHaveTextContent('1 поступление')
   })
 
   it('пересчитывает остаток по курсу, но не трогает зафиксированный платёж', async () => {
@@ -170,14 +205,14 @@ describe('ReceiptsPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId(`day-${TODAY}`)).toBeInTheDocument()
     })
-    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    await openBatch(user)
 
     // Цена единицы — во вкладке «Позиции».
     expect(screen.getByTestId('receipt-total')).toHaveTextContent('84 000,00')
     expect(screen.getByTestId('unit-cost-i0')).toHaveTextContent('8 400,00')
 
     // 600 $ закрыты по курсу платежа 80 (48 000 ₽), остаток 400 $ по 90 = 36 000 ₽.
-    await user.click(screen.getByRole('tab', { name: 'Платежи' }))
+    await user.click(screen.getByRole('button', { name: 'Платежи' }))
     expect(screen.getByTestId('receipt-paid')).toHaveTextContent('600,00')
     expect(screen.getByTestId('receipt-remaining')).toHaveTextContent('400,00')
     expect(screen.getByTestId('payment-rub-p0')).toHaveTextContent('48 000,00')
@@ -188,9 +223,7 @@ describe('ReceiptsPage', () => {
 
     // Переоценилась только незакрытая часть: 48 000 + 400 × 100 = 88 000 ₽.
     expect(screen.getByTestId('receipt-total')).toHaveTextContent('88 000,00')
-    await user.click(screen.getByRole('tab', { name: 'Позиции' }))
     expect(screen.getByTestId('unit-cost-i0')).toHaveTextContent('8 800,00')
-    await user.click(screen.getByRole('tab', { name: 'Платежи' }))
     expect(screen.getByTestId('payment-rub-p0')).toHaveTextContent('48 000,00')
   })
 
@@ -262,7 +295,7 @@ describe('ReceiptsPage', () => {
     render(<ReceiptsPage />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    await openBatch(user)
     // Карточка пришла с курсом ЦБ — видно и курс, и его дату.
     expect(screen.getByTestId('receipt-cbr-rate')).toHaveTextContent(
       /актуальному курсу ЦБ на 08.10.2026 — 90 ₽ за 1 USD/,
@@ -335,7 +368,7 @@ describe('ReceiptsPage — план и лимит', () => {
     await user.clear(screen.getByLabelText('НДС i0'))
     await user.type(screen.getByLabelText('НДС i0'), '0')
 
-    await user.click(screen.getByRole('tab', { name: 'Платежи' }))
+    await user.click(screen.getByRole('button', { name: 'Платежи' }))
     await user.click(screen.getByRole('button', { name: 'Добавить валютный платёж' }))
     const pay = screen.getByTestId('receipt-payments').querySelector('tbody tr')
     expect(pay).not.toBeNull()
@@ -361,7 +394,7 @@ describe('ReceiptsPage — план и лимит', () => {
     await user.type(screen.getByLabelText('Товар i0'), 'ТОВ1')
     await user.type(screen.getByLabelText('Количество i0'), '10')
     await user.type(screen.getByLabelText('Стоимость за ед. i0'), '100')
-    await user.click(screen.getByRole('tab', { name: 'Платежи' }))
+    await user.click(screen.getByRole('button', { name: 'Платежи' }))
     await user.click(screen.getByRole('button', { name: 'Добавить валютный платёж' }))
     await user.type(screen.getByLabelText('Сумма платежа pnew1'), '1500')
     await user.type(screen.getByLabelText('Курс платежа pnew1'), '80')
@@ -387,7 +420,7 @@ describe('ReceiptsPage — план и лимит', () => {
     expect(row).toHaveTextContent('—')
     expect(row).not.toHaveTextContent('0,00')
 
-    await user.click(within(row).getByRole('button', { name: 'Открыть' }))
+    await user.click(screen.getByTestId('day-receipt-d1'))
     expect(screen.getByTestId('draft-hint')).toHaveTextContent('Черновик из выгрузки 1С')
     // Валюту берём из партии (импорт — USD), а курс у черновика пустой:
     // пока нет позиций, считать нечего.
@@ -501,9 +534,10 @@ describe('ReceiptsPage — план и лимит', () => {
     const list = await screen.findByTestId('day-receipts')
     expect(list).toHaveTextContent('88.978261')
 
-    await user.click(within(list).getByRole('button', { name: 'Открыть' }))
+    await user.click(within(list).getByTestId('day-receipt-b1'))
     // Средний курс — 88,9783; рядом видно, из чего он собран.
     expect(screen.getByTestId('receipt-average-rate')).toHaveTextContent('88.9783')
+    await openSection(user, 'Себестоимость')
     expect(screen.getByTestId('receipt-effective')).toHaveTextContent('88')
     expect(screen.getByTestId('receipt-risk-rate')).toHaveTextContent('91')
   })
@@ -530,6 +564,7 @@ describe('ReceiptsPage — пошлина, НДС, Risk и общие расхо
     // (10 + 0,5 + 2,31) × 90 + 1 × 90 = 1 242,90 ₽ за единицу, 124 290 ₽ за строку.
     expect(screen.getByTestId('unit-cost-i0')).toHaveTextContent('1 242,90')
     expect(screen.getByTestId('item-total-i0')).toHaveTextContent('124 290,00')
+    await openSection(user, 'Себестоимость')
     expect(screen.getByTestId('receipt-duty')).toHaveTextContent('4 500,00')
     expect(screen.getByTestId('receipt-vat')).toHaveTextContent('20 790,00')
     expect(screen.getByTestId('receipt-risk-total')).toHaveTextContent('100,00')
@@ -542,7 +577,7 @@ describe('ReceiptsPage — пошлина, НДС, Risk и общие расхо
 
     await screen.findByTestId('receipts-calendar')
     await user.click(screen.getByRole('button', { name: 'Добавить поступление' }))
-    await user.click(screen.getByRole('tab', { name: 'Общие расходы' }))
+    await user.click(screen.getByRole('button', { name: 'Общие расходы' }))
     await user.click(screen.getByRole('button', { name: 'Добавить расход' }))
 
     await user.type(screen.getByLabelText('Расход enew1'), 'Доставка')
@@ -554,10 +589,10 @@ describe('ReceiptsPage — пошлина, НДС, Risk и общие расхо
     expect(screen.getByTestId('receipt-expenses-rub')).toHaveTextContent('9 050,00')
 
     // Строка 10 шт × 100 ₽ (партия в рублях, курс 1) + НДС 22 % + расход 9 050 ₽.
-    await user.click(screen.getByRole('tab', { name: 'Позиции' }))
     await user.type(screen.getByLabelText('Товар i0'), 'ТОВ1')
     await user.type(screen.getByLabelText('Стоимость за ед. i0'), '100')
     await user.type(screen.getByLabelText('Количество i0'), '10')
+    await openSection(user, 'Себестоимость')
     expect(screen.getByTestId('receipt-vat')).toHaveTextContent('220,00')
     expect(screen.getByTestId('receipt-total')).toHaveTextContent('10 270,00')
   })
@@ -568,32 +603,29 @@ describe('ReceiptsPage — пошлина, НДС, Risk и общие расхо
     render(<ReceiptsPage />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByRole('button', { name: 'Открыть' }))
-    await user.click(screen.getByRole('tab', { name: 'Платежи' }))
+    await openBatch(user)
+    await user.click(screen.getByRole('button', { name: 'Платежи' }))
 
-    let category = screen.getByLabelText('Категория платежа p0')
+    const category = screen.getByLabelText('Категория платежа p0')
     expect(within(category).getByRole('option', { name: 'Инвойс' })).toBeInTheDocument()
     expect(within(category).queryByRole('option', { name: 'Risk' })).toBeNull()
 
     // Появился Risk в строке — появился и выбор категории платежа.
-    await user.click(screen.getByRole('tab', { name: 'Позиции' }))
     await user.clear(screen.getByLabelText('Risk i0'))
     await user.type(screen.getByLabelText('Risk i0'), '1')
-    await user.click(screen.getByRole('tab', { name: 'Платежи' }))
-    category = screen.getByLabelText('Категория платежа p0')
     expect(within(category).getByRole('option', { name: 'Risk' })).toBeInTheDocument()
   })
 
-  it('во вкладке «Себестоимость» видно, из чего сложилась сумма', async () => {
+  it('в секции «Себестоимость» видно, из чего сложилась сумма', async () => {
     const user = userEvent.setup()
     mockApi(routes())
     render(<ReceiptsPage />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByRole('button', { name: 'Открыть' }))
-    await user.click(screen.getByRole('tab', { name: 'Себестоимость' }))
+    await openBatch(user)
+    await user.click(screen.getByRole('button', { name: 'Себестоимость' }))
 
-    const panel = screen.getByRole('tabpanel', { name: 'Себестоимость' })
+    const panel = screen.getByTestId('panel-cost')
     expect(screen.getByTestId('cost-total')).toHaveTextContent('84 000,00 ₽')
     // Единственное слагаемое — инвойс: 1 000 $ по курсу 84 = 84 000 ₽.
     expect(panel).toHaveTextContent('1 000,00 USD × курс 84')
@@ -694,9 +726,7 @@ describe('ReceiptsPage — позиции из файла «Партия»', () 
     render(<ReceiptsPage user={IMPORT_USER} />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(
-      within(screen.getByTestId('day-receipt-d1')).getByRole('button', { name: 'Открыть' }),
-    )
+    await user.click(screen.getByTestId('day-receipt-d1'))
 
     await user.upload(screen.getByLabelText('Файл партии из 1С'), file())
     await user.click(screen.getByRole('button', { name: 'Загрузить позиции из 1С' }))
@@ -719,9 +749,7 @@ describe('ReceiptsPage — позиции из файла «Партия»', () 
     render(<ReceiptsPage />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(
-      within(screen.getByTestId(`day-receipt-b1`)).getByRole('button', { name: 'Открыть' }),
-    )
+    await user.click(screen.getByTestId('day-receipt-b1'))
 
     const items = screen.getByTestId('receipt-items')
     expect(within(items).getByRole('columnheader', { name: 'Товар' })).toBeInTheDocument()
@@ -749,9 +777,7 @@ describe('ReceiptsPage — позиции из файла «Партия»', () 
     render(<ReceiptsPage user={sales} />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(
-      within(screen.getByTestId('day-receipt-d1')).getByRole('button', { name: 'Открыть' }),
-    )
+    await user.click(screen.getByTestId('day-receipt-d1'))
 
     expect(screen.getByTestId('receipt-form')).toBeInTheDocument()
     expect(screen.queryByTestId('batch-items-import')).toBeNull()
@@ -769,9 +795,7 @@ describe('ReceiptsPage — позиции из файла «Партия»', () 
     render(<ReceiptsPage user={IMPORT_USER} />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(
-      within(screen.getByTestId('day-receipt-d1')).getByRole('button', { name: 'Открыть' }),
-    )
+    await user.click(screen.getByTestId('day-receipt-d1'))
 
     await user.upload(screen.getByLabelText('Файл партии из 1С'), file())
     await user.click(screen.getByRole('button', { name: 'Загрузить позиции из 1С' }))
@@ -831,7 +855,7 @@ describe('ReceiptsPage — растаможка партии', () => {
     render(<ReceiptsPage />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    await openBatch(user)
     await user.click(screen.getByTestId('customs-start'))
 
     // Курс подставляется из ЦБ на дату растаможки (в моке — 90,5).
@@ -891,7 +915,7 @@ describe('ReceiptsPage — растаможка партии', () => {
     render(<ReceiptsPage user={IMPORT_USER} />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    await openBatch(user)
     expect(screen.getByTestId('customs-badge')).toBeInTheDocument()
     // Менеджер по закупкам видит статус, но не отменяет фиксацию.
     expect(screen.queryByTestId('customs-cancel')).toBeNull()
@@ -907,7 +931,7 @@ describe('ReceiptsPage — растаможка партии', () => {
     render(<ReceiptsPage user={DIRECTOR_USER} />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    await openBatch(user)
     await user.click(screen.getByTestId('customs-cancel'))
 
     await waitFor(() => {
@@ -944,7 +968,7 @@ describe('ReceiptsPage — растаможка партии', () => {
     render(<ReceiptsPage />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    await openBatch(user)
     await user.click(screen.getByTestId('customs-start'))
     // По умолчанию дата растаможки — сегодня, курс ЦБ на неё (в моке 90,5).
     await waitFor(() => {
@@ -968,7 +992,7 @@ describe('ReceiptsPage — растаможка партии', () => {
     render(<ReceiptsPage user={DIRECTOR_USER} />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    await openBatch(user)
     expect(screen.getByTestId('customs-cancel')).toBeEnabled()
     expect(screen.queryByTestId('customs-dirty')).toBeNull()
 
@@ -991,7 +1015,7 @@ describe('ReceiptsPage — растаможка партии', () => {
 
     await screen.findByTestId('receipts-calendar')
     expect(screen.getByTestId('clearance-badge')).toBeInTheDocument()
-    expect(screen.getByTestId(`day-cleared-${TODAY}`)).toHaveTextContent('растаможено: 1')
+    expect(screen.getByTestId(`day-dot-${TODAY}`)).toHaveClass('cleared')
   })
 
   it('пока открыто окно растаможки, строки партии не правятся', async () => {
@@ -1000,7 +1024,7 @@ describe('ReceiptsPage — растаможка партии', () => {
     render(<ReceiptsPage />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    await openBatch(user)
     // До окна строки правятся: количество, цена и проценты доступны.
     expect(screen.getByLabelText('Количество i0')).toBeEnabled()
     expect(screen.getByLabelText('Пошлина i0')).toBeEnabled()
@@ -1038,7 +1062,7 @@ describe('ReceiptsPage — растаможка партии', () => {
     render(<ReceiptsPage />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByRole('button', { name: 'Открыть' }))
+    await openBatch(user)
 
     // Поменяли процент в строке — растаможка ждёт сохранения.
     await user.clear(screen.getByLabelText('Пошлина i0'))

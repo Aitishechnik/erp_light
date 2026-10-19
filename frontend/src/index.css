@@ -622,17 +622,14 @@ button.primary:disabled,
   border-radius: 0.6rem;
 }
 
-/* Карточка партии — отдельный экран документа: секции стопкой, подвал внизу. */
+/* Карточка партии — белая панель справа от календаря. */
 .receipt-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: calc(100vh - 7rem);
   padding: 0;
   margin: 0;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  overflow: visible;
 }
 
 /* Колонки карточки — по содержимому, но поля не сжимаются в нечитаемое. */
@@ -699,7 +696,7 @@ button.primary:disabled,
   font-weight: 600;
 }
 
-.receipt-doc .back-link {
+.receipts-page .back-link {
   border: 0;
   background: transparent;
   padding: 0;
@@ -708,12 +705,12 @@ button.primary:disabled,
   cursor: pointer;
 }
 
-.receipt-doc .back-link:hover {
+.receipts-page .back-link:hover {
   color: var(--accent);
 }
 
 /* Кнопки в карточке: без них браузер рисует свои «серые» кнопки. */
-.receipt-doc button {
+.receipts-page button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -729,27 +726,27 @@ button.primary:disabled,
   cursor: pointer;
 }
 
-.receipt-doc button:hover:not(:disabled) {
+.receipts-page button:hover:not(:disabled) {
   background: #f9fafb;
 }
 
-.receipt-doc button.primary {
+.receipts-page button.primary {
   border-color: var(--accent);
   background: var(--accent);
   color: #fff;
 }
 
-.receipt-doc button.primary:hover:not(:disabled) {
+.receipts-page button.primary:hover:not(:disabled) {
   background: #1a63d3;
 }
 
-.receipt-doc button.primary:disabled {
+.receipts-page button.primary:disabled {
   border-color: #a9c6f5;
   background: #a9c6f5;
   color: #fff;
 }
 
-.receipt-doc button.mini {
+.receipts-page button.mini {
   padding: 0.15rem 0.45rem;
   border-color: transparent;
   background: transparent;
@@ -757,17 +754,17 @@ button.primary:disabled,
   font-size: 0.8rem;
 }
 
-.receipt-doc button.mini:hover:not(:disabled) {
+.receipts-page button.mini:hover:not(:disabled) {
   background: #f1f3f5;
   color: var(--text);
 }
 
-.receipt-doc button:disabled {
+.receipts-page button:disabled {
   opacity: 0.55;
   cursor: default;
 }
 
-.receipt-doc button:focus-visible {
+.receipts-page button:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
   outline-offset: 1px;
 }
@@ -846,8 +843,8 @@ button.primary:disabled,
   min-width: 0;
 }
 
-.receipt-doc .doc-passport .field input,
-.receipt-doc .doc-passport .field select {
+.receipts-page .doc-passport .field input,
+.receipts-page .doc-passport .field select {
   flex: 1;
   width: 100%;
   min-width: 0;
@@ -857,7 +854,7 @@ button.primary:disabled,
   grid-column: 1 / -1;
 }
 
-.receipt-doc .doc-passport .field textarea {
+.receipts-page .doc-passport .field textarea {
   width: 100%;
   min-width: 0;
 }
@@ -1055,7 +1052,7 @@ button.primary:disabled,
   outline-offset: 1px;
 }
 
-.receipt-doc .doc-toolbar .file-pick input {
+.receipts-page .doc-toolbar .file-pick input {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -1064,7 +1061,7 @@ button.primary:disabled,
   cursor: pointer;
 }
 
-.receipt-doc .doc-toolbar .file-pick-name {
+.receipts-page .doc-toolbar .file-pick-name {
   font-size: 12px;
   color: var(--muted);
 }
@@ -1244,9 +1241,6 @@ button.primary:disabled,
 
 /* Подвал карточки: себестоимость и сохранение всегда под рукой. */
 .doc-footer {
-  position: sticky;
-  bottom: 0;
-  z-index: 5;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -1311,30 +1305,30 @@ button.primary:disabled,
 }
 
 /* Поля таблиц — «тихие»: рамка появляется только при наведении и фокусе. */
-.receipt-doc .doc-card .receipt-items td input,
-.receipt-doc .doc-card .receipt-expenses td input,
-.receipt-doc .doc-card .receipt-payments td input {
+.receipts-page .doc-card .receipt-items td input,
+.receipts-page .doc-card .receipt-expenses td input,
+.receipts-page .doc-card .receipt-payments td input {
   border-color: transparent;
   background: transparent;
 }
 
-.receipt-doc .doc-card .receipt-items td input:hover:not(:disabled),
-.receipt-doc .doc-card .receipt-expenses td input:hover:not(:disabled),
-.receipt-doc .doc-card .receipt-payments td input:hover:not(:disabled) {
+.receipts-page .doc-card .receipt-items td input:hover:not(:disabled),
+.receipts-page .doc-card .receipt-expenses td input:hover:not(:disabled),
+.receipts-page .doc-card .receipt-payments td input:hover:not(:disabled) {
   border-color: var(--border);
   background: #fff;
 }
 
-.receipt-doc .doc-card .receipt-items td input:focus,
-.receipt-doc .doc-card .receipt-expenses td input:focus,
-.receipt-doc .doc-card .receipt-payments td input:focus {
+.receipts-page .doc-card .receipt-items td input:focus,
+.receipts-page .doc-card .receipt-expenses td input:focus,
+.receipts-page .doc-card .receipt-payments td input:focus {
   border-color: var(--accent);
   background: #fff;
 }
 
-.receipt-doc .doc-card .receipt-items td input:disabled,
-.receipt-doc .doc-card .receipt-expenses td input:disabled,
-.receipt-doc .doc-card .receipt-payments td input:disabled {
+.receipts-page .doc-card .receipt-items td input:disabled,
+.receipts-page .doc-card .receipt-expenses td input:disabled,
+.receipts-page .doc-card .receipt-payments td input:disabled {
   border-color: transparent;
   background: #f5f6f8;
 }
@@ -1345,7 +1339,7 @@ button.primary:disabled,
 }
 
 /* 1440-экран: карточка должна помещаться целиком, а не прятать «Сумму» за прокруткой. */
-@media (max-width: 1500px) {
+@media (max-width: 1800px) {
   .receipt-items td input,
   .receipt-payments td input,
   .receipt-expenses td input {
@@ -1356,4 +1350,427 @@ button.primary:disabled,
     padding-left: 0.45rem;
     padding-right: 0.45rem;
   }
+  .receipt-items th {
+    white-space: normal;
+    line-height: 1.2;
+    vertical-align: bottom;
+  }
+}
+
+/* ── Рабочее место: календарь и партии слева, карточка справа ─────────── */
+
+.receipts-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.receipts-head h1 {
+  margin: 0;
+  font-size: 1.375rem;
+}
+
+.month-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+}
+
+.month-nav button {
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  color: var(--muted);
+}
+
+.month-nav strong {
+  min-width: 7rem;
+  padding: 0 8px;
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.workplace {
+  display: grid;
+  grid-template-columns: 312px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.rail {
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.mini-card {
+  padding: 10px 10px 12px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.mini-dow,
+.mini-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.mini-dow {
+  padding: 4px 0 6px;
+  font-size: 10.5px;
+  color: #98a2b3;
+  text-align: center;
+}
+
+.mini-days {
+  gap: 2px;
+}
+
+.mini-days .mini-day {
+  position: relative;
+  height: 2.1rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.78rem;
+  box-shadow: none;
+}
+
+.mini-days .mini-day:hover {
+  background: #f1f3f5;
+}
+
+.mini-days .mini-day.out {
+  color: #c3c8d0;
+}
+
+.mini-days .mini-day.selected,
+.mini-days .mini-day.selected:hover {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.mini-dot {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: translateX(-50%);
+}
+
+.mini-dot.cleared {
+  background: #1c6b3a;
+}
+
+.mini-days .mini-day.selected .mini-dot {
+  background: #fff;
+}
+
+.rail-day {
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.rail-list {
+  display: grid;
+  gap: 8px;
+}
+
+.rail-empty {
+  margin: 0;
+  padding: 4px;
+  font-size: 12.5px;
+}
+
+.rail-list .batch-card {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: #fff;
+  text-align: left;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+.rail-list .batch-card:hover {
+  border-color: #c9d2dd;
+  background: #fff;
+}
+
+.rail-list .batch-card.active {
+  border-color: color-mix(in srgb, var(--accent) 55%, white);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, white);
+}
+
+.batch-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+}
+
+.batch-supplier {
+  overflow: hidden;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-bottom {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.batch-bottom b {
+  font-weight: 650;
+}
+
+.batch-note {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: #98a2b3;
+}
+
+.work-right {
+  min-width: 0;
+}
+
+.doc-empty {
+  display: grid;
+  gap: 8px;
+  align-content: center;
+  align-items: center;
+  justify-items: center;
+  min-height: 24rem;
+  padding: 48px 24px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  text-align: center;
+}
+
+.doc-empty h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.doc-empty .hint {
+  max-width: 30rem;
+  margin: 0;
+}
+
+/* Шапка карточки */
+.receipt-card .doc-header {
+  padding: 14px 16px 10px;
+}
+
+.receipt-card > .hint {
+  margin: 0 0 8px;
+  padding: 0 16px;
+}
+
+/* Паспорт внутри карточки */
+.receipt-card .doc-passport {
+  grid-template-columns: minmax(15rem, 1.6fr) 10rem 6rem 13rem;
+  padding: 12px 16px;
+  background: #fcfcfd;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+}
+
+/* Четыре главные цифры */
+.numbers {
+  display: grid;
+  grid-template-columns: 1.35fr repeat(3, 1fr);
+  border-bottom: 1px solid var(--border);
+}
+
+.numbers-cell {
+  padding: 12px 16px;
+  border-right: 1px solid var(--border);
+  min-width: 0;
+}
+
+.numbers-cell:last-child {
+  border-right: 0;
+}
+
+.numbers-label {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.numbers-value {
+  display: block;
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.numbers-main .numbers-value {
+  font-size: 1.2rem;
+}
+
+.numbers-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: #98a2b3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Секции-аккордеоны */
+.accordions {
+  display: block;
+}
+
+.acc {
+  display: block;
+}
+
+.acc .acc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: #fff;
+  text-align: left;
+  box-shadow: none;
+}
+
+.acc .acc-head:hover {
+  background: #fcfcfd;
+}
+
+.acc:first-child .acc-head {
+  border-top: 0;
+}
+
+.acc-chev {
+  width: 12px;
+  font-size: 11px;
+  color: #98a2b3;
+}
+
+.acc-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.acc-count {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #f1f3f5;
+  color: #475467;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.acc-sum {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.acc .acc-body {
+  border: 0;
+  border-top: 1px solid #f0f2f5;
+  border-radius: 0;
+  background: #fff;
+}
+
+.acc-body .doc-card-title,
+.acc-body .doc-card-sub {
+  display: none;
+}
+
+#panel-cost .doc-card-head,
+#panel-customs .doc-card-head {
+  display: none;
+}
+
+/* Подвал карточки */
+.receipt-card .doc-footer {
+  margin: 0;
+  padding: 10px 16px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 0.9rem 0.9rem;
+  background: #fff;
+}
+
+/* Карточка партии тянется вниз: липкие календарь и подвал работают по окну. */
+.content.content-receipts {
+  overflow: visible;
+}
+
+/* Узкий экран: календарь и день — над карточкой, чтобы таблица не пряталась. */
+@media (max-width: 1500px) {
+  .workplace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .rail {
+    position: static;
+    grid-template-columns: 280px minmax(0, 1fr);
+    align-items: start;
+  }
+  .rail .mini-card {
+    grid-row: 1 / span 2;
+    width: 280px;
+  }
+  .rail-day,
+  .rail-list {
+    grid-column: 2;
+  }
+  .rail-list {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  }
+}
+
+/* Позиции: загрузка из 1С и «Добавить строку» — в одной строке. */
+.items-import {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
 }

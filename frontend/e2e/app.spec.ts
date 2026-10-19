@@ -437,7 +437,7 @@ test('поступление заводится в календаре, себе�
   await expect(page.getByTestId('unit-cost-i0')).toHaveText('9 000,00')
 
   // Валютный платёж закрывает часть инвойса по своему курсу и не переоценивается.
-  await page.getByRole('tab', { name: 'Платежи' }).click()
+  await page.getByRole('button', { name: 'Платежи' }).click()
   await page.getByRole('button', { name: 'Добавить валютный платёж' }).click()
   await page.getByLabel('Сумма платежа pnew1').fill('600')
   await page.getByLabel('Курс платежа pnew1').fill('80')
@@ -520,11 +520,12 @@ test('пошлина, Risk и общие расходы считаются в к
   // (100 + 5) × 90 + 1 × 90 = 9 540 ₽ за единицу, 95 400 ₽ за строку.
   await expect(page.getByTestId('unit-cost-i0')).toHaveText('9 540,00')
   await expect(page.getByTestId('receipt-total')).toHaveText('95 400,00 ₽')
+  await page.getByRole('button', { name: 'Себестоимость' }).click()
   await expect(page.getByTestId('receipt-risk-total')).toContainText('10,00')
   await expect(page.getByTestId('receipt-duty')).toContainText('4 500,00')
 
   // Общий расход в рублях входит в себестоимость целиком.
-  await page.getByRole('tab', { name: 'Общие расходы' }).click()
+  await page.getByRole('button', { name: 'Общие расходы' }).click()
   await page.getByRole('button', { name: 'Добавить расход' }).click()
   await page.getByLabel('Расход enew1').fill('Доставка')
   await page.getByLabel('Сумма расхода enew1').fill('5000')
@@ -532,7 +533,7 @@ test('пошлина, Risk и общие расходы считаются в к
   await expect(page.getByTestId('receipt-total')).toHaveText('100 400,00 ₽')
 
   // Платёж категории Risk закрывает Risk по своему курсу.
-  await page.getByRole('tab', { name: 'Платежи' }).click()
+  await page.getByRole('button', { name: 'Платежи' }).click()
   await page.getByRole('button', { name: 'Добавить валютный платёж' }).click()
   const payRow = page.locator('[data-testid="receipt-payments"] tbody tr').first()
   await payRow.getByLabel(/Категория платежа/).selectOption('risk')
@@ -604,7 +605,7 @@ test('растаможка партии: проценты превращаютс
 
   await page.goto('/')
   await openSection(page, 'Закупки', 'Поступления')
-  await page.getByTestId('day-receipt-b1').getByRole('button', { name: 'Открыть' }).click()
+  await page.getByTestId('day-receipt-b1').click()
   await page.getByTestId('customs-start').click()
 
   // Курс подставляется из ЦБ на дату растаможки: 50 $ × 90,5 = 4 525 ₽ пошлины.
@@ -639,8 +640,7 @@ test('растаможка партии: проценты превращаютс
   // Проценты в строках исчезли: вместо полей — зафиксированные рубли.
   await expect(page.getByLabel('Пошлина i0')).toHaveCount(0)
   await expect(page.getByLabel('НДС i0')).toHaveCount(0)
-  // Строка календаря тоже помечена — возвращаемся к списку.
-  await page.getByTestId('receipt-back').click()
+  // Пометка видна в списке дня слева.
   await expect(page.getByTestId('clearance-badge')).toBeVisible()
 
   expect(sent[0]?.rate).toBe('80')
@@ -722,7 +722,7 @@ test('закупщик грузит позиции партии из файла 
   await openSection(page, 'Закупки', 'Поступления')
   await expect(page.getByTestId('receipts-calendar')).toBeVisible()
 
-  await page.getByTestId(`day-receipt-b1`).getByRole('button', { name: 'Открыть' }).click()
+  await page.getByTestId('day-receipt-b1').click()
   await expect(page.getByTestId('draft-hint')).toContainText('файл «Партия» из 1С')
 
   await page.getByLabel('Файл партии из 1С').setInputFiles({

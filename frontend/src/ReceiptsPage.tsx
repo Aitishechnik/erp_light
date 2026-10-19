@@ -110,8 +110,8 @@ type Draft = {
   rateDate: string
 }
 
-/** Вкладки карточки партии: детали не мешаются на одном экране. */
-type TabId = 'items' | 'expenses' | 'payments' | 'customs' | 'cost'
+/** Раскрывающиеся секции карточки: детали не мешаются на одном экране. */
+type SectionId = 'items' | 'expenses' | 'payments' | 'customs' | 'cost'
 
 /** Черновик окна подтверждения растаможки: дата, курс и правимые итоги. */
 type CustomsDraft = {
@@ -125,6 +125,45 @@ type CustomsDraft = {
 }
 
 const WEEKDAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс']
+
+const MONTHS = [
+  'Январь',
+  'Февраль',
+  'Март',
+  'Апрель',
+  'Май',
+  'Июнь',
+  'Июль',
+  'Август',
+  'Сентябрь',
+  'Октябрь',
+  'Ноябрь',
+  'Декабрь',
+]
+
+const MONTHS_GENITIVE = [
+  'января',
+  'февраля',
+  'марта',
+  'апреля',
+  'мая',
+  'июня',
+  'июля',
+  'августа',
+  'сентября',
+  'октября',
+  'ноября',
+  'декабря',
+]
+
+/** Русское склонение: 1 поступление, 2 поступления, 5 поступлений. */
+function plural(value: number, one: string, few: string, many: string): string {
+  const mod10 = value % 10
+  const mod100 = value % 100
+  if (mod10 === 1 && mod100 !== 11) return one
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few
+  return many
+}
 
 /** Локальная дата в формате ГГГГ-ММ-ДД (toISOString даёт UTC и сдвигает день). */
 function iso(day: Date): string {
@@ -491,8 +530,8 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   const [busy, setBusy] = useState(false)
   /** Окно подтверждения растаможки: дата, курс и правимые итоги. */
   const [customs, setCustoms] = useState<CustomsDraft | null>(null)
-  /** Какая вкладка открыта в карточке: по умолчанию — позиции. */
-  const [tab, setTab] = useState<TabId>('items')
+  /** Какие секции карточки раскрыты: по умолчанию — позиции. */
+  const [openSections, setOpenSections] = useState<SectionId[]>(['items'])
   /** Курс ЦБ на сегодня для расходов в usd: без даты — последний доступный. */
   const [usdRate, setUsdRate] = useState<string | null>(null)
   const itemsInput = useRef<HTMLInputElement>(null)
@@ -583,7 +622,10 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   }
 
   const startCreate = (target = day) => {
-    setTab('items')
+    if (dirty && !window.confirm('В карточке есть несохранённые изменения. Начать новое?')) {
+      return
+    }
+    setOpenSections(['items'])
     setRateHint(null)
     setError(null)
     setItemsFile(null)
@@ -596,7 +638,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   }
 
   const startEdit = (batch: Batch) => {
-    setTab('items')
+    setOpenSections(['items'])
     setRateHint(null)
     setError(null)
     setItemsFile(null)
@@ -884,7 +926,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
       : `Курс остатка введён вручную — ${value} (например, когда ЦБ недоступен).`
   })()
 
-  /** Закрыть карточку и вернуться к календарю; несохранённые правки спрашиваем. */
+  /** Закрыть карточку: правая панель показывает «выберите поступление». */
   const closeDocument = () => {
     if (
       dirty &&
@@ -898,180 +940,187 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
     setSavedSnapshot(null)
   }
 
-  /* ── Календарь и список за день: карточка закрыта ───────────────────── */
+  /** Выбрать день в мини-календаре: слева — только его поступления. */
+  const selectDay = (next: string) => {
+    if (next === day) return
+    if (dirty && !window.confirm('В карточке есть несохранённые изменения. Сменить день?')) {
+      return
+    }
+    if (next.slice(0, 7) !== month) setMonth(next.slice(0, 7))
+    setDay(next)
+    // Открытая партия другого дня в списке не видна — закрываем её.
+    if (draft && draft.date !== next) {
+      setCustoms(null)
+      setDraft(null)
+      setSavedHint(null)
+      setSavedSnapshot(null)
+    }
+  }
+
+  const toggleSection = (section: SectionId) => {
+    setOpenSections((current) =>
+      current.includes(section) ? current.filter((row) => row !== section) : [...current, section],
+    )
+  }
+  const isOpen = (section: SectionId) => openSections.includes(section)
+
+  /** Открыть партию из списка дня. */
+  const openBatch = (batch: Batch) => {
+    if (draft?.id === batch.id) return
+    if (dirty && !window.confirm('В карточке есть несохранённые изменения. Открыть другую?')) {
+      return
+    }
+    setCustoms(null)
+    setSavedHint(null)
+    startEdit(batch)
+  }
+
+  const dayLabel = `${Number(day.slice(-2))} ${MONTHS_GENITIVE[Number(day.slice(5, 7)) - 1]}`
+  const dayBatchesWord = plural(dayBatches.length, 'поступление', 'поступления', 'поступлений')
+  const monthLabel = `${MONTHS[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`
+
+  const pageHead = (
+    <header className="receipts-head">
+      <h1>Поступления</h1>
+      <div className="month-nav">
+        <button type="button" onClick={() => shiftMonth(-1)} aria-label="Предыдущий месяц">
+          ←
+        </button>
+        <strong data-testid="receipts-month">{monthLabel}</strong>
+        <button type="button" onClick={() => shiftMonth(1)} aria-label="Следующий месяц">
+          →
+        </button>
+      </div>
+      <span className="spacer" />
+      <button type="button" className="primary" onClick={() => startCreate(day)}>
+        Новое поступление
+      </button>
+    </header>
+  )
+
+  const rail = (
+    <aside className="rail">
+      <div className="mini-card" data-testid="receipts-calendar">
+        <div className="mini-dow" aria-hidden="true">
+          {WEEKDAYS.map((title) => (
+            <span key={title}>{title}</span>
+          ))}
+        </div>
+        <div className="mini-days">
+          {weeks.flat().map((cell) => {
+            const rows = byDay.get(cell.date) ?? []
+            const clearedDay = rows.some((batch) => batch.customs_date)
+            return (
+              <button
+                key={cell.date}
+                type="button"
+                data-testid={`day-${cell.date}`}
+                className={[
+                  'mini-day',
+                  cell.inMonth ? '' : 'out',
+                  cell.date === day ? 'selected' : '',
+                  rows.length > 0 ? 'has' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                title={
+                  rows.length > 0
+                    ? `${rows.length} ${plural(rows.length, 'поступление', 'поступления', 'поступлений')}`
+                    : undefined
+                }
+                onClick={() => selectDay(cell.date)}
+              >
+                {Number(cell.date.slice(-2))}
+                {rows.length > 0 ? (
+                  <i
+                    className={clearedDay ? 'mini-dot cleared' : 'mini-dot'}
+                    data-testid={`day-dot-${cell.date}`}
+                  />
+                ) : null}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="rail-day" data-testid="rail-day">
+        {dayLabel} · {dayBatches.length} {dayBatchesWord}
+      </div>
+
+      <div className="rail-list" data-testid="day-receipts">
+        {dayBatches.length === 0 ? (
+          <p className="hint rail-empty" data-testid="day-empty">
+            В этот день поступлений нет.
+          </p>
+        ) : null}
+        {dayBatches.map((batch) => {
+          const isDraft = batch.source === '1c' && batch.items.length === 0
+          const active = draft?.id === batch.id
+          return (
+            <button
+              key={batch.id}
+              type="button"
+              data-testid={`day-receipt-${batch.id}`}
+              className={active ? 'batch-card active' : 'batch-card'}
+              onClick={() => openBatch(batch)}
+            >
+              <span className="batch-top">
+                <strong>{batch.batch_number}</strong>
+                {isDraft ? (
+                  <span className="badge status-draft" data-testid="draft-badge">
+                    черновик
+                  </span>
+                ) : null}
+                {batch.customs_date ? (
+                  <span className="badge status-clearance" data-testid="clearance-badge">
+                    растаможена
+                  </span>
+                ) : null}
+              </span>
+              <span className="batch-supplier">{batch.supplier ?? '—'}</span>
+              <span className="batch-bottom">
+                <b>{isDraft ? '—' : `${formatMoney(batch.finance.final_cost_rub)} ₽`}</b>
+                <span className="batch-note">
+                  {batch.items.length} поз.
+                  {isDraft ? '' : ` · ${trim(batch.finance.average_rate)}`}
+                </span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </aside>
+  )
 
   if (!draft || !cost) {
     return (
-      <section>
-        <header className="page-head">
-          <h1>Поступления</h1>
-          <p className="hint">
-            Календарь поступлений партий: поставщик, товары, валюта и курс. Себестоимость
-            пересчитывается сразу при изменении курса, сумм и расходов.
-          </p>
-          <div className="toolbar">
-            <button type="button" onClick={() => shiftMonth(-1)} aria-label="Предыдущий месяц">
-              ←
-            </button>
-            <strong data-testid="receipts-month">{month}</strong>
-            <button type="button" onClick={() => shiftMonth(1)} aria-label="Следующий месяц">
-              →
-            </button>
-            <span className="sep" />
-            <button type="button" className="primary" onClick={() => startCreate(day)}>
-              Добавить поступление
-            </button>
-          </div>
-        </header>
-
+      <section className="receipts-page">
+        {pageHead}
         {error ? (
           <p className="error" role="alert">
             {error}
           </p>
         ) : null}
-
-        <table className="calendar" data-testid="receipts-calendar">
-          <thead>
-            <tr>
-              {WEEKDAYS.map((title) => (
-                <th key={title} scope="col">
-                  {title}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {weeks.map((week) => (
-              <tr key={week[0]?.date ?? 'week'}>
-                {week.map((cell) => {
-                  const rows = byDay.get(cell.date) ?? []
-                  const total = rows.reduce(
-                    (sum, batch) => sum + Number(batch.finance.final_cost_rub),
-                    0,
-                  )
-                  const clearedCount = rows.filter((batch) => batch.customs_date).length
-                  return (
-                    <td
-                      key={cell.date}
-                      className={[
-                        'calendar-day',
-                        cell.inMonth ? '' : 'other-month',
-                        cell.date === day ? 'selected' : '',
-                      ]
-                        .filter(Boolean)
-                        .join(' ')}
-                    >
-                      <button
-                        type="button"
-                        className="calendar-cell"
-                        onClick={() => setDay(cell.date)}
-                        data-testid={`day-${cell.date}`}
-                      >
-                        <span className="calendar-date">{Number(cell.date.slice(-2))}</span>
-                        {rows.length > 0 ? (
-                          <>
-                            <span className="badge status-filling">поступлений: {rows.length}</span>
-                            {clearedCount > 0 ? (
-                              <span
-                                className="badge status-clearance"
-                                data-testid={`day-cleared-${cell.date}`}
-                              >
-                                растаможено: {clearedCount}
-                              </span>
-                            ) : null}
-                            {/* У черновиков из 1С позиций ещё нет: нулевая себестоимость — не итог дня. */}
-                            {total > 0 ? (
-                              <span className="calendar-sum">{formatMoney(String(total))} ₽</span>
-                            ) : (
-                              <span
-                                className="calendar-sum"
-                                data-testid={`day-drafts-${cell.date}`}
-                              >
-                                черновики
-                              </span>
-                            )}
-                          </>
-                        ) : null}
-                      </button>
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <h2 className="section-title">Поступления на {day}</h2>
-        {dayBatches.length === 0 ? (
-          <p className="hint" data-testid="day-empty">
-            В этот день поступлений нет.
-          </p>
-        ) : (
-          <table data-testid="day-receipts">
-            <thead>
-              <tr>
-                <th scope="col">Номер</th>
-                <th scope="col">Поставщик</th>
-                <th scope="col">Позиций</th>
-                <th scope="col">Валюта</th>
-                <th scope="col" className="num">
-                  Курс
-                </th>
-                <th scope="col" className="num">
-                  Себестоимость, ₽
-                </th>
-                <th scope="col" aria-label="Действия" />
-              </tr>
-            </thead>
-            <tbody>
-              {dayBatches.map((batch) => {
-                const isDraft = batch.source === '1c' && batch.items.length === 0
-                return (
-                  <tr key={batch.id} data-testid={`day-receipt-${batch.id}`}>
-                    <td>
-                      {batch.batch_number}
-                      {isDraft ? (
-                        <span className="badge status-draft" data-testid="draft-badge">
-                          {' '}
-                          черновик
-                        </span>
-                      ) : null}
-                      {batch.customs_date ? (
-                        <span
-                          className="badge status-clearance"
-                          data-testid="clearance-badge"
-                          title={`Растаможена ${batch.customs_date}`}
-                        >
-                          {' '}
-                          растаможена
-                        </span>
-                      ) : null}
-                    </td>
-                    <td>{batch.supplier ?? '—'}</td>
-                    <td>{batch.items.length}</td>
-                    <td>{batch.currency}</td>
-                    <td className="num">{isDraft ? '—' : trim(batch.finance.average_rate)}</td>
-                    <td className="num">
-                      {isDraft ? '—' : formatMoney(batch.finance.final_cost_rub)}
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="mini"
-                        onClick={() => {
-                          setTab('items')
-                          startEdit(batch)
-                        }}
-                      >
-                        Открыть
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        )}
+        <div className="workplace">
+          {rail}
+          <div className="work-right">
+            <div className="doc-empty" data-testid="empty-doc">
+              <h2>
+                {dayBatches.length === 0
+                  ? `На ${dayLabel} поступлений нет`
+                  : 'Выберите поступление'}
+              </h2>
+              <p className="hint">
+                {dayBatches.length === 0
+                  ? 'Можно добавить поступление на этот день или выбрать другой день в календаре.'
+                  : 'Слева — все поступления этого дня. Нажмите на любое, чтобы открыть его.'}
+              </p>
+              <button type="button" className="primary" onClick={() => startCreate(day)}>
+                Добавить поступление
+              </button>
+            </div>
+          </div>
+        </div>
       </section>
     )
   }
@@ -1089,1421 +1138,1420 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   const paidRub = cost.invoice.paidRub + cost.risk.paidRub
 
   return (
-    <section className="receipt-doc" data-testid="receipt-doc">
-      <div className="doc-crumbs">
-        <span>Закупки</span>
-        <span className="sep">/</span>
-        <span>Поступления</span>
-        <span className="sep">/</span>
-        <strong>{draft.number.trim() || 'новое поступление'}</strong>
-      </div>
-
-      <form className="receipt-form receipt-doc-form" onSubmit={submit} data-testid="receipt-form">
-        <header className="doc-header">
-          <div className="doc-header-main">
-            <button
-              type="button"
-              className="back-link"
-              data-testid="receipt-back"
-              onClick={closeDocument}
-            >
-              ← К поступлениям
-            </button>
-            <div className="doc-title-row">
-              <input
-                className="doc-title-input"
-                aria-label="Номер поступления"
-                placeholder="Новый номер"
-                value={draft.number}
-                size={Math.max(draft.number.length, 8)}
-                onChange={(event) => setDraft({ ...draft, number: event.target.value })}
-                required
-              />
-              {draft.isDraft ? (
-                <span className="badge status-draft" data-testid="draft-badge">
-                  черновик
-                </span>
-              ) : null}
-              {draft.customsDate ? (
-                <span className="badge status-clearance" data-testid="customs-badge">
-                  растаможена {ruDate(draft.customsDate)}
-                  {draft.customsRate ? ` · курс ${trim(draft.customsRate)}` : ''}
-                </span>
-              ) : null}
-              {!draft.isDraft && !draft.customsDate && draft.id ? (
-                <span className="badge status-filling">в работе</span>
-              ) : null}
-              {draft.id ? <span className="badge status-source">из 1С</span> : null}
-            </div>
-            {savedHint && !dirty ? (
-              <p className="hint saved" data-testid="receipt-saved">
-                {savedHint}
-              </p>
-            ) : null}
-            {draft.isDraft ? (
-              <p className="hint" data-testid="draft-hint">
-                Черновик из выгрузки 1С: заполнены номер, дата, поставщик и комментарий. Загрузите
-                файл «Партия» из 1С или добавьте позиции вручную — и поступление станет обычным.
-              </p>
-            ) : null}
-          </div>
-          <div className="doc-header-actions">
-            {draft.customsDate === '' ? (
-              <button
-                type="button"
-                className="primary"
-                data-testid="customs-start"
-                disabled={busy || dirty || !draft.id || draft.items.length === 0}
-                onClick={() => void openCustoms()}
-              >
-                Растаможить
-              </button>
-            ) : mayCancelCustoms ? (
-              <button
-                type="button"
-                data-testid="customs-cancel"
-                disabled={busy || dirty}
-                onClick={() => void dropCustoms()}
-              >
-                Отменить растаможку
-              </button>
-            ) : null}
-          </div>
-        </header>
-
-        {error ? (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        ) : null}
-
-        <section className="doc-passport" aria-label="Реквизиты поступления">
-          <label className="field">
-            Дата
-            <input
-              type="date"
-              aria-label="Дата поступления"
-              value={draft.date}
-              onChange={(event) => setDraft({ ...draft, date: event.target.value })}
-              required
-            />
-          </label>
-          <label className="field">
-            Поставщик
-            <select
-              aria-label="Поставщик"
-              value={draft.supplierId}
-              onChange={(event) => setDraft({ ...draft, supplierId: event.target.value })}
-            >
-              <option value="">— не выбран —</option>
-              {suppliers.map((row) => (
-                <option key={row.id} value={row.id}>
-                  {row.name}
-                </option>
-              ))}
-              <option value="__manual__">— ввести вручную —</option>
-            </select>
-          </label>
-          {draft.supplierId === '__manual__' ? (
-            <label className="field">
-              Название поставщика
-              <input
-                aria-label="Название поставщика"
-                value={draft.supplierText}
-                onChange={(event) => setDraft({ ...draft, supplierText: event.target.value })}
-              />
-            </label>
-          ) : null}
-          <label className="field">
-            Валюта
-            <input
-              aria-label="Валюта"
-              value={draft.currency}
-              // Фикс таможни посчитан в валюте партии: после растаможки её не меняем,
-              // а пока открыто окно — тем более: суммы посчитаны в этой валюте.
-              disabled={cleared || locked}
-              onChange={(event) => setDraft({ ...draft, currency: event.target.value })}
-            />
-          </label>
-          <div className="field">
-            <span>Курс остатка, ₽</span>
-            <div className="rate-row">
-              <input
-                aria-label="Курс"
-                value={draft.rate}
-                onChange={(event) =>
-                  // Курс вписан руками — дата курса ЦБ больше не применима.
-                  setDraft({ ...draft, rate: event.target.value, rateDate: '' })
-                }
-              />
-              <button type="button" aria-label="Обновить курс ЦБ" onClick={() => void fillRate()}>
-                Курс ЦБ
-              </button>
-            </div>
-          </div>
-          <label className="field doc-comment">
-            Комментарий
-            <textarea
-              aria-label="Комментарий"
-              rows={2}
-              value={draft.comment}
-              onChange={(event) => setDraft({ ...draft, comment: event.target.value })}
-            />
-          </label>
-        </section>
-
-        {rateHint ? <p className="hint">{rateHint}</p> : null}
-        {/* Каким курсом и на какую дату оценён незакрытый остаток. */}
-        <p className="hint doc-rate-caption" data-testid="receipt-cbr-rate">
-          {rateCaption}
+    <section className="receipts-page" data-testid="receipt-doc">
+      {pageHead}
+      {error ? (
+        <p className="error" role="alert">
+          {error}
         </p>
-
-        {dirty ? (
-          // Таможня считает суммы по сохранённым строкам: с несохранёнными правками
-          // карточка после растаможки вернулась бы к состоянию на сервере.
-          <p className="hint" data-testid="customs-dirty">
-            В карточке есть несохранённые изменения. Сначала сохраните поступление — потом
-            растаможка посчитает суммы по сохранённым строкам.
-          </p>
-        ) : null}
-        {draft.customsDate === '' && !draft.id ? (
-          <p className="hint" data-testid="customs-need-save">
-            Растаможка доступна после сохранения поступления.
-          </p>
-        ) : null}
-
-        <section className="kpis" aria-label="Итоги партии">
-          <div className="kpi kpi-primary">
-            <span className="kpi-label">Себестоимость</span>
-            <span className="kpi-value" data-testid="receipt-total">
-              {money(cost.total)} ₽
-            </span>
-            <span className="kpi-sub">
-              {draft.items.length} поз. · {currency}
-            </span>
-          </div>
-          <div className="kpi">
-            <span className="kpi-label">Средний курс</span>
-            <span className="kpi-value" data-testid="receipt-average-rate">
-              {formatRate(cost.averageRate)}
-            </span>
-            <span className="kpi-sub">
-              {trim(draft.rate) ? (
-                <>
-                  инвойс <b data-testid="receipt-effective">{formatRate(cost.invoice.rate)}</b> ·
-                  Risk <b data-testid="receipt-risk-rate">{formatRate(cost.risk.rate)}</b>
-                </>
-              ) : (
-                'курс не задан'
-              )}
-            </span>
-          </div>
-          <div className="kpi">
-            <span className="kpi-label">Инвойс</span>
-            <span className="kpi-value" data-testid="receipt-invoice">
-              {money(cost.invoice.total)} {currency}
-            </span>
-            <span className="kpi-sub">
-              {cost.invoice.paidCurrency > 0
-                ? `оплачено ${money(cost.invoice.paidCurrency)} ${currency}`
-                : 'не оплачен'}
-            </span>
-          </div>
-          <div className="kpi">
-            <span className="kpi-label">Risk</span>
-            <span className="kpi-value" data-testid="receipt-risk-total">
-              {money(cost.risk.total)} {currency}
-            </span>
-            <span className="kpi-sub">
-              {cost.risk.total === 0
-                ? 'нет в партии'
-                : cost.risk.paidCurrency >= cost.risk.total
-                  ? 'оплачен'
-                  : `оплачено ${money(cost.risk.paidCurrency)} ${currency}`}
-            </span>
-          </div>
-          <div className="kpi">
-            <span className="kpi-label">Пошлина</span>
-            <span className="kpi-value" data-testid="receipt-duty">
-              {money(cost.dutyRub)} ₽
-            </span>
-            <span className="kpi-sub">{cleared ? 'зафиксирована' : 'в процентах по строкам'}</span>
-          </div>
-          <div className="kpi">
-            <span className="kpi-label">НДС</span>
-            <span className="kpi-value" data-testid="receipt-vat">
-              {money(cost.vatRub)} ₽
-            </span>
-            <span className="kpi-sub">{cleared ? 'зафиксирован' : 'в процентах по строкам'}</span>
-          </div>
-        </section>
-
-        <div className="doc-tabs-panel">
-          <div className="receipt-tabs" role="tablist" aria-label="Разделы поступления">
-            <button
-              type="button"
-              role="tab"
-              id="tab-items"
-              aria-selected={tab === 'items'}
-              aria-controls="panel-items"
-              aria-label="Позиции"
-              data-testid="tab-items"
-              className={tab === 'items' ? 'tab active' : 'tab'}
-              onClick={() => setTab('items')}
-            >
-              Позиции <span className="tab-count">{draft.items.length}</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              id="tab-expenses"
-              aria-selected={tab === 'expenses'}
-              aria-controls="panel-expenses"
-              aria-label="Общие расходы"
-              data-testid="tab-expenses"
-              className={tab === 'expenses' ? 'tab active' : 'tab'}
-              onClick={() => setTab('expenses')}
-            >
-              Общие расходы <span className="tab-count">{draft.expenses.length}</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              id="tab-payments"
-              aria-selected={tab === 'payments'}
-              aria-controls="panel-payments"
-              aria-label="Платежи"
-              data-testid="tab-payments"
-              className={tab === 'payments' ? 'tab active' : 'tab'}
-              onClick={() => setTab('payments')}
-            >
-              Платежи <span className="tab-count">{draft.payments.length}</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              id="tab-customs"
-              aria-selected={tab === 'customs'}
-              aria-controls="panel-customs"
-              aria-label="Таможня"
-              data-testid="tab-customs"
-              className={tab === 'customs' ? 'tab active' : 'tab'}
-              onClick={() => setTab('customs')}
-            >
-              Таможня
-            </button>
-            <button
-              type="button"
-              role="tab"
-              id="tab-cost"
-              aria-selected={tab === 'cost'}
-              aria-controls="panel-cost"
-              aria-label="Себестоимость"
-              data-testid="tab-cost"
-              className={tab === 'cost' ? 'tab active' : 'tab'}
-              onClick={() => setTab('cost')}
-            >
-              Себестоимость
-            </button>
-          </div>
-
-          {tab === 'items' ? (
-            <div className="doc-card" id="panel-items" role="tabpanel" aria-labelledby="tab-items">
-              <div className="doc-card-head">
-                <h2 className="doc-card-title">Позиции</h2>
-                <span className="doc-card-sub">{draft.items.length} строк</span>
-                <span className="spacer" />
-                {cleared ? null : (
-                  <button
-                    type="button"
-                    disabled={locked}
-                    onClick={() =>
-                      setDraft({
-                        ...draft,
-                        items: [
-                          ...draft.items,
-                          {
-                            key: nextKey('i'),
-                            title: '',
-                            code: '',
-                            quantity: '',
-                            price: '',
-                            duty: '0',
-                            vat: '22',
-                            risk: '0',
-                            dutyRub: '',
-                            vatRub: '',
-                          },
-                        ],
-                      })
-                    }
-                  >
-                    Добавить строку
-                  </button>
-                )}
-              </div>
-
-              {draft.id && mayLoadItems ? (
-                <div className="doc-toolbar" data-testid="batch-items-import">
-                  <span className="doc-toolbar-label">Позиции из 1С (файл «Партия»)</span>
-                  <label className="file-pick">
-                    Выбрать файл
-                    <input
-                      ref={itemsInput}
-                      type="file"
-                      accept=".xlsx"
-                      aria-label="Файл партии из 1С"
-                      // Пока открыто окно растаможки, позиции из файла не подменяем.
-                      disabled={busy || locked}
-                      onChange={(event) => {
-                        setItemsFile(event.target.files?.[0] ?? null)
-                        setItemsHint(null)
-                      }}
-                    />
-                  </label>
-                  <span className="file-pick-name">
-                    {itemsFile ? itemsFile.name : 'файл не выбран'}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={busy || locked || !itemsFile}
-                    onClick={() => void loadItems()}
-                  >
-                    {busy ? 'Загрузка…' : 'Загрузить позиции из 1С'}
-                  </button>
-                  <span className="hint">Из файла берутся товар и количество</span>
-                </div>
-              ) : null}
-              {itemsHint ? (
-                <p className="hint doc-inline-hint" data-testid="batch-items-hint">
-                  {itemsHint}
-                </p>
-              ) : null}
-
-              <div className="table-scroll">
-                <table className="receipt-items" data-testid="receipt-items">
-                  <thead>
-                    <tr>
-                      <th scope="col">Товар</th>
-                      <th scope="col" className="num">
-                        Стоимость за ед., {currencyLabel(draft.currency)}
-                      </th>
-                      <th scope="col" className="num">
-                        Кол-во
-                      </th>
-                      <th scope="col" className="num">
-                        Пошлина, {cleared ? '₽' : '%'}
-                      </th>
-                      <th scope="col" className="num">
-                        НДС, {cleared ? '₽' : '%'}
-                      </th>
-                      <th scope="col" className="num">
-                        Risk, {currencyLabel(draft.currency)}
-                      </th>
-                      <th scope="col" className="num">
-                        Цена за ед., ₽
-                      </th>
-                      <th scope="col" className="num">
-                        Сумма, ₽
-                      </th>
-                      <th scope="col" aria-label="Действия" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {draft.items.length === 0 ? (
-                      <tr>
-                        <td colSpan={9} className="hint">
-                          Позиций пока нет — добавьте строку или загрузите файл «Партия» из 1С.
-                        </td>
-                      </tr>
-                    ) : null}
-                    {draft.items.map((item) => (
-                      <tr key={item.key}>
-                        <td>
-                          {cleared ? (
-                            <>
-                              <span data-testid={`item-title-${item.key}`}>{item.title}</span>
-                              {item.code ? (
-                                <span className="unit" data-testid={`product-code-${item.key}`}>
-                                  код {item.code}
-                                </span>
-                              ) : null}
-                            </>
-                          ) : (
-                            <>
-                              <input
-                                aria-label={`Товар ${item.key}`}
-                                list="receipt-products"
-                                disabled={locked}
-                                placeholder="название товара"
-                                value={item.title}
-                                onChange={(event) => {
-                                  // В поле — название; код под полем всегда тот, что уйдёт на сервер.
-                                  const title = event.target.value
-                                  const found = findProduct(products, title)
-                                  setDraft({
-                                    ...draft,
-                                    items: draft.items.map((row) =>
-                                      row.key === item.key
-                                        ? { ...row, title, code: found?.code ?? '' }
-                                        : row,
-                                    ),
-                                  })
-                                }}
-                              />
-                              {item.code ? (
-                                <span className="unit" data-testid={`product-code-${item.key}`}>
-                                  код {item.code}
-                                </span>
-                              ) : item.title.trim() ? (
-                                <span
-                                  className="unit product-missing"
-                                  data-testid={`product-missing-${item.key}`}
-                                >
-                                  нет в справочнике — строка не сохранится
-                                </span>
-                              ) : null}
-                            </>
-                          )}
-                        </td>
-                        <td className="num">
-                          {cleared ? (
-                            <span data-testid={`item-price-${item.key}`}>{item.price}</span>
-                          ) : (
-                            <input
-                              className="cell"
-                              aria-label={`Стоимость за ед. ${item.key}`}
-                              disabled={locked}
-                              value={item.price}
-                              onChange={(event) =>
-                                setDraft({
-                                  ...draft,
-                                  items: draft.items.map((row) =>
-                                    row.key === item.key
-                                      ? { ...row, price: event.target.value }
-                                      : row,
-                                  ),
-                                })
-                              }
-                            />
-                          )}
-                        </td>
-                        <td className="num">
-                          {cleared ? (
-                            <span data-testid={`item-quantity-${item.key}`}>{item.quantity}</span>
-                          ) : (
-                            <input
-                              className="cell"
-                              aria-label={`Количество ${item.key}`}
-                              disabled={locked}
-                              value={item.quantity}
-                              onChange={(event) =>
-                                setDraft({
-                                  ...draft,
-                                  items: draft.items.map((row) =>
-                                    row.key === item.key
-                                      ? { ...row, quantity: event.target.value }
-                                      : row,
-                                  ),
-                                })
-                              }
-                            />
-                          )}
-                        </td>
-                        <td className="num" data-testid={`item-duty-${item.key}`}>
-                          {cleared ? (
-                            // После растаможки в колонке — зафиксированные рубли, а не процент.
-                            formatMoney(item.dutyRub || '0')
-                          ) : (
-                            <input
-                              className="cell"
-                              aria-label={`Пошлина ${item.key}`}
-                              disabled={locked}
-                              value={item.duty}
-                              onChange={(event) =>
-                                setDraft({
-                                  ...draft,
-                                  items: draft.items.map((row) =>
-                                    row.key === item.key
-                                      ? { ...row, duty: event.target.value }
-                                      : row,
-                                  ),
-                                })
-                              }
-                            />
-                          )}
-                        </td>
-                        <td className="num" data-testid={`item-vat-${item.key}`}>
-                          {cleared ? (
-                            formatMoney(item.vatRub || '0')
-                          ) : (
-                            <input
-                              className="cell"
-                              aria-label={`НДС ${item.key}`}
-                              disabled={locked}
-                              value={item.vat}
-                              onChange={(event) =>
-                                setDraft({
-                                  ...draft,
-                                  items: draft.items.map((row) =>
-                                    row.key === item.key
-                                      ? { ...row, vat: event.target.value }
-                                      : row,
-                                  ),
-                                })
-                              }
-                            />
-                          )}
-                        </td>
-                        <td className="num">
-                          {cleared ? (
-                            <span data-testid={`item-risk-${item.key}`}>{item.risk}</span>
-                          ) : (
-                            <input
-                              className="cell"
-                              aria-label={`Risk ${item.key}`}
-                              disabled={locked}
-                              value={item.risk}
-                              onChange={(event) =>
-                                setDraft({
-                                  ...draft,
-                                  items: draft.items.map((row) =>
-                                    row.key === item.key
-                                      ? { ...row, risk: event.target.value }
-                                      : row,
-                                  ),
-                                })
-                              }
-                            />
-                          )}
-                        </td>
-                        <td className="num" data-testid={`unit-cost-${item.key}`}>
-                          {formatMoney(String(cost.unit[item.key] ?? 0))}
-                        </td>
-                        <td className="num" data-testid={`item-total-${item.key}`}>
-                          {formatMoney(String(cost.itemTotal[item.key] ?? 0))}
-                        </td>
-                        <td>
-                          {cleared ? null : (
-                            <button
-                              type="button"
-                              className="mini"
-                              disabled={locked}
-                              onClick={() =>
-                                setDraft({
-                                  ...draft,
-                                  items: draft.items.filter((row) => row.key !== item.key),
-                                })
-                              }
-                            >
-                              Убрать
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <datalist id="receipt-products">
-                {products.map((product) => (
-                  <option key={product.id} value={product.name}>
-                    {product.code}
-                  </option>
-                ))}
-              </datalist>
-              {cleared ? (
-                <p className="hint doc-inline-hint" data-testid="customs-hint">
-                  Таможня пройдена {draft.customsDate}: пошлина и НДС зафиксированы в рублях по
-                  курсу {trim(draft.customsRate)} и больше не пересчитываются. Строки изменить
-                  нельзя — сначала отмените растаможку.
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-
-          {tab === 'expenses' ? (
-            <div
-              className="doc-card"
-              id="panel-expenses"
-              role="tabpanel"
-              aria-labelledby="tab-expenses"
-            >
-              <div className="doc-card-head">
-                <h2 className="doc-card-title">Общие расходы</h2>
-                <span className="doc-card-sub">на всю партию</span>
-                <span className="spacer" />
-                <button
-                  type="button"
-                  onClick={() =>
-                    setDraft({
-                      ...draft,
-                      expenses: [
-                        ...draft.expenses,
-                        { key: nextKey('e'), description: '', currency: 'RUB', amount: '' },
-                      ],
-                    })
-                  }
-                >
-                  Добавить расход
-                </button>
-              </div>
-              <p className="hint doc-inline-hint">
-                Доставка, оформление и прочее. Валюта — только руб. или usd; расход в usd считается
-                по курсу ЦБ на сегодня
-                {usdRate === null ? ' (курс пока не получен)' : ` (${trim(usdRate)} ₽)`}.
-              </p>
-              <div className="table-scroll">
-                <table className="receipt-expenses" data-testid="receipt-expenses">
-                  <thead>
-                    <tr>
-                      <th scope="col">Название</th>
-                      <th scope="col">Валюта</th>
-                      <th scope="col" className="num">
-                        Сумма
-                      </th>
-                      <th scope="col" className="num">
-                        Сумма, ₽
-                      </th>
-                      <th scope="col" aria-label="Действия" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {draft.expenses.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="hint">
-                          Общих расходов нет.
-                        </td>
-                      </tr>
-                    ) : (
-                      draft.expenses.map((row) => (
-                        <tr key={row.key}>
-                          <td>
-                            <input
-                              aria-label={`Расход ${row.key}`}
-                              placeholder="название расхода"
-                              value={row.description}
-                              onChange={(event) =>
-                                setDraft({
-                                  ...draft,
-                                  expenses: draft.expenses.map((expense) =>
-                                    expense.key === row.key
-                                      ? { ...expense, description: event.target.value }
-                                      : expense,
-                                  ),
-                                })
-                              }
-                            />
-                          </td>
-                          <td>
-                            <select
-                              aria-label={`Валюта расхода ${row.key}`}
-                              value={row.currency}
-                              onChange={(event) =>
-                                setDraft({
-                                  ...draft,
-                                  expenses: draft.expenses.map((expense) =>
-                                    expense.key === row.key
-                                      ? {
-                                          ...expense,
-                                          currency: event.target.value as ExpenseCurrency,
-                                        }
-                                      : expense,
-                                  ),
-                                })
-                              }
-                            >
-                              <option value="RUB">руб.</option>
-                              <option value="USD">usd</option>
-                            </select>
-                          </td>
-                          <td className="num">
-                            <input
-                              className="cell"
-                              aria-label={`Сумма расхода ${row.key}`}
-                              value={row.amount}
-                              onChange={(event) =>
-                                setDraft({
-                                  ...draft,
-                                  expenses: draft.expenses.map((expense) =>
-                                    expense.key === row.key
-                                      ? { ...expense, amount: event.target.value }
-                                      : expense,
-                                  ),
-                                })
-                              }
-                            />
-                          </td>
-                          <td className="num" data-testid={`expense-rub-${row.key}`}>
-                            {formatMoney(
-                              String(expenseRub(row, usdRate === null ? null : number(usdRate))),
-                            )}
-                          </td>
-                          <td>
-                            <button
-                              type="button"
-                              className="mini"
-                              onClick={() =>
-                                setDraft({
-                                  ...draft,
-                                  expenses: draft.expenses.filter(
-                                    (expense) => expense.key !== row.key,
-                                  ),
-                                })
-                              }
-                            >
-                              Убрать
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              <div className="doc-card-foot">
-                <span>
-                  Итого расходов:{' '}
-                  <strong data-testid="receipt-expenses-rub">{money(cost.expensesRub)} ₽</strong>
-                </span>
-              </div>
-            </div>
-          ) : null}
-
-          {tab === 'payments' ? (
-            <div
-              className="doc-card"
-              id="panel-payments"
-              role="tabpanel"
-              aria-labelledby="tab-payments"
-            >
-              <div className="doc-card-head">
-                <h2 className="doc-card-title">Платежи</h2>
-                <span className="doc-card-sub">закрывают инвойс и Risk</span>
-                <span className="spacer" />
-                <button
-                  type="button"
-                  onClick={() =>
-                    setDraft({
-                      ...draft,
-                      payments: [
-                        ...draft.payments,
-                        {
-                          key: nextKey('p'),
-                          date: draft.date,
-                          amount: '',
-                          rate: draft.currency === 'RUB' ? '1' : draft.rate,
-                          category: 'invoice',
-                          comment: '',
-                        },
-                      ],
-                    })
-                  }
-                >
-                  Добавить валютный платёж
-                </button>
-              </div>
-              <div className="table-scroll">
-                <table className="receipt-payments" data-testid="receipt-payments">
-                  <thead>
-                    <tr>
-                      <th scope="col">Категория</th>
-                      <th scope="col">Валютный платёж: дата</th>
-                      <th scope="col" className="num">
-                        Сумма, {draft.currency}
-                      </th>
-                      <th scope="col" className="num">
-                        Курс, ₽
-                      </th>
-                      <th scope="col" className="num">
-                        Сумма, ₽
-                      </th>
-                      <th scope="col">Комментарий</th>
-                      <th scope="col" aria-label="Действия" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {draft.payments.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="hint">
-                          Валютных платежей нет — инвойс не закрыт.
-                        </td>
-                      </tr>
-                    ) : (
-                      draft.payments.map((row) => (
-                        <tr key={row.key}>
-                          <td>
-                            <select
-                              aria-label={`Категория платежа ${row.key}`}
-                              value={row.category}
-                              onChange={(event) =>
-                                setDraft({
-                                  ...draft,
-                                  payments: draft.payments.map((payment) =>
-                                    payment.key === row.key
-                                      ? {
-                                          ...payment,
-                                          category: event.target.value as PaymentCategory,
-                                        }
-                                      : payment,
-                                  ),
-                                })
-                              }
-                            >
-                              <option value="invoice">Инвойс</option>
-                              {/* Risk предлагаем только когда он есть в партии. */}
-                              {hasRisk || row.category === 'risk' ? (
-                                <option value="risk">Risk</option>
-                              ) : null}
-                            </select>
-                          </td>
-                          <td>
-                            <input
-                              type="date"
-                              aria-label={`Дата платежа ${row.key}`}
-                              value={row.date}
-                              onChange={(event) =>
-                                setDraft({
-                                  ...draft,
-                                  payments: draft.payments.map((payment) =>
-                                    payment.key === row.key
-                                      ? { ...payment, date: event.target.value }
-                                      : payment,
-                                  ),
-                                })
-                              }
-                            />
-                          </td>
-                          <td className="num">
-                            <input
-                              className="cell"
-                              aria-label={`Сумма платежа ${row.key}`}
-                              value={row.amount}
-                              onChange={(event) =>
-                                setDraft({
-                                  ...draft,
-                                  payments: draft.payments.map((payment) =>
-                                    payment.key === row.key
-                                      ? { ...payment, amount: event.target.value }
-                                      : payment,
-                                  ),
-                                })
-                              }
-                            />
-                          </td>
-                          <td className="num">
-                            <input
-                              className="cell"
-                              aria-label={`Курс платежа ${row.key}`}
-                              value={row.rate}
-                              onChange={(event) =>
-                                setDraft({
-                                  ...draft,
-                                  payments: draft.payments.map((payment) =>
-                                    payment.key === row.key
-                                      ? { ...payment, rate: event.target.value }
-                                      : payment,
-                                  ),
-                                })
-                              }
-                            />
-                          </td>
-                          <td className="num" data-testid={`payment-rub-${row.key}`}>
-                            {formatMoney(String(number(row.amount) * number(row.rate)))}
-                            {row.date > iso(new Date()) ? (
-                              <span className="badge"> план</span>
-                            ) : null}
-                          </td>
-                          <td>
-                            <input
-                              aria-label={`Комментарий платежа ${row.key}`}
-                              value={row.comment}
-                              onChange={(event) =>
-                                setDraft({
-                                  ...draft,
-                                  payments: draft.payments.map((payment) =>
-                                    payment.key === row.key
-                                      ? { ...payment, comment: event.target.value }
-                                      : payment,
-                                  ),
-                                })
-                              }
-                            />
-                          </td>
-                          <td>
-                            <button
-                              type="button"
-                              className="mini"
-                              onClick={() =>
-                                setDraft({
-                                  ...draft,
-                                  payments: draft.payments.filter(
-                                    (payment) => payment.key !== row.key,
-                                  ),
-                                })
-                              }
-                            >
-                              Убрать
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="closing">
-                <div className="closing-group">
-                  <h3>Инвойс</h3>
-                  <div className="closing-row">
-                    <span>Оплачено</span>
-                    <strong data-testid="receipt-paid">
-                      {money(cost.invoice.paidCurrency)} {currency}
-                    </strong>
-                    <span className="muted">= {money(cost.invoice.paidRub)} ₽</span>
-                  </div>
-                  <div className="closing-row">
-                    <span>Незакрытая часть</span>
-                    <strong data-testid="receipt-remaining">
-                      {money(cost.invoice.remaining)} {currency}
-                    </strong>
-                    <span className="muted">
-                      {trim(draft.rate)
-                        ? `по курсу ${formatRate(cost.invoice.rate)}`
-                        : '— курс не задан'}
+      ) : null}
+      <div className="workplace">
+        {rail}
+        <div className="work-right">
+          <form className="receipt-form receipt-card" onSubmit={submit} data-testid="receipt-form">
+            <header className="doc-header">
+              <div className="doc-header-main">
+                <div className="doc-title-row">
+                  <input
+                    className="doc-title-input"
+                    aria-label="Номер поступления"
+                    placeholder="Новый номер"
+                    value={draft.number}
+                    size={Math.max(draft.number.length, 8)}
+                    onChange={(event) => setDraft({ ...draft, number: event.target.value })}
+                    required
+                  />
+                  {draft.isDraft ? <span className="badge status-draft">черновик</span> : null}
+                  {draft.customsDate ? (
+                    <span className="badge status-clearance" data-testid="customs-badge">
+                      растаможена {ruDate(draft.customsDate)}
+                      {draft.customsRate ? ` · курс ${trim(draft.customsRate)}` : ''}
                     </span>
-                  </div>
-                  <div className="closing-row">
-                    <span>План (ещё не наступило)</span>
-                    <strong data-testid="receipt-planned">
-                      {money(cost.invoice.plannedCurrency)} {currency}
-                    </strong>
-                    <span className="muted">= {money(cost.invoice.plannedRub)} ₽</span>
-                  </div>
-                  <div className="closing-row">
-                    <span>Свободно к оплате</span>
-                    <strong data-testid="receipt-limit">
-                      {money(
-                        Math.max(
-                          0,
-                          cost.invoice.total -
-                            cost.invoice.paidCurrency -
-                            cost.invoice.plannedCurrency,
-                        ),
-                      )}{' '}
-                      {currency}
-                    </strong>
-                    <span className="muted">лимит платежей</span>
-                  </div>
+                  ) : null}
+                  {!draft.isDraft && !draft.customsDate && draft.id ? (
+                    <span className="badge status-filling">в работе</span>
+                  ) : null}
+                  {draft.id ? <span className="badge status-source">из 1С</span> : null}
                 </div>
-
-                <div className="closing-group">
-                  <h3>Risk</h3>
-                  {hasRisk ? (
-                    <>
-                      <div className="closing-row">
-                        <span>Оплачено</span>
-                        <strong data-testid="receipt-risk-paid">
-                          {money(cost.risk.paidCurrency)} {currency}
-                        </strong>
-                        <span className="muted">= {money(cost.risk.paidRub)} ₽</span>
-                      </div>
-                      <div className="closing-row">
-                        <span>Незакрытая часть</span>
-                        <strong data-testid="receipt-risk-remaining">
-                          {money(cost.risk.remaining)} {currency}
-                        </strong>
-                        <span className="muted">по курсу {formatRate(cost.risk.rate)}</span>
-                      </div>
-                      <div className="closing-row">
-                        <span>План (ещё не наступило)</span>
-                        <strong data-testid="receipt-planned-risk">
-                          {money(cost.risk.plannedCurrency)} {currency}
-                        </strong>
-                        <span className="muted">= {money(cost.risk.plannedRub)} ₽</span>
-                      </div>
-                      <div className="closing-row">
-                        <span>Свободно к оплате</span>
-                        <strong data-testid="receipt-risk-limit">
-                          {money(
-                            Math.max(
-                              0,
-                              cost.risk.total - cost.risk.paidCurrency - cost.risk.plannedCurrency,
-                            ),
-                          )}{' '}
-                          {currency}
-                        </strong>
-                        <span className="muted">лимит платежей</span>
-                      </div>
-                    </>
-                  ) : (
-                    <p className="hint closed-empty">
-                      Risk в партии нет — платежи этой категории не нужны.
-                    </p>
-                  )}
-                </div>
+                {savedHint && !dirty ? (
+                  <p className="hint saved" data-testid="receipt-saved">
+                    {savedHint}
+                  </p>
+                ) : null}
+                {draft.isDraft ? (
+                  <p className="hint" data-testid="draft-hint">
+                    Черновик из выгрузки 1С: заполнены номер, дата, поставщик и комментарий.
+                    Загрузите файл «Партия» из 1С или добавьте позиции вручную — и поступление
+                    станет обычным.
+                  </p>
+                ) : null}
               </div>
-
-              {cost.limitInvoiceExceeded || cost.limitRiskExceeded ? (
-                <p className="error" role="alert" data-testid="receipt-limit-error">
-                  {cost.limitRiskExceeded
-                    ? 'Сумма платежей категории Risk больше Risk партии.'
-                    : 'Сумма валютных платежей больше инвойсной стоимости партии.'}{' '}
-                  Уменьшите платёж или добавьте товары.
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-
-          {tab === 'customs' ? (
-            <div
-              className="doc-card"
-              id="panel-customs"
-              role="tabpanel"
-              aria-labelledby="tab-customs"
-            >
-              <div className="doc-card-head">
-                <h2 className="doc-card-title">Таможня</h2>
-                <span className="doc-card-sub">
-                  {cleared ? `пройдена ${ruDate(draft.customsDate)}` : 'не пройдена'}
-                </span>
-                <span className="spacer" />
-                {cleared && mayCancelCustoms ? (
-                  <button type="button" disabled={busy || dirty} onClick={() => void dropCustoms()}>
+              <div className="doc-header-actions">
+                {draft.customsDate === '' ? (
+                  <button
+                    type="button"
+                    className="primary"
+                    data-testid="customs-start"
+                    disabled={busy || dirty || !draft.id || draft.items.length === 0}
+                    onClick={() => void openCustoms()}
+                  >
+                    Растаможить
+                  </button>
+                ) : mayCancelCustoms ? (
+                  <button
+                    type="button"
+                    data-testid="customs-cancel"
+                    disabled={busy || dirty}
+                    onClick={() => void dropCustoms()}
+                  >
                     Отменить растаможку
                   </button>
                 ) : null}
               </div>
+            </header>
 
-              {cleared ? (
-                <div className="customs-facts">
-                  <div>
-                    <span className="kpi-label">Дата растаможки</span>
-                    <strong>{ruDate(draft.customsDate)}</strong>
-                  </div>
-                  <div>
-                    <span className="kpi-label">Курс фиксации, ₽</span>
-                    <strong>{trim(draft.customsRate) || '—'}</strong>
-                  </div>
-                  <div>
-                    <span className="kpi-label">Пошлина, ₽</span>
-                    <strong>{money(cost.dutyRub)}</strong>
-                  </div>
-                  <div>
-                    <span className="kpi-label">НДС, ₽</span>
-                    <strong>{money(cost.vatRub)}</strong>
-                  </div>
+            <section className="doc-passport" aria-label="Реквизиты поступления">
+              <label className="field">
+                Поставщик
+                <select
+                  aria-label="Поставщик"
+                  value={draft.supplierId}
+                  onChange={(event) => setDraft({ ...draft, supplierId: event.target.value })}
+                >
+                  <option value="">— не выбран —</option>
+                  {suppliers.map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.name}
+                    </option>
+                  ))}
+                  <option value="__manual__">— ввести вручную —</option>
+                </select>
+              </label>
+              {draft.supplierId === '__manual__' ? (
+                <label className="field">
+                  Название поставщика
+                  <input
+                    aria-label="Название поставщика"
+                    value={draft.supplierText}
+                    onChange={(event) => setDraft({ ...draft, supplierText: event.target.value })}
+                  />
+                </label>
+              ) : null}
+              <label className="field">
+                Дата
+                <input
+                  type="date"
+                  aria-label="Дата поступления"
+                  value={draft.date}
+                  onChange={(event) => setDraft({ ...draft, date: event.target.value })}
+                  required
+                />
+              </label>
+              <label className="field">
+                Валюта
+                <input
+                  aria-label="Валюта"
+                  value={draft.currency}
+                  // Фикс таможни посчитан в валюте партии: после растаможки её не меняем,
+                  // а пока открыто окно — тем более: суммы посчитаны в этой валюте.
+                  disabled={cleared || locked}
+                  onChange={(event) => setDraft({ ...draft, currency: event.target.value })}
+                />
+              </label>
+              <div className="field">
+                <span>Курс остатка, ₽</span>
+                <div className="rate-row">
+                  <input
+                    aria-label="Курс"
+                    value={draft.rate}
+                    onChange={(event) =>
+                      // Курс вписан руками — дата курса ЦБ больше не применима.
+                      setDraft({ ...draft, rate: event.target.value, rateDate: '' })
+                    }
+                  />
+                  <button
+                    type="button"
+                    aria-label="Обновить курс ЦБ"
+                    onClick={() => void fillRate()}
+                  >
+                    Курс ЦБ
+                  </button>
                 </div>
-              ) : (
-                <div className="customs-facts">
-                  <div>
-                    <span className="kpi-label">Пошлина сейчас</span>
-                    <strong>{money(cost.dutyRub)} ₽</strong>
-                  </div>
-                  <div>
-                    <span className="kpi-label">НДС сейчас</span>
-                    <strong>{money(cost.vatRub)} ₽</strong>
-                  </div>
-                  <div>
-                    <span className="kpi-label">Курс остатка</span>
-                    <strong>{trim(draft.rate) || '—'}</strong>
-                  </div>
-                </div>
-              )}
-
-              <p className="hint doc-inline-hint">
-                {cleared
-                  ? 'Пошлина и НДС зафиксированы в рублях по курсу на дату растаможки и больше не пересчитываются. Строки партии изменить нельзя — сначала отмените растаможку.'
-                  : 'Пока партия не растаможена, пошлина и НДС считаются в процентах от стоимости строки. При растаможке они зафиксируются в рублях по курсу на выбранную дату — курс и суммы можно поправить вручную.'}
-              </p>
-            </div>
-          ) : null}
-
-          {tab === 'cost' ? (
-            <div className="doc-card" id="panel-cost" role="tabpanel" aria-labelledby="tab-cost">
-              <div className="doc-card-head">
-                <h2 className="doc-card-title">Из чего сложилась себестоимость</h2>
-                <span className="doc-card-sub">все суммы в рублях</span>
-                <span className="spacer" />
-                <span className="doc-card-sub">средний курс {formatRate(cost.averageRate)}</span>
               </div>
+              <label className="field doc-comment">
+                Комментарий
+                <textarea
+                  aria-label="Комментарий"
+                  rows={2}
+                  value={draft.comment}
+                  onChange={(event) => setDraft({ ...draft, comment: event.target.value })}
+                />
+              </label>
+            </section>
 
-              <div className="cost-summary">
-                <div className="cost-total">
-                  <span className="kpi-label">Себестоимость партии</span>
-                  <strong data-testid="cost-total">{money(cost.total)} ₽</strong>
-                  <span className="doc-card-sub">
-                    {draft.items.length} поз. · оплачено{' '}
-                    {money(cost.invoice.paidCurrency + cost.risk.paidCurrency)} {currency}
+            {rateHint ? <p className="hint">{rateHint}</p> : null}
+            {/* Каким курсом и на какую дату оценён незакрытый остаток. */}
+            <p className="hint doc-rate-caption" data-testid="receipt-cbr-rate">
+              {rateCaption}
+            </p>
+
+            {dirty ? (
+              // Таможня считает суммы по сохранённым строкам: с несохранёнными правками
+              // карточка после растаможки вернулась бы к состоянию на сервере.
+              <p className="hint" data-testid="customs-dirty">
+                В карточке есть несохранённые изменения. Сначала сохраните поступление — потом
+                растаможка посчитает суммы по сохранённым строкам.
+              </p>
+            ) : null}
+            {draft.customsDate === '' && !draft.id ? (
+              <p className="hint" data-testid="customs-need-save">
+                Растаможка доступна после сохранения поступления.
+              </p>
+            ) : null}
+
+            <section className="numbers" aria-label="Итоги партии">
+              <div className="numbers-cell numbers-main">
+                <span className="numbers-label">Себестоимость</span>
+                <span className="numbers-value" data-testid="receipt-total">
+                  {money(cost.total)} ₽
+                </span>
+                <span className="numbers-sub">
+                  {draft.items.length} поз. · {currency}
+                </span>
+              </div>
+              <div className="numbers-cell">
+                <span className="numbers-label">Средний курс</span>
+                <span className="numbers-value" data-testid="receipt-average-rate">
+                  {formatRate(cost.averageRate)}
+                </span>
+                <span className="numbers-sub">
+                  {trim(draft.rate)
+                    ? `инвойс ${formatRate(cost.invoice.rate)} · Risk ${formatRate(cost.risk.rate)}`
+                    : 'курс не задан'}
+                </span>
+              </div>
+              <div className="numbers-cell">
+                <span className="numbers-label">Оплачено</span>
+                <span className="numbers-value">{money(paidRub)} ₽</span>
+                <span className="numbers-sub">инвойс и Risk</span>
+              </div>
+              <div className="numbers-cell">
+                <span className="numbers-label">Остаток</span>
+                <span className="numbers-value">
+                  {money(cost.invoice.remaining + cost.risk.remaining)} {currency}
+                </span>
+                <span className="numbers-sub">не закрыто платежами</span>
+              </div>
+            </section>
+
+            <div className="accordions">
+              <section className="acc">
+                <button
+                  type="button"
+                  className="acc-head"
+                  data-testid="acc-items"
+                  aria-expanded={isOpen('items')}
+                  aria-label="Позиции"
+                  onClick={() => toggleSection('items')}
+                >
+                  <span className="acc-chev">{isOpen('items') ? '▾' : '▸'}</span>
+                  <span className="acc-title">Позиции</span>
+                  <span className="acc-count">{draft.items.length}</span>
+                  <span className="spacer" />
+                  <span className="acc-sum">{money(cost.total)} ₽</span>
+                </button>
+                {isOpen('items') ? (
+                  <div className="doc-card acc-body" id="panel-items">
+                    <div className="doc-toolbar">
+                      {draft.id && mayLoadItems && !cleared ? (
+                        <div className="items-import" data-testid="batch-items-import">
+                          <span className="doc-toolbar-label">Позиции из 1С (файл «Партия»)</span>
+                          <label className="file-pick">
+                            Выбрать файл
+                            <input
+                              ref={itemsInput}
+                              type="file"
+                              accept=".xlsx"
+                              aria-label="Файл партии из 1С"
+                              // Пока открыто окно растаможки, позиции из файла не подменяем.
+                              disabled={busy || locked}
+                              onChange={(event) => {
+                                setItemsFile(event.target.files?.[0] ?? null)
+                                setItemsHint(null)
+                              }}
+                            />
+                          </label>
+                          <span className="file-pick-name">
+                            {itemsFile ? itemsFile.name : 'файл не выбран'}
+                          </span>
+                          <button
+                            type="button"
+                            title="Из файла берутся товар и количество"
+                            disabled={busy || locked || !itemsFile}
+                            onClick={() => void loadItems()}
+                          >
+                            {busy ? 'Загрузка…' : 'Загрузить позиции из 1С'}
+                          </button>
+                        </div>
+                      ) : null}
+                      <span className="spacer" />
+                      {cleared ? null : (
+                        <button
+                          type="button"
+                          disabled={locked}
+                          onClick={() =>
+                            setDraft({
+                              ...draft,
+                              items: [
+                                ...draft.items,
+                                {
+                                  key: nextKey('i'),
+                                  title: '',
+                                  code: '',
+                                  quantity: '',
+                                  price: '',
+                                  duty: '0',
+                                  vat: '22',
+                                  risk: '0',
+                                  dutyRub: '',
+                                  vatRub: '',
+                                },
+                              ],
+                            })
+                          }
+                        >
+                          Добавить строку
+                        </button>
+                      )}
+                    </div>
+
+                    {itemsHint ? (
+                      <p className="hint doc-inline-hint" data-testid="batch-items-hint">
+                        {itemsHint}
+                      </p>
+                    ) : null}
+
+                    <div className="table-scroll">
+                      <table className="receipt-items" data-testid="receipt-items">
+                        <thead>
+                          <tr>
+                            <th scope="col">Товар</th>
+                            <th scope="col" className="num">
+                              Стоимость за ед., {currencyLabel(draft.currency)}
+                            </th>
+                            <th scope="col" className="num">
+                              Кол‑во
+                            </th>
+                            <th scope="col" className="num">
+                              Пошлина, {cleared ? '₽' : '%'}
+                            </th>
+                            <th scope="col" className="num">
+                              НДС, {cleared ? '₽' : '%'}
+                            </th>
+                            <th scope="col" className="num">
+                              Risk, {currencyLabel(draft.currency)}
+                            </th>
+                            <th scope="col" className="num">
+                              Цена за ед., ₽
+                            </th>
+                            <th scope="col" className="num">
+                              Сумма, ₽
+                            </th>
+                            <th scope="col" aria-label="Действия" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {draft.items.length === 0 ? (
+                            <tr>
+                              <td colSpan={9} className="hint">
+                                Позиций пока нет — добавьте строку или загрузите файл «Партия» из
+                                1С.
+                              </td>
+                            </tr>
+                          ) : null}
+                          {draft.items.map((item) => (
+                            <tr key={item.key}>
+                              <td>
+                                {cleared ? (
+                                  <>
+                                    <span data-testid={`item-title-${item.key}`}>{item.title}</span>
+                                    {item.code ? (
+                                      <span
+                                        className="unit"
+                                        data-testid={`product-code-${item.key}`}
+                                      >
+                                        код {item.code}
+                                      </span>
+                                    ) : null}
+                                  </>
+                                ) : (
+                                  <>
+                                    <input
+                                      aria-label={`Товар ${item.key}`}
+                                      list="receipt-products"
+                                      disabled={locked}
+                                      placeholder="название товара"
+                                      value={item.title}
+                                      onChange={(event) => {
+                                        // В поле — название; код под полем всегда тот, что уйдёт на сервер.
+                                        const title = event.target.value
+                                        const found = findProduct(products, title)
+                                        setDraft({
+                                          ...draft,
+                                          items: draft.items.map((row) =>
+                                            row.key === item.key
+                                              ? { ...row, title, code: found?.code ?? '' }
+                                              : row,
+                                          ),
+                                        })
+                                      }}
+                                    />
+                                    {item.code ? (
+                                      <span
+                                        className="unit"
+                                        data-testid={`product-code-${item.key}`}
+                                      >
+                                        код {item.code}
+                                      </span>
+                                    ) : item.title.trim() ? (
+                                      <span
+                                        className="unit product-missing"
+                                        data-testid={`product-missing-${item.key}`}
+                                      >
+                                        нет в справочнике — строка не сохранится
+                                      </span>
+                                    ) : null}
+                                  </>
+                                )}
+                              </td>
+                              <td className="num">
+                                {cleared ? (
+                                  <span data-testid={`item-price-${item.key}`}>{item.price}</span>
+                                ) : (
+                                  <input
+                                    className="cell"
+                                    aria-label={`Стоимость за ед. ${item.key}`}
+                                    disabled={locked}
+                                    value={item.price}
+                                    onChange={(event) =>
+                                      setDraft({
+                                        ...draft,
+                                        items: draft.items.map((row) =>
+                                          row.key === item.key
+                                            ? { ...row, price: event.target.value }
+                                            : row,
+                                        ),
+                                      })
+                                    }
+                                  />
+                                )}
+                              </td>
+                              <td className="num">
+                                {cleared ? (
+                                  <span data-testid={`item-quantity-${item.key}`}>
+                                    {item.quantity}
+                                  </span>
+                                ) : (
+                                  <input
+                                    className="cell"
+                                    aria-label={`Количество ${item.key}`}
+                                    disabled={locked}
+                                    value={item.quantity}
+                                    onChange={(event) =>
+                                      setDraft({
+                                        ...draft,
+                                        items: draft.items.map((row) =>
+                                          row.key === item.key
+                                            ? { ...row, quantity: event.target.value }
+                                            : row,
+                                        ),
+                                      })
+                                    }
+                                  />
+                                )}
+                              </td>
+                              <td className="num" data-testid={`item-duty-${item.key}`}>
+                                {cleared ? (
+                                  // После растаможки в колонке — зафиксированные рубли, а не процент.
+                                  formatMoney(item.dutyRub || '0')
+                                ) : (
+                                  <input
+                                    className="cell"
+                                    aria-label={`Пошлина ${item.key}`}
+                                    disabled={locked}
+                                    value={item.duty}
+                                    onChange={(event) =>
+                                      setDraft({
+                                        ...draft,
+                                        items: draft.items.map((row) =>
+                                          row.key === item.key
+                                            ? { ...row, duty: event.target.value }
+                                            : row,
+                                        ),
+                                      })
+                                    }
+                                  />
+                                )}
+                              </td>
+                              <td className="num" data-testid={`item-vat-${item.key}`}>
+                                {cleared ? (
+                                  formatMoney(item.vatRub || '0')
+                                ) : (
+                                  <input
+                                    className="cell"
+                                    aria-label={`НДС ${item.key}`}
+                                    disabled={locked}
+                                    value={item.vat}
+                                    onChange={(event) =>
+                                      setDraft({
+                                        ...draft,
+                                        items: draft.items.map((row) =>
+                                          row.key === item.key
+                                            ? { ...row, vat: event.target.value }
+                                            : row,
+                                        ),
+                                      })
+                                    }
+                                  />
+                                )}
+                              </td>
+                              <td className="num">
+                                {cleared ? (
+                                  <span data-testid={`item-risk-${item.key}`}>{item.risk}</span>
+                                ) : (
+                                  <input
+                                    className="cell"
+                                    aria-label={`Risk ${item.key}`}
+                                    disabled={locked}
+                                    value={item.risk}
+                                    onChange={(event) =>
+                                      setDraft({
+                                        ...draft,
+                                        items: draft.items.map((row) =>
+                                          row.key === item.key
+                                            ? { ...row, risk: event.target.value }
+                                            : row,
+                                        ),
+                                      })
+                                    }
+                                  />
+                                )}
+                              </td>
+                              <td className="num" data-testid={`unit-cost-${item.key}`}>
+                                {formatMoney(String(cost.unit[item.key] ?? 0))}
+                              </td>
+                              <td className="num" data-testid={`item-total-${item.key}`}>
+                                {formatMoney(String(cost.itemTotal[item.key] ?? 0))}
+                              </td>
+                              <td>
+                                {cleared ? null : (
+                                  <button
+                                    type="button"
+                                    className="mini"
+                                    disabled={locked}
+                                    onClick={() =>
+                                      setDraft({
+                                        ...draft,
+                                        items: draft.items.filter((row) => row.key !== item.key),
+                                      })
+                                    }
+                                  >
+                                    Убрать
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <datalist id="receipt-products">
+                      {products.map((product) => (
+                        <option key={product.id} value={product.name}>
+                          {product.code}
+                        </option>
+                      ))}
+                    </datalist>
+                    {cleared ? (
+                      <p className="hint doc-inline-hint" data-testid="customs-hint">
+                        Таможня пройдена {draft.customsDate}: пошлина и НДС зафиксированы в рублях
+                        по курсу {trim(draft.customsRate)} и больше не пересчитываются. Строки
+                        изменить нельзя — сначала отмените растаможку.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </section>
+
+              <section className="acc">
+                <button
+                  type="button"
+                  className="acc-head"
+                  data-testid="acc-expenses"
+                  aria-expanded={isOpen('expenses')}
+                  aria-label="Общие расходы"
+                  onClick={() => toggleSection('expenses')}
+                >
+                  <span className="acc-chev">{isOpen('expenses') ? '▾' : '▸'}</span>
+                  <span className="acc-title">Общие расходы</span>
+                  <span className="acc-count">{draft.expenses.length}</span>
+                  <span className="spacer" />
+                  <span className="acc-sum">{money(cost.expensesRub)} ₽</span>
+                </button>
+                {isOpen('expenses') ? (
+                  <div className="doc-card acc-body" id="panel-expenses">
+                    <div className="doc-card-head">
+                      <h2 className="doc-card-title">Общие расходы</h2>
+                      <span className="doc-card-sub">на всю партию</span>
+                      <span className="spacer" />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDraft({
+                            ...draft,
+                            expenses: [
+                              ...draft.expenses,
+                              { key: nextKey('e'), description: '', currency: 'RUB', amount: '' },
+                            ],
+                          })
+                        }
+                      >
+                        Добавить расход
+                      </button>
+                    </div>
+                    <p className="hint doc-inline-hint">
+                      Доставка, оформление и прочее. Валюта — только руб. или usd; расход в usd
+                      считается по курсу ЦБ на сегодня
+                      {usdRate === null ? ' (курс пока не получен)' : ` (${trim(usdRate)} ₽)`}.
+                    </p>
+                    <div className="table-scroll">
+                      <table className="receipt-expenses" data-testid="receipt-expenses">
+                        <thead>
+                          <tr>
+                            <th scope="col">Название</th>
+                            <th scope="col">Валюта</th>
+                            <th scope="col" className="num">
+                              Сумма
+                            </th>
+                            <th scope="col" className="num">
+                              Сумма, ₽
+                            </th>
+                            <th scope="col" aria-label="Действия" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {draft.expenses.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="hint">
+                                Общих расходов нет.
+                              </td>
+                            </tr>
+                          ) : (
+                            draft.expenses.map((row) => (
+                              <tr key={row.key}>
+                                <td>
+                                  <input
+                                    aria-label={`Расход ${row.key}`}
+                                    placeholder="название расхода"
+                                    value={row.description}
+                                    onChange={(event) =>
+                                      setDraft({
+                                        ...draft,
+                                        expenses: draft.expenses.map((expense) =>
+                                          expense.key === row.key
+                                            ? { ...expense, description: event.target.value }
+                                            : expense,
+                                        ),
+                                      })
+                                    }
+                                  />
+                                </td>
+                                <td>
+                                  <select
+                                    aria-label={`Валюта расхода ${row.key}`}
+                                    value={row.currency}
+                                    onChange={(event) =>
+                                      setDraft({
+                                        ...draft,
+                                        expenses: draft.expenses.map((expense) =>
+                                          expense.key === row.key
+                                            ? {
+                                                ...expense,
+                                                currency: event.target.value as ExpenseCurrency,
+                                              }
+                                            : expense,
+                                        ),
+                                      })
+                                    }
+                                  >
+                                    <option value="RUB">руб.</option>
+                                    <option value="USD">usd</option>
+                                  </select>
+                                </td>
+                                <td className="num">
+                                  <input
+                                    className="cell"
+                                    aria-label={`Сумма расхода ${row.key}`}
+                                    value={row.amount}
+                                    onChange={(event) =>
+                                      setDraft({
+                                        ...draft,
+                                        expenses: draft.expenses.map((expense) =>
+                                          expense.key === row.key
+                                            ? { ...expense, amount: event.target.value }
+                                            : expense,
+                                        ),
+                                      })
+                                    }
+                                  />
+                                </td>
+                                <td className="num" data-testid={`expense-rub-${row.key}`}>
+                                  {formatMoney(
+                                    String(
+                                      expenseRub(row, usdRate === null ? null : number(usdRate)),
+                                    ),
+                                  )}
+                                </td>
+                                <td>
+                                  <button
+                                    type="button"
+                                    className="mini"
+                                    onClick={() =>
+                                      setDraft({
+                                        ...draft,
+                                        expenses: draft.expenses.filter(
+                                          (expense) => expense.key !== row.key,
+                                        ),
+                                      })
+                                    }
+                                  >
+                                    Убрать
+                                  </button>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="doc-card-foot">
+                      <span>
+                        Итого расходов:{' '}
+                        <strong data-testid="receipt-expenses-rub">
+                          {money(cost.expensesRub)} ₽
+                        </strong>
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+
+              <section className="acc">
+                <button
+                  type="button"
+                  className="acc-head"
+                  data-testid="acc-payments"
+                  aria-expanded={isOpen('payments')}
+                  aria-label="Платежи"
+                  onClick={() => toggleSection('payments')}
+                >
+                  <span className="acc-chev">{isOpen('payments') ? '▾' : '▸'}</span>
+                  <span className="acc-title">Платежи</span>
+                  <span className="acc-count">{draft.payments.length}</span>
+                  <span className="spacer" />
+                  <span className="acc-sum">
+                    {money(cost.invoice.paidRub + cost.risk.paidRub)} ₽
                   </span>
-                </div>
-                <div className="cost-bars">
-                  <div className="cost-bar" data-testid="cost-bar">
-                    {partsTotal > 0 ? (
-                      <>
-                        {invoiceRub > 0 ? (
-                          <span
-                            style={{ width: `${sharePct(invoiceRub)}%`, background: '#1f6feb' }}
-                            title={`Инвойс ${money(invoiceRub)} ₽`}
-                          />
-                        ) : null}
-                        {riskRub > 0 ? (
-                          <span
-                            style={{ width: `${sharePct(riskRub)}%`, background: '#6941c6' }}
-                            title={`Risk ${money(riskRub)} ₽`}
-                          />
-                        ) : null}
-                        {cost.dutyRub > 0 ? (
-                          <span
-                            style={{ width: `${sharePct(cost.dutyRub)}%`, background: '#0f766e' }}
-                            title={`Пошлина ${money(cost.dutyRub)} ₽`}
-                          />
-                        ) : null}
-                        {cost.vatRub > 0 ? (
-                          <span
-                            style={{ width: `${sharePct(cost.vatRub)}%`, background: '#b45309' }}
-                            title={`НДС ${money(cost.vatRub)} ₽`}
-                          />
-                        ) : null}
-                        {cost.expensesRub > 0 ? (
-                          <span
-                            style={{
-                              width: `${sharePct(cost.expensesRub)}%`,
-                              background: '#98a2b3',
-                            }}
-                            title={`Расходы ${money(cost.expensesRub)} ₽`}
-                          />
-                        ) : null}
-                      </>
-                    ) : null}
-                  </div>
-                  <div className="cost-legend">
-                    <span className="cost-legend-item">
-                      <i style={{ background: '#1f6feb' }} />
-                      <span className="cost-legend-name">Инвойс</span>
-                      <b>{money(invoiceRub)} ₽</b>
-                      <small>{shareText(invoiceRub)} %</small>
-                    </span>
-                    <span className="cost-legend-item">
-                      <i style={{ background: '#6941c6' }} />
-                      <span className="cost-legend-name">Risk</span>
-                      <b>{money(riskRub)} ₽</b>
-                      <small>{shareText(riskRub)} %</small>
-                    </span>
-                    <span className="cost-legend-item">
-                      <i style={{ background: '#0f766e' }} />
-                      <span className="cost-legend-name">Пошлина</span>
-                      <b>{money(cost.dutyRub)} ₽</b>
-                      <small>{shareText(cost.dutyRub)} %</small>
-                    </span>
-                    <span className="cost-legend-item">
-                      <i style={{ background: '#b45309' }} />
-                      <span className="cost-legend-name">НДС</span>
-                      <b>{money(cost.vatRub)} ₽</b>
-                      <small>{shareText(cost.vatRub)} %</small>
-                    </span>
-                    <span className="cost-legend-item">
-                      <i style={{ background: '#98a2b3' }} />
-                      <span className="cost-legend-name">Расходы</span>
-                      <b>{money(cost.expensesRub)} ₽</b>
-                      <small>{shareText(cost.expensesRub)} %</small>
-                    </span>
-                  </div>
-                </div>
-              </div>
+                </button>
+                {isOpen('payments') ? (
+                  <div className="doc-card acc-body" id="panel-payments">
+                    <div className="doc-card-head">
+                      <h2 className="doc-card-title">Платежи</h2>
+                      <span className="doc-card-sub">закрывают инвойс и Risk</span>
+                      <span className="spacer" />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDraft({
+                            ...draft,
+                            payments: [
+                              ...draft.payments,
+                              {
+                                key: nextKey('p'),
+                                date: draft.date,
+                                amount: '',
+                                rate: draft.currency === 'RUB' ? '1' : draft.rate,
+                                category: 'invoice',
+                                comment: '',
+                              },
+                            ],
+                          })
+                        }
+                      >
+                        Добавить валютный платёж
+                      </button>
+                    </div>
+                    <div className="table-scroll">
+                      <table className="receipt-payments" data-testid="receipt-payments">
+                        <thead>
+                          <tr>
+                            <th scope="col">Категория</th>
+                            <th scope="col">Валютный платёж: дата</th>
+                            <th scope="col" className="num">
+                              Сумма, {draft.currency}
+                            </th>
+                            <th scope="col" className="num">
+                              Курс, ₽
+                            </th>
+                            <th scope="col" className="num">
+                              Сумма, ₽
+                            </th>
+                            <th scope="col">Комментарий</th>
+                            <th scope="col" aria-label="Действия" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {draft.payments.length === 0 ? (
+                            <tr>
+                              <td colSpan={7} className="hint">
+                                Валютных платежей нет — инвойс не закрыт.
+                              </td>
+                            </tr>
+                          ) : (
+                            draft.payments.map((row) => (
+                              <tr key={row.key}>
+                                <td>
+                                  <select
+                                    aria-label={`Категория платежа ${row.key}`}
+                                    value={row.category}
+                                    onChange={(event) =>
+                                      setDraft({
+                                        ...draft,
+                                        payments: draft.payments.map((payment) =>
+                                          payment.key === row.key
+                                            ? {
+                                                ...payment,
+                                                category: event.target.value as PaymentCategory,
+                                              }
+                                            : payment,
+                                        ),
+                                      })
+                                    }
+                                  >
+                                    <option value="invoice">Инвойс</option>
+                                    {/* Risk предлагаем только когда он есть в партии. */}
+                                    {hasRisk || row.category === 'risk' ? (
+                                      <option value="risk">Risk</option>
+                                    ) : null}
+                                  </select>
+                                </td>
+                                <td>
+                                  <input
+                                    type="date"
+                                    aria-label={`Дата платежа ${row.key}`}
+                                    value={row.date}
+                                    onChange={(event) =>
+                                      setDraft({
+                                        ...draft,
+                                        payments: draft.payments.map((payment) =>
+                                          payment.key === row.key
+                                            ? { ...payment, date: event.target.value }
+                                            : payment,
+                                        ),
+                                      })
+                                    }
+                                  />
+                                </td>
+                                <td className="num">
+                                  <input
+                                    className="cell"
+                                    aria-label={`Сумма платежа ${row.key}`}
+                                    value={row.amount}
+                                    onChange={(event) =>
+                                      setDraft({
+                                        ...draft,
+                                        payments: draft.payments.map((payment) =>
+                                          payment.key === row.key
+                                            ? { ...payment, amount: event.target.value }
+                                            : payment,
+                                        ),
+                                      })
+                                    }
+                                  />
+                                </td>
+                                <td className="num">
+                                  <input
+                                    className="cell"
+                                    aria-label={`Курс платежа ${row.key}`}
+                                    value={row.rate}
+                                    onChange={(event) =>
+                                      setDraft({
+                                        ...draft,
+                                        payments: draft.payments.map((payment) =>
+                                          payment.key === row.key
+                                            ? { ...payment, rate: event.target.value }
+                                            : payment,
+                                        ),
+                                      })
+                                    }
+                                  />
+                                </td>
+                                <td className="num" data-testid={`payment-rub-${row.key}`}>
+                                  {formatMoney(String(number(row.amount) * number(row.rate)))}
+                                  {row.date > iso(new Date()) ? (
+                                    <span className="badge"> план</span>
+                                  ) : null}
+                                </td>
+                                <td>
+                                  <input
+                                    aria-label={`Комментарий платежа ${row.key}`}
+                                    value={row.comment}
+                                    onChange={(event) =>
+                                      setDraft({
+                                        ...draft,
+                                        payments: draft.payments.map((payment) =>
+                                          payment.key === row.key
+                                            ? { ...payment, comment: event.target.value }
+                                            : payment,
+                                        ),
+                                      })
+                                    }
+                                  />
+                                </td>
+                                <td>
+                                  <button
+                                    type="button"
+                                    className="mini"
+                                    onClick={() =>
+                                      setDraft({
+                                        ...draft,
+                                        payments: draft.payments.filter(
+                                          (payment) => payment.key !== row.key,
+                                        ),
+                                      })
+                                    }
+                                  >
+                                    Убрать
+                                  </button>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
 
-              <div className="table-scroll">
-                <table className="cost-lines">
-                  <thead>
-                    <tr>
-                      <th scope="col">Слагаемое</th>
-                      <th scope="col">Как получилось</th>
-                      <th scope="col" className="num">
-                        Сумма, ₽
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td>Инвойс</td>
-                      <td className="muted">
-                        {money(cost.invoice.total)} {currency} × курс{' '}
-                        {formatRate(cost.invoice.rate)}
-                      </td>
-                      <td className="num">{money(invoiceRub)}</td>
-                    </tr>
-                    {cost.risk.total > 0 ? (
-                      <tr>
-                        <td>Risk</td>
-                        <td className="muted">
-                          {money(cost.risk.total)} {currency} × курс {formatRate(cost.risk.rate)}
-                        </td>
-                        <td className="num">{money(riskRub)}</td>
-                      </tr>
+                    <div className="closing">
+                      <div className="closing-group">
+                        <h3>Инвойс</h3>
+                        <div className="closing-row">
+                          <span>Оплачено</span>
+                          <strong data-testid="receipt-paid">
+                            {money(cost.invoice.paidCurrency)} {currency}
+                          </strong>
+                          <span className="muted">= {money(cost.invoice.paidRub)} ₽</span>
+                        </div>
+                        <div className="closing-row">
+                          <span>Незакрытая часть</span>
+                          <strong data-testid="receipt-remaining">
+                            {money(cost.invoice.remaining)} {currency}
+                          </strong>
+                          <span className="muted">
+                            {trim(draft.rate)
+                              ? `по курсу ${formatRate(cost.invoice.rate)}`
+                              : '— курс не задан'}
+                          </span>
+                        </div>
+                        <div className="closing-row">
+                          <span>План (ещё не наступило)</span>
+                          <strong data-testid="receipt-planned">
+                            {money(cost.invoice.plannedCurrency)} {currency}
+                          </strong>
+                          <span className="muted">= {money(cost.invoice.plannedRub)} ₽</span>
+                        </div>
+                        <div className="closing-row">
+                          <span>Свободно к оплате</span>
+                          <strong data-testid="receipt-limit">
+                            {money(
+                              Math.max(
+                                0,
+                                cost.invoice.total -
+                                  cost.invoice.paidCurrency -
+                                  cost.invoice.plannedCurrency,
+                              ),
+                            )}{' '}
+                            {currency}
+                          </strong>
+                          <span className="muted">лимит платежей</span>
+                        </div>
+                      </div>
+
+                      <div className="closing-group">
+                        <h3>Risk</h3>
+                        {hasRisk ? (
+                          <>
+                            <div className="closing-row">
+                              <span>Оплачено</span>
+                              <strong data-testid="receipt-risk-paid">
+                                {money(cost.risk.paidCurrency)} {currency}
+                              </strong>
+                              <span className="muted">= {money(cost.risk.paidRub)} ₽</span>
+                            </div>
+                            <div className="closing-row">
+                              <span>Незакрытая часть</span>
+                              <strong data-testid="receipt-risk-remaining">
+                                {money(cost.risk.remaining)} {currency}
+                              </strong>
+                              <span className="muted">по курсу {formatRate(cost.risk.rate)}</span>
+                            </div>
+                            <div className="closing-row">
+                              <span>План (ещё не наступило)</span>
+                              <strong data-testid="receipt-planned-risk">
+                                {money(cost.risk.plannedCurrency)} {currency}
+                              </strong>
+                              <span className="muted">= {money(cost.risk.plannedRub)} ₽</span>
+                            </div>
+                            <div className="closing-row">
+                              <span>Свободно к оплате</span>
+                              <strong data-testid="receipt-risk-limit">
+                                {money(
+                                  Math.max(
+                                    0,
+                                    cost.risk.total -
+                                      cost.risk.paidCurrency -
+                                      cost.risk.plannedCurrency,
+                                  ),
+                                )}{' '}
+                                {currency}
+                              </strong>
+                              <span className="muted">лимит платежей</span>
+                            </div>
+                          </>
+                        ) : (
+                          <p className="hint closed-empty">
+                            Risk в партии нет — платежи этой категории не нужны.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {cost.limitInvoiceExceeded || cost.limitRiskExceeded ? (
+                      <p className="error" role="alert" data-testid="receipt-limit-error">
+                        {cost.limitRiskExceeded
+                          ? 'Сумма платежей категории Risk больше Risk партии.'
+                          : 'Сумма валютных платежей больше инвойсной стоимости партии.'}{' '}
+                        Уменьшите платёж или добавьте товары.
+                      </p>
                     ) : null}
-                    <tr>
-                      <td>Пошлина</td>
-                      <td className="muted">
-                        {cleared ? 'зафиксирована при растаможке' : 'проценты по строкам'}
-                      </td>
-                      <td className="num">{money(cost.dutyRub)}</td>
-                    </tr>
-                    <tr>
-                      <td>НДС</td>
-                      <td className="muted">
-                        {cleared ? 'зафиксирован при растаможке' : 'проценты по строкам'}
-                      </td>
-                      <td className="num">{money(cost.vatRub)}</td>
-                    </tr>
-                    <tr>
-                      <td>Общие расходы</td>
-                      <td className="muted">
-                        {draft.expenses.length === 0
-                          ? 'расходов нет'
-                          : `${draft.expenses.length} шт. — делятся между строками`}
-                      </td>
-                      <td className="num">{money(cost.expensesRub)}</td>
-                    </tr>
-                    <tr className="total-row">
-                      <td colSpan={2}>Себестоимость</td>
-                      <td className="num">{money(cost.total)}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+                  </div>
+                ) : null}
+              </section>
+
+              <section className="acc">
+                <button
+                  type="button"
+                  className="acc-head"
+                  data-testid="acc-customs"
+                  aria-expanded={isOpen('customs')}
+                  aria-label="Таможня"
+                  onClick={() => toggleSection('customs')}
+                >
+                  <span className="acc-chev">{isOpen('customs') ? '▾' : '▸'}</span>
+                  <span className="acc-title">Таможня</span>
+                  <span className="spacer" />
+                  <span className="acc-sum">
+                    {cleared ? `пройдена ${ruDate(draft.customsDate)}` : 'не пройдена'}
+                  </span>
+                </button>
+                {isOpen('customs') ? (
+                  <div className="doc-card acc-body" id="panel-customs">
+                    <div className="doc-card-head">
+                      <h2 className="doc-card-title">Таможня</h2>
+                      <span className="doc-card-sub">
+                        {cleared ? `пройдена ${ruDate(draft.customsDate)}` : 'не пройдена'}
+                      </span>
+                      <span className="spacer" />
+                      {cleared && mayCancelCustoms ? (
+                        <button
+                          type="button"
+                          disabled={busy || dirty}
+                          onClick={() => void dropCustoms()}
+                        >
+                          Отменить растаможку
+                        </button>
+                      ) : null}
+                    </div>
+
+                    {cleared ? (
+                      <div className="customs-facts">
+                        <div>
+                          <span className="kpi-label">Дата растаможки</span>
+                          <strong>{ruDate(draft.customsDate)}</strong>
+                        </div>
+                        <div>
+                          <span className="kpi-label">Курс фиксации, ₽</span>
+                          <strong>{trim(draft.customsRate) || '—'}</strong>
+                        </div>
+                        <div>
+                          <span className="kpi-label">Пошлина, ₽</span>
+                          <strong>{money(cost.dutyRub)}</strong>
+                        </div>
+                        <div>
+                          <span className="kpi-label">НДС, ₽</span>
+                          <strong>{money(cost.vatRub)}</strong>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="customs-facts">
+                        <div>
+                          <span className="kpi-label">Пошлина сейчас</span>
+                          <strong>{money(cost.dutyRub)} ₽</strong>
+                        </div>
+                        <div>
+                          <span className="kpi-label">НДС сейчас</span>
+                          <strong>{money(cost.vatRub)} ₽</strong>
+                        </div>
+                        <div>
+                          <span className="kpi-label">Курс остатка</span>
+                          <strong>{trim(draft.rate) || '—'}</strong>
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="hint doc-inline-hint">
+                      {cleared
+                        ? 'Пошлина и НДС зафиксированы в рублях по курсу на дату растаможки и больше не пересчитываются. Строки партии изменить нельзя — сначала отмените растаможку.'
+                        : 'Пока партия не растаможена, пошлина и НДС считаются в процентах от стоимости строки. При растаможке они зафиксируются в рублях по курсу на выбранную дату — курс и суммы можно поправить вручную.'}
+                    </p>
+                  </div>
+                ) : null}
+              </section>
+
+              <section className="acc">
+                <button
+                  type="button"
+                  className="acc-head"
+                  data-testid="acc-cost"
+                  aria-expanded={isOpen('cost')}
+                  aria-label="Себестоимость"
+                  onClick={() => toggleSection('cost')}
+                >
+                  <span className="acc-chev">{isOpen('cost') ? '▾' : '▸'}</span>
+                  <span className="acc-title">Себестоимость</span>
+                  <span className="spacer" />
+                  <span className="acc-sum">как получилась сумма</span>
+                </button>
+                {isOpen('cost') ? (
+                  <div className="doc-card acc-body" id="panel-cost" data-testid="panel-cost">
+                    <div className="doc-card-head">
+                      <h2 className="doc-card-title">Из чего сложилась себестоимость</h2>
+                      <span className="doc-card-sub">все суммы в рублях</span>
+                      <span className="spacer" />
+                      <span className="doc-card-sub">
+                        средний курс {formatRate(cost.averageRate)}
+                      </span>
+                    </div>
+
+                    <div className="cost-summary">
+                      <div className="cost-total">
+                        <span className="kpi-label">Себестоимость партии</span>
+                        <strong data-testid="cost-total">{money(cost.total)} ₽</strong>
+                        <span className="doc-card-sub">
+                          {draft.items.length} поз. · оплачено{' '}
+                          {money(cost.invoice.paidCurrency + cost.risk.paidCurrency)} {currency}
+                        </span>
+                      </div>
+                      <div className="cost-bars">
+                        <div className="cost-bar" data-testid="cost-bar">
+                          {partsTotal > 0 ? (
+                            <>
+                              {invoiceRub > 0 ? (
+                                <span
+                                  style={{
+                                    width: `${sharePct(invoiceRub)}%`,
+                                    background: '#1f6feb',
+                                  }}
+                                  title={`Инвойс ${money(invoiceRub)} ₽`}
+                                />
+                              ) : null}
+                              {riskRub > 0 ? (
+                                <span
+                                  style={{ width: `${sharePct(riskRub)}%`, background: '#6941c6' }}
+                                  title={`Risk ${money(riskRub)} ₽`}
+                                />
+                              ) : null}
+                              {cost.dutyRub > 0 ? (
+                                <span
+                                  style={{
+                                    width: `${sharePct(cost.dutyRub)}%`,
+                                    background: '#0f766e',
+                                  }}
+                                  title={`Пошлина ${money(cost.dutyRub)} ₽`}
+                                />
+                              ) : null}
+                              {cost.vatRub > 0 ? (
+                                <span
+                                  style={{
+                                    width: `${sharePct(cost.vatRub)}%`,
+                                    background: '#b45309',
+                                  }}
+                                  title={`НДС ${money(cost.vatRub)} ₽`}
+                                />
+                              ) : null}
+                              {cost.expensesRub > 0 ? (
+                                <span
+                                  style={{
+                                    width: `${sharePct(cost.expensesRub)}%`,
+                                    background: '#98a2b3',
+                                  }}
+                                  title={`Расходы ${money(cost.expensesRub)} ₽`}
+                                />
+                              ) : null}
+                            </>
+                          ) : null}
+                        </div>
+                        <div className="cost-legend">
+                          <span className="cost-legend-item">
+                            <i style={{ background: '#1f6feb' }} />
+                            <span className="cost-legend-name">Инвойс</span>
+                            <b>{money(invoiceRub)} ₽</b>
+                            <small>{shareText(invoiceRub)} %</small>
+                          </span>
+                          <span className="cost-legend-item">
+                            <i style={{ background: '#6941c6' }} />
+                            <span className="cost-legend-name">Risk</span>
+                            <b>{money(riskRub)} ₽</b>
+                            <small>{shareText(riskRub)} %</small>
+                          </span>
+                          <span className="cost-legend-item">
+                            <i style={{ background: '#0f766e' }} />
+                            <span className="cost-legend-name">Пошлина</span>
+                            <b>{money(cost.dutyRub)} ₽</b>
+                            <small>{shareText(cost.dutyRub)} %</small>
+                          </span>
+                          <span className="cost-legend-item">
+                            <i style={{ background: '#b45309' }} />
+                            <span className="cost-legend-name">НДС</span>
+                            <b>{money(cost.vatRub)} ₽</b>
+                            <small>{shareText(cost.vatRub)} %</small>
+                          </span>
+                          <span className="cost-legend-item">
+                            <i style={{ background: '#98a2b3' }} />
+                            <span className="cost-legend-name">Расходы</span>
+                            <b>{money(cost.expensesRub)} ₽</b>
+                            <small>{shareText(cost.expensesRub)} %</small>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="table-scroll">
+                      <table className="cost-lines">
+                        <thead>
+                          <tr>
+                            <th scope="col">Слагаемое</th>
+                            <th scope="col">Как получилось</th>
+                            <th scope="col" className="num">
+                              Сумма, ₽
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td>Инвойс</td>
+                            <td className="muted">
+                              {money(cost.invoice.total)} {currency} × курс{' '}
+                              <span data-testid="receipt-effective">
+                                {formatRate(cost.invoice.rate)}
+                              </span>
+                            </td>
+                            <td className="num" data-testid="receipt-invoice">
+                              {money(invoiceRub)}
+                            </td>
+                          </tr>
+                          {cost.risk.total > 0 ? (
+                            <tr>
+                              <td>Risk</td>
+                              <td className="muted" data-testid="receipt-risk-total">
+                                {money(cost.risk.total)} {currency} × курс{' '}
+                                <span data-testid="receipt-risk-rate">
+                                  {formatRate(cost.risk.rate)}
+                                </span>
+                              </td>
+                              <td className="num">{money(riskRub)}</td>
+                            </tr>
+                          ) : null}
+                          <tr>
+                            <td>Пошлина</td>
+                            <td className="muted">
+                              {cleared ? 'зафиксирована при растаможке' : 'проценты по строкам'}
+                            </td>
+                            <td className="num" data-testid="receipt-duty">
+                              {money(cost.dutyRub)}
+                            </td>
+                          </tr>
+                          <tr>
+                            <td>НДС</td>
+                            <td className="muted">
+                              {cleared ? 'зафиксирован при растаможке' : 'проценты по строкам'}
+                            </td>
+                            <td className="num" data-testid="receipt-vat">
+                              {money(cost.vatRub)}
+                            </td>
+                          </tr>
+                          <tr>
+                            <td>Общие расходы</td>
+                            <td className="muted">
+                              {draft.expenses.length === 0
+                                ? 'расходов нет'
+                                : `${draft.expenses.length} шт. — делятся между строками`}
+                            </td>
+                            <td className="num">{money(cost.expensesRub)}</td>
+                          </tr>
+                          <tr className="total-row">
+                            <td colSpan={2}>Себестоимость</td>
+                            <td className="num">{money(cost.total)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : null}
+              </section>
             </div>
-          ) : null}
+
+            <footer className="doc-footer">
+              <div className="doc-footer-total">
+                <span className="kpi-label">Себестоимость</span>
+                <strong>{money(cost.total)} ₽</strong>
+              </div>
+              <span className="doc-footer-note">
+                Средний курс {formatRate(cost.averageRate)} · оплачено {money(paidRub)} ₽
+              </span>
+              <span className="spacer" />
+              <button type="button" onClick={closeDocument}>
+                Отмена
+              </button>
+              <button
+                type="submit"
+                className="primary"
+                // Пока открыто окно растаможки, карточку не сохраняем: сначала подтвердите её.
+                disabled={busy || locked || cost.limitInvoiceExceeded || cost.limitRiskExceeded}
+              >
+                Сохранить
+              </button>
+              {draft.id ? (
+                <button type="button" disabled={busy || locked} onClick={() => void remove()}>
+                  Удалить
+                </button>
+              ) : null}
+            </footer>
+
+            {customs ? (
+              <div className="modal-backdrop">
+                <div
+                  className="customs-box modal"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Растаможка партии"
+                  data-testid="customs-box"
+                >
+                  <h3 className="section-title">Растаможка: проверьте курс и суммы</h3>
+                  <div className="toolbar">
+                    <label className="field">
+                      Дата растаможки
+                      <input
+                        type="date"
+                        aria-label="Дата растаможки"
+                        value={customs.date}
+                        onChange={(event) => {
+                          const day = event.target.value
+                          setCustoms({ ...customs, date: day })
+                          // Курс ЦБ на дату растаможки — сразу, без отдельного нажатия.
+                          void loadCustomsRate(day)
+                        }}
+                      />
+                    </label>
+                    <label className="field">
+                      Курс фиксации, ₽
+                      <input
+                        aria-label="Курс растаможки"
+                        value={customs.rate}
+                        onChange={(event) => changeCustomsRate(event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      Пошлина, ₽
+                      <input
+                        className="cell"
+                        aria-label="Пошлина партии, ₽"
+                        value={customs.duty}
+                        onChange={(event) => setCustoms({ ...customs, duty: event.target.value })}
+                      />
+                    </label>
+                    <label className="field">
+                      НДС, ₽
+                      <input
+                        className="cell"
+                        aria-label="НДС партии, ₽"
+                        value={customs.vat}
+                        onChange={(event) => setCustoms({ ...customs, vat: event.target.value })}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void loadCustomsRate(customs.date)}
+                      data-testid="customs-rate"
+                    >
+                      Курс ЦБ на дату
+                    </button>
+                  </div>
+                  {customs.hint ? (
+                    <p className="hint" data-testid="customs-rate-hint">
+                      {customs.hint}
+                    </p>
+                  ) : (
+                    <p className="hint">Курс и суммы можно исправить до подтверждения.</p>
+                  )}
+                  <p className="hint" data-testid="customs-total">
+                    Итог: пошлина{' '}
+                    <strong data-testid="customs-duty-total">
+                      {formatMoney(customs.duty || '0')} ₽
+                    </strong>{' '}
+                    · НДС{' '}
+                    <strong data-testid="customs-vat-total">
+                      {formatMoney(customs.vat || '0')} ₽
+                    </strong>{' '}
+                    · всего{' '}
+                    <strong data-testid="customs-sum">
+                      {formatMoney(String(number(customs.duty) + number(customs.vat)))} ₽
+                    </strong>
+                  </p>
+                  <p className="hint">
+                    Итог распределится по строкам пропорционально их пошлине: сумма строк в точности
+                    равна введённой. После подтверждения проценты в строках заменятся этими рублями.
+                  </p>
+                  <div className="toolbar">
+                    <button
+                      type="button"
+                      className="primary"
+                      data-testid="customs-confirm"
+                      disabled={busy || number(customs.rate) <= 0}
+                      onClick={() => void submitCustoms()}
+                    >
+                      Подтвердить растаможку
+                    </button>
+                    <button type="button" disabled={busy} onClick={() => setCustoms(null)}>
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </form>
         </div>
-
-        <footer className="doc-footer">
-          <div className="doc-footer-total">
-            <span className="kpi-label">Себестоимость</span>
-            <strong>{money(cost.total)} ₽</strong>
-          </div>
-          <span className="doc-footer-note">
-            Средний курс {formatRate(cost.averageRate)} · оплачено {money(paidRub)} ₽
-          </span>
-          <span className="spacer" />
-          <button type="button" onClick={closeDocument}>
-            Отмена
-          </button>
-          <button
-            type="submit"
-            className="primary"
-            // Пока открыто окно растаможки, карточку не сохраняем: сначала подтвердите её.
-            disabled={busy || locked || cost.limitInvoiceExceeded || cost.limitRiskExceeded}
-          >
-            Сохранить
-          </button>
-          {draft.id ? (
-            <button type="button" disabled={busy || locked} onClick={() => void remove()}>
-              Удалить
-            </button>
-          ) : null}
-        </footer>
-
-        {customs ? (
-          <div className="modal-backdrop">
-            <div
-              className="customs-box modal"
-              role="dialog"
-              aria-modal="true"
-              aria-label="Растаможка партии"
-              data-testid="customs-box"
-            >
-              <h3 className="section-title">Растаможка: проверьте курс и суммы</h3>
-              <div className="toolbar">
-                <label className="field">
-                  Дата растаможки
-                  <input
-                    type="date"
-                    aria-label="Дата растаможки"
-                    value={customs.date}
-                    onChange={(event) => {
-                      const day = event.target.value
-                      setCustoms({ ...customs, date: day })
-                      // Курс ЦБ на дату растаможки — сразу, без отдельного нажатия.
-                      void loadCustomsRate(day)
-                    }}
-                  />
-                </label>
-                <label className="field">
-                  Курс фиксации, ₽
-                  <input
-                    aria-label="Курс растаможки"
-                    value={customs.rate}
-                    onChange={(event) => changeCustomsRate(event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  Пошлина, ₽
-                  <input
-                    className="cell"
-                    aria-label="Пошлина партии, ₽"
-                    value={customs.duty}
-                    onChange={(event) => setCustoms({ ...customs, duty: event.target.value })}
-                  />
-                </label>
-                <label className="field">
-                  НДС, ₽
-                  <input
-                    className="cell"
-                    aria-label="НДС партии, ₽"
-                    value={customs.vat}
-                    onChange={(event) => setCustoms({ ...customs, vat: event.target.value })}
-                  />
-                </label>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void loadCustomsRate(customs.date)}
-                  data-testid="customs-rate"
-                >
-                  Курс ЦБ на дату
-                </button>
-              </div>
-              {customs.hint ? (
-                <p className="hint" data-testid="customs-rate-hint">
-                  {customs.hint}
-                </p>
-              ) : (
-                <p className="hint">Курс и суммы можно исправить до подтверждения.</p>
-              )}
-              <p className="hint" data-testid="customs-total">
-                Итог: пошлина{' '}
-                <strong data-testid="customs-duty-total">
-                  {formatMoney(customs.duty || '0')} ₽
-                </strong>{' '}
-                · НДС{' '}
-                <strong data-testid="customs-vat-total">{formatMoney(customs.vat || '0')} ₽</strong>{' '}
-                · всего{' '}
-                <strong data-testid="customs-sum">
-                  {formatMoney(String(number(customs.duty) + number(customs.vat)))} ₽
-                </strong>
-              </p>
-              <p className="hint">
-                Итог распределится по строкам пропорционально их пошлине: сумма строк в точности
-                равна введённой. После подтверждения проценты в строках заменятся этими рублями.
-              </p>
-              <div className="toolbar">
-                <button
-                  type="button"
-                  className="primary"
-                  data-testid="customs-confirm"
-                  disabled={busy || number(customs.rate) <= 0}
-                  onClick={() => void submitCustoms()}
-                >
-                  Подтвердить растаможку
-                </button>
-                <button type="button" disabled={busy} onClick={() => setCustoms(null)}>
-                  Отмена
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null}
-      </form>
+      </div>
     </section>
   )
 }

@@ -191,7 +191,7 @@ export function App() {
         </div>
       </aside>
 
-      <main className="content">
+      <main className={current.id === 'receipts' ? 'content content-receipts' : 'content'}>
         {current.id === 'stock' && current.ready ? <StockPage /> : null}
         {current.id === 'sales' && current.ready ? <SalesPlansPage user={user} /> : null}
         {current.id === 'nomenclature' && current.ready ? <NomenclaturePage /> : null}
