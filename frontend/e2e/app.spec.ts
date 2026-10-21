@@ -88,20 +88,9 @@ const RAW_SUPPLIER = {
   is_active: true,
 }
 
-const RAW_STOCK = [
-  {
-    batch_item_id: 'raw-item-1',
-    batch_number: 'ИТ-0000001',
-    batch_date: '2026-10-10',
-    product_code: 'RAW-1',
-    product_name: 'Орех грецкий, вес',
-    product_kind: 'raw',
-    unit: 'кг',
-    quantity_on_hand: '50.000',
-    unit_cost: '100.00',
-    value_rub: '5000.00',
-    snapshot_date: null,
-  },
+const COUNTRIES = [
+  { id: 'th-1', name: 'Таиланд', delivery_days: 90, is_active: true, source: 'manual' },
+  { id: 'cn-1', name: 'Китай', delivery_days: 65, is_active: true, source: 'manual' },
 ]
 
 const RECEIPT = {
@@ -530,97 +519,174 @@ test('менеджер заполняет план продаж по клиен�
   await expect(page.getByText('На проверке')).toBeVisible()
 })
 
-test('закупщик ведёт план закупок сырья и отправляет его на утверждение', async ({ page }) => {
+test('закупщик раскладывает потребность плана продаж на сырьё', async ({ page }) => {
   const year = new Date().getFullYear()
-  const month = new Date().getMonth() + 1
-  let plans: Record<string, unknown>[] = []
+  const position = {
+    product_id: 'fin-1',
+    code: 'FIN-1',
+    name: 'Смесь ореховая, 100 гр',
+    unit: 'шт',
+    total: '300.000',
+    months: [
+      { month: 1, quantity: '100.000' },
+      { month: 2, quantity: '200.000' },
+    ],
+    decomposed: false,
+    status: 'ok',
+    changed: false,
+  }
+  const source = {
+    state: 'ok',
+    title: 'План продаж не менялся с момента составления плана закупок',
+    annual_status_title: 'Финально согласован',
+    annual_approved_at: '2026-10-21T18:00:00Z',
+    snapshot_at: '2026-10-21T18:10:00Z',
+    acknowledged_at: '2026-10-21T18:10:00Z',
+    changes: [],
+    history: [],
+    revision_requested_at: null,
+    revision_requested_by_name: null,
+  }
+  let items: Record<string, unknown>[] = []
+  let planStatus: 'draft' | 'on_review' = 'draft'
 
   function purchasePlan(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     return {
       id: 'pp-1',
       year,
-      status: 'draft',
-      status_title: 'Черновик',
+      status: planStatus,
+      status_title: planStatus === 'draft' ? 'Черновик' : 'На проверке',
       created_by_name: 'Директор по закупкам',
       approved_by_name: null,
       approved_at: null,
       notes: null,
       created_at: '2026-10-21T10:00:00Z',
       updated_at: '2026-10-21T10:00:00Z',
-      editable_months: [month],
-      items: [],
+      editable_months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+      source,
+      positions: [{ ...position, decomposed: items.length > 0 }],
+      items,
       ...overrides,
     }
   }
 
   await mockSession(page, PURCHASE_DIRECTOR)
-  await page.route('**/api/v1/stock', (route) => route.fulfill({ json: RAW_STOCK }))
-  await page.route('**/api/v1/products', (route) => route.fulfill({ json: RAW_PRODUCTS }))
+  await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/products**', (route) => route.fulfill({ json: RAW_PRODUCTS }))
   await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [RAW_SUPPLIER] }))
+  await page.route('**/api/v1/countries**', (route) => route.fulfill({ json: COUNTRIES }))
   await page.route('**/api/v1/purchase-plans**', (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname
     if (path.endsWith('/items')) {
       const body = request.postDataJSON() as {
         items: {
+          sales_product_id: string
           product_id: string
-          month: number
+          country_id: string
           quantity: string
           price_rub: string | null
           supplier_id: string | null
-          delivery_days: number
         }[]
       }
-      const items = body.items.map((item, index) => ({
+      items = body.items.map((item, index) => ({
         id: `pi-${index}`,
+        sales_product_id: item.sales_product_id,
         product_id: item.product_id,
         product_code: 'RAW-1',
         product_name: 'Орех грецкий, вес',
         product_kind: 'raw',
         unit: 'кг',
-        month: item.month,
+        country_id: item.country_id,
+        country_name: 'Таиланд',
+        delivery_days: 90,
         quantity: Number(item.quantity).toFixed(3),
         price_rub: item.price_rub === null ? null : Number(item.price_rub).toFixed(2),
         supplier_id: item.supplier_id,
         supplier_name: 'ООО Импорт',
-        delivery_days: item.delivery_days,
-        order_month: Math.max(1, item.month - Math.ceil(item.delivery_days / 30)),
         notes: null,
+        schedule: [
+          {
+            month: 1,
+            quantity: '10.000',
+            order_year: year - 1,
+            order_month: 10,
+            overdue: false,
+          },
+          {
+            month: 2,
+            quantity: '20.000',
+            order_year: year - 1,
+            order_month: 11,
+            overdue: false,
+          },
+        ],
       }))
-      plans = [purchasePlan({ items })]
-      return route.fulfill({ json: plans[0] })
+      return route.fulfill({ json: purchasePlan() })
     }
     if (path.endsWith('/submit')) {
-      plans = [purchasePlan({ status: 'on_review', status_title: 'На проверке' })]
-      return route.fulfill({ json: plans[0] })
+      planStatus = 'on_review'
+      return route.fulfill({ json: purchasePlan() })
     }
-    if (request.method() === 'POST') {
-      plans = [purchasePlan()]
-      return route.fulfill({ status: 201, json: plans[0] })
-    }
-    return route.fulfill({ json: plans })
+    return route.fulfill({ json: [purchasePlan()] })
   })
 
   await page.goto('/')
   await openSection(page, 'Планирование', 'План закупок сырья')
-  await expect(page.getByTestId('purchase-no-plan')).toContainText('плана закупок сырья нет')
-
-  await page.getByRole('button', { name: `Создать план на ${year}` }).click()
   await expect(page.getByTestId('purchase-status')).toHaveText('Черновик')
+  await expect(page.getByTestId('position-FIN-1')).toContainText('300')
+  await expect(page.getByTestId('empty-FIN-1')).toContainText('Сырьё не добавлено')
 
-  await page.getByLabel('Товар новой строки').selectOption('raw-1')
-  await page.getByLabel('Количество новой строки').fill('12,5')
-  await page.getByLabel('Цена новой строки').fill('300.25')
-  await page.getByLabel('Поставщик новой строки').selectOption('sup-1')
-  await page.getByRole('button', { name: 'Добавить строку' }).click()
+  await page.getByRole('button', { name: 'Добавить сырьё FIN-1' }).click()
+  await page.getByLabel('Сырьё FIN-1 1').selectOption('raw-1')
+  await page.getByLabel('Страна FIN-1 1').selectOption('th-1')
+  await page.getByLabel('Количество FIN-1 1').fill('30')
+  await page.getByLabel('Цена FIN-1 1').fill('500')
+  await page.getByLabel('Поставщик FIN-1 1').selectOption('sup-1')
+  await expect(page.getByTestId('purchase-table')).toContainText('янв 10')
+  await expect(page.getByTestId('purchase-table')).toContainText('заказ окт')
 
-  await expect(page.getByTestId('purchase-table')).toContainText('RAW-1')
-  await expect(page.getByTestId('purchase-table')).toContainText('50 кг')
   await page.getByRole('button', { name: 'Сохранить' }).click()
   await expect(page.getByTestId('purchase-saved')).toContainText('План сохранён')
+  await expect(page.getByTestId('purchase-table')).toContainText('Таиланд')
+  await expect(page.getByTestId('position-FIN-1')).toContainText('разложено')
 
-  await page.getByRole('button', { name: 'Отправить на утверждение' }).click()
+  await page.getByRole('button', { name: 'Отправить на согласование' }).click()
   await expect(page.getByTestId('purchase-status')).toHaveText('На проверке')
+})
+
+test('страна со сроком доставки заводится в справочнике', async ({ page }) => {
+  let rows: Record<string, unknown>[] = []
+  await mockSession(page, PURCHASE_DIRECTOR)
+  await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/countries**', (route) => {
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON() as { name: string; delivery_days: number }
+      rows = [
+        {
+          id: 'th-1',
+          name: body.name,
+          delivery_days: body.delivery_days,
+          is_active: true,
+          source: 'manual',
+        },
+      ]
+      return route.fulfill({ status: 201, json: rows[0] })
+    }
+    return route.fulfill({ json: rows })
+  })
+
+  await page.goto('/')
+  await openSection(page, 'Справочники', 'Страны')
+  await expect(page.getByTestId('countries-empty')).toBeVisible()
+
+  await page.getByLabel('Название страны').fill('Таиланд')
+  await page.getByLabel('Срок доставки, дней').fill('90')
+  await page.getByRole('button', { name: 'Добавить' }).click()
+
+  await expect(page.getByTestId('countries-table')).toContainText('Таиланд')
+  await expect(page.getByTestId('countries-table')).toContainText('90 дн')
+  await expect(page.getByTestId('countries-count')).toHaveText('1')
 })
 
 test('коммерческий директор отправляет годовой план отдела на финальное согласование', async ({

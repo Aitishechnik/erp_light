@@ -9,6 +9,7 @@ import {
   type SessionUser,
 } from './api'
 import { CounterpartiesPage } from './CounterpartiesPage'
+import { CountriesPage } from './CountriesPage'
 import { ImportsPage } from './ImportsPage'
 import { LoginPage } from './LoginPage'
 import { NomenclaturePage } from './NomenclaturePage'
@@ -77,7 +78,7 @@ const GROUPS: Group[] = [
       { id: 'nomenclature', title: 'Номенклатура', ready: true },
       { id: 'counterparties', title: 'Контрагенты', ready: true },
       { id: 'currencies', title: 'Валюты', ready: false },
-      { id: 'countries', title: 'Страны', ready: false },
+      { id: 'countries', title: 'Страны', ready: true },
     ],
   },
   {
@@ -209,6 +210,7 @@ export function App() {
         {current.id === 'purchase' && current.ready ? <PurchasePlanPage user={user} /> : null}
         {current.id === 'nomenclature' && current.ready ? <NomenclaturePage /> : null}
         {current.id === 'counterparties' && current.ready ? <CounterpartiesPage /> : null}
+        {current.id === 'countries' && current.ready ? <CountriesPage user={user} /> : null}
         {current.id === 'receipts' && current.ready ? <ReceiptsPage user={user} /> : null}
         {current.id === 'imports' && current.ready ? <ImportsPage user={user} /> : null}
         {!current.ready ? (

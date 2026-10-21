@@ -57,7 +57,7 @@ def get_plan(plan_id: uuid.UUID, user: CurrentUser, db: DbSession) -> PurchasePl
 def update_items(
     plan_id: uuid.UUID, payload: PurchasePlanItemsIn, user: CurrentUser, db: DbSession
 ) -> PurchasePlanOut:
-    """Полная замена строк по редактируемым месяцам."""
+    """Полная замена строк плана: позиция продаж, сырьё, страна и годовое количество."""
     try:
         return service.update_items(db, user, plan_id, payload.items)
     except PlanError as exc:
@@ -100,6 +100,26 @@ def reopen(
     """Вернуть утверждённый план в работу; только исполнительный директор."""
     try:
         return service.reopen(db, user, plan_id, payload.reason)
+    except PlanError as exc:
+        raise _fail(exc) from exc
+
+
+@router.post("/purchase-plans/{plan_id}/acknowledge-source", response_model=PurchasePlanOut)
+def acknowledge_source(plan_id: uuid.UUID, user: CurrentUser, db: DbSession) -> PurchasePlanOut:
+    """Принять изменения плана продаж к сведению и обновить снимок источника."""
+    try:
+        return service.acknowledge_source(db, user, plan_id)
+    except PlanError as exc:
+        raise _fail(exc) from exc
+
+
+@router.post("/purchase-plans/{plan_id}/request-revision", response_model=PurchasePlanOut)
+def request_revision(
+    plan_id: uuid.UUID, payload: PurchasePlanRejectIn, user: CurrentUser, db: DbSession
+) -> PurchasePlanOut:
+    """Попросить исполнительного директора вернуть утверждённый план в работу."""
+    try:
+        return service.request_revision(db, user, plan_id, payload.reason)
     except PlanError as exc:
         raise _fail(exc) from exc
 

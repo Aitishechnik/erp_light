@@ -10,9 +10,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
+    JSON,
     DateTime,
     ForeignKey,
     Integer,
@@ -30,6 +31,7 @@ from app.db import Base
 if TYPE_CHECKING:
     from app.models.auth import User
     from app.models.counterparties import Counterparty
+    from app.models.countries import Country
     from app.models.domain import Product
 
 # Статусы плана продаж: черновик → заполняется → на проверке → утверждён.
@@ -122,10 +124,12 @@ PURCHASE_PLAN_STATUS_TITLES = {
 
 
 class PurchasePlan(Base):
-    """Годовой план закупок сырья.
+    """Годовой план закупок сырья на основании годового плана продаж.
 
-    Один план на год, ведётся вручную: строки не связаны со строками плана продаж.
-    Утверждённый план продаж остаётся бизнес-контекстом, а не источником расчёта.
+    Один план на год. Позиции берутся из финально согласованного годового плана
+    продаж, закупщик вручную раскладывает их на сырьё. Снимок источника и его
+    отпечаток позволяют показать, что план продаж пересмотрели после составления
+    плана закупок.
     """
 
     __tablename__ = "purchase_plans"
@@ -142,6 +146,21 @@ class PurchasePlan(Base):
     )
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Снимок утверждённого годового плана продаж: позиция × месяц × количество.
+    source_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    source_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_snapshot_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    source_acknowledged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revision_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revision_requested_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -151,16 +170,26 @@ class PurchasePlan(Base):
 
     created_by: Mapped[User] = relationship(foreign_keys=[created_by_id], lazy="joined")
     approved_by: Mapped[User | None] = relationship(foreign_keys=[approved_by_id], lazy="joined")
+    revision_requested_by: Mapped[User | None] = relationship(
+        foreign_keys=[revision_requested_by_id], lazy="joined"
+    )
     items: Mapped[list[PurchasePlanItem]] = relationship(
         back_populates="plan", cascade="all, delete-orphan"
+    )
+    source_events: Mapped[list[PurchasePlanSourceEvent]] = relationship(
+        back_populates="plan",
+        cascade="all, delete-orphan",
+        order_by="PurchasePlanSourceEvent.acknowledged_at",
     )
 
 
 class PurchasePlanItem(Base):
-    """Строка плана закупок сырья: сырьё × месяц, цена в рублях.
+    """Строка плана закупок: потребность позиции закрывается сырьём.
 
-    Один товар и месяц могут встречаться несколько раз — например, два поставщика
-    с разными ценами и сроками. Месяц заказа считается от срока логистики.
+    ``sales_product_id`` — позиция плана продаж, которую закрывает строка;
+    ``product_id`` — закупаемое сырьё. Количество — годовое: по месяцам оно
+    раскладывается расчётом (``services/purchase_need.py``) пропорционально
+    продажам позиции, а месяц заказа сдвигается на срок доставки страны.
     """
 
     __tablename__ = "purchase_plan_items"
@@ -169,25 +198,69 @@ class PurchasePlanItem(Base):
     plan_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("purchase_plans.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    sales_product_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("products.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+        comment="Позиция годового плана продаж, которую закрывает строка",
+    )
     product_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("products.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    month: Mapped[int] = mapped_column(Integer, nullable=False)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False, default=Decimal("0"))
+    country_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("countries.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+        comment="Страна происхождения сырья: из неё берётся срок доставки",
+    )
+    quantity: Mapped[Decimal] = mapped_column(
+        Numeric(15, 3), nullable=False, default=Decimal("0"), comment="Годовое количество"
+    )
     price_rub: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
     supplier_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    delivery_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
-    order_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    delivery_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=30, comment="Снимок срока доставки страны, дней"
+    )
     notes: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
     plan: Mapped[PurchasePlan] = relationship(back_populates="items")
-    product: Mapped[Product] = relationship(lazy="joined")
+    sales_product: Mapped[Product] = relationship(foreign_keys=[sales_product_id], lazy="joined")
+    product: Mapped[Product] = relationship(foreign_keys=[product_id], lazy="joined")
+    country: Mapped[Country] = relationship(lazy="joined")
     supplier: Mapped[Counterparty | None] = relationship(lazy="joined")
+
+
+class PurchasePlanSourceEvent(Base):
+    """Принятое к сведению изменение плана продаж.
+
+    Хранит diff на момент подтверждения — чтобы директор по закупкам мог
+    вернуться и посмотреть, что именно изменилось.
+    """
+
+    __tablename__ = "purchase_plan_source_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    plan_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("purchase_plans.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    acknowledged_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    source_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    changes: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
+    acknowledged_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    plan: Mapped[PurchasePlan] = relationship(back_populates="source_events")
+    acknowledged_by: Mapped[User | None] = relationship(lazy="joined")
 
 
 # Статусы годового плана отдела продаж: не отправлен → на финальном согласовании →

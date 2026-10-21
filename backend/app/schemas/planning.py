@@ -69,12 +69,14 @@ class SalesPlanOut(BaseModel):
 
 
 class PurchasePlanItemIn(BaseModel):
-    product_id: uuid.UUID
-    month: int = Field(ge=1, le=12)
-    quantity: Decimal = Field(gt=0, description="Количество на месяц")
+    """Строка плана закупок: сырьё, страна и годовое количество."""
+
+    sales_product_id: uuid.UUID = Field(description="Позиция годового плана продаж")
+    product_id: uuid.UUID = Field(description="Закупаемое сырьё")
+    country_id: uuid.UUID = Field(description="Страна происхождения: срок доставки")
+    quantity: Decimal = Field(gt=0, description="Годовое количество")
     price_rub: Decimal | None = Field(default=None, ge=0, description="Цена за единицу, ₽")
     supplier_id: uuid.UUID | None = Field(default=None, description="Поставщик из справочника")
-    delivery_days: int = Field(default=30, ge=0, le=365, description="Срок логистики, дней")
     notes: str | None = Field(default=None, max_length=255)
 
 
@@ -91,21 +93,87 @@ class PurchasePlanRejectIn(BaseModel):
     reason: str = Field(default="", max_length=500)
 
 
+class PurchasePlanScheduleEntryOut(BaseModel):
+    """Месячная потребность строки и месяц, до которого нужно оформить заказ."""
+
+    month: int
+    quantity: Decimal
+    order_year: int
+    order_month: int
+    overdue: bool = Field(description="Срок заказа уже прошёл")
+
+
 class PurchasePlanItemOut(BaseModel):
     id: uuid.UUID
+    sales_product_id: uuid.UUID
     product_id: uuid.UUID
     product_code: str
     product_name: str
     product_kind: str
     unit: str
-    month: int
+    country_id: uuid.UUID
+    country_name: str
+    delivery_days: int
     quantity: Decimal
     price_rub: Decimal | None
     supplier_id: uuid.UUID | None
     supplier_name: str | None
-    delivery_days: int
-    order_month: int | None
     notes: str | None
+    schedule: list[PurchasePlanScheduleEntryOut]
+
+
+class PurchasePlanMonthOut(BaseModel):
+    month: int
+    quantity: Decimal
+
+
+class PurchasePlanPositionOut(BaseModel):
+    """Позиция годового плана продаж и её ручная разузловка на сырьё."""
+
+    product_id: uuid.UUID
+    code: str
+    name: str
+    unit: str
+    total: Decimal
+    months: list[PurchasePlanMonthOut]
+    decomposed: bool
+    status: str = Field(description="ok | added | removed | orphan")
+    changed: bool
+
+
+class PurchasePlanChangeOut(BaseModel):
+    """Одно расхождение снимка и текущего плана продаж."""
+
+    product_id: uuid.UUID
+    code: str
+    name: str
+    unit: str
+    month: int
+    was: Decimal | None
+    now: Decimal | None
+    kind: str = Field(description="added | removed | changed")
+
+
+class PurchasePlanSourceEventOut(BaseModel):
+    id: uuid.UUID
+    acknowledged_at: datetime
+    acknowledged_by_name: str | None
+    changes: list[PurchasePlanChangeOut]
+
+
+class PurchasePlanSourceOut(BaseModel):
+    """Состояние источника: финально согласованный годовой план продаж."""
+
+    state: str = Field(description="ok | changed | revision | missing | no_snapshot")
+    title: str
+    annual_status_title: str | None
+    annual_approved_at: datetime | None
+    snapshot_at: datetime | None
+    acknowledged_at: datetime | None
+    changes: list[PurchasePlanChangeOut]
+    history: list[PurchasePlanSourceEventOut]
+    revision_requested_at: datetime | None
+    revision_requested_by_name: str | None
 
 
 class PurchasePlanOut(BaseModel):
@@ -120,6 +188,8 @@ class PurchasePlanOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     editable_months: list[int] = Field(description="Месяцы, которые сейчас можно менять")
+    source: PurchasePlanSourceOut
+    positions: list[PurchasePlanPositionOut]
     items: list[PurchasePlanItemOut]
 
 

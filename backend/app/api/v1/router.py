@@ -7,6 +7,7 @@ from app.api.v1 import (
     auth,
     batches,
     counterparties,
+    countries,
     health,
     imports,
     products,
@@ -24,6 +25,7 @@ api_router.include_router(auth.router)
 api_router.include_router(users.router)
 api_router.include_router(products.router)
 api_router.include_router(counterparties.router)
+api_router.include_router(countries.router)
 api_router.include_router(imports.router)
 api_router.include_router(rates.router)
 api_router.include_router(batches.router)

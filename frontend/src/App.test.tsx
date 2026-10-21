@@ -184,4 +184,21 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Выйти' }))
     expect(await screen.findByLabelText('Логин')).toBeInTheDocument()
   })
+
+  it('открывает справочник стран из меню', async () => {
+    const user = userEvent.setup()
+    mockApi({
+      '/api/v1/auth/me': { body: PURCHASE_DIRECTOR },
+      '/api/v1/stock': { body: [] },
+      '/api/v1/countries': { body: [] },
+    })
+    render(<App />)
+
+    const catalogs = await screen.findByRole('button', { name: 'Справочники' })
+    await user.click(catalogs)
+    await user.click(screen.getByRole('button', { name: 'Страны' }))
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Страны' })).toBeInTheDocument()
+    expect(await screen.findByTestId('countries-empty')).toBeInTheDocument()
+  })
 })

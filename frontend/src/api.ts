@@ -160,21 +160,76 @@ export type SalesPlanCorrectionItemIn = {
 
 export type PurchasePlanStatus = 'draft' | 'on_review' | 'approved'
 
+export type PurchasePlanScheduleEntry = {
+  month: number
+  quantity: string
+  order_year: number
+  order_month: number
+  overdue: boolean
+}
+
 export type PurchasePlanItem = {
   id: string
+  sales_product_id: string
   product_id: string
   product_code: string
   product_name: string
   product_kind: string
   unit: string
-  month: number
+  country_id: string
+  country_name: string
+  delivery_days: number
   quantity: string
   price_rub: string | null
   supplier_id: string | null
   supplier_name: string | null
-  delivery_days: number
-  order_month: number | null
   notes: string | null
+  schedule: PurchasePlanScheduleEntry[]
+}
+
+export type PurchasePlanMonth = { month: number; quantity: string }
+
+export type PurchasePlanPosition = {
+  product_id: string
+  code: string
+  name: string
+  unit: string
+  total: string
+  months: PurchasePlanMonth[]
+  decomposed: boolean
+  status: 'ok' | 'added' | 'removed' | 'orphan'
+  changed: boolean
+}
+
+export type PurchasePlanChange = {
+  product_id: string
+  code: string
+  name: string
+  unit: string
+  month: number
+  was: string | null
+  now: string | null
+  kind: 'added' | 'removed' | 'changed'
+}
+
+export type PurchasePlanSourceEvent = {
+  id: string
+  acknowledged_at: string
+  acknowledged_by_name: string | null
+  changes: PurchasePlanChange[]
+}
+
+export type PurchasePlanSource = {
+  state: 'ok' | 'changed' | 'revision' | 'missing' | 'no_snapshot'
+  title: string
+  annual_status_title: string | null
+  annual_approved_at: string | null
+  snapshot_at: string | null
+  acknowledged_at: string | null
+  changes: PurchasePlanChange[]
+  history: PurchasePlanSourceEvent[]
+  revision_requested_at: string | null
+  revision_requested_by_name: string | null
 }
 
 export type PurchasePlan = {
@@ -189,16 +244,39 @@ export type PurchasePlan = {
   created_at: string
   updated_at: string
   editable_months: number[]
+  source: PurchasePlanSource
+  positions: PurchasePlanPosition[]
   items: PurchasePlanItem[]
 }
 
 export type PurchasePlanItemIn = {
+  sales_product_id: string
   product_id: string
-  month: number
+  country_id: string
   quantity: string
   price_rub: string | null
   supplier_id: string | null
+  notes?: string | null
+}
+
+export type Country = {
+  id: string
+  name: string
   delivery_days: number
+  is_active: boolean
+  source: string
+}
+
+export type CountryIn = {
+  name: string
+  delivery_days: number
+  is_active?: boolean
+}
+
+export type CountryUpdate = {
+  name?: string
+  delivery_days?: number
+  is_active?: boolean
 }
 
 export type CounterpartyRole = 'customer' | 'local_supplier' | 'import_supplier'
@@ -645,6 +723,27 @@ export function updateCounterparty(
   })
 }
 
+export function fetchCountries(options?: { includeInactive?: boolean }): Promise<Country[]> {
+  const params = new URLSearchParams()
+  if (options?.includeInactive) params.set('include_inactive', 'true')
+  const query = params.toString()
+  return request<Country[]>(`/api/v1/countries${query ? `?${query}` : ''}`)
+}
+
+export function createCountry(payload: CountryIn): Promise<Country> {
+  return request<Country>('/api/v1/countries', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateCountry(countryId: string, payload: CountryUpdate): Promise<Country> {
+  return request<Country>(`/api/v1/countries/${countryId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function fetchImportKinds(): Promise<ImportKind[]> {
   return request<ImportKind[]>('/api/v1/imports/kinds')
 }
@@ -832,6 +931,19 @@ export function rejectPurchasePlan(planId: string, reason: string): Promise<Purc
 
 export function reopenPurchasePlan(planId: string, reason: string): Promise<PurchasePlan> {
   return request<PurchasePlan>(`/api/v1/purchase-plans/${planId}/reopen`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  })
+}
+
+export function acknowledgePurchasePlanSource(planId: string): Promise<PurchasePlan> {
+  return request<PurchasePlan>(`/api/v1/purchase-plans/${planId}/acknowledge-source`, {
+    method: 'POST',
+  })
+}
+
+export function requestPurchasePlanRevision(planId: string, reason: string): Promise<PurchasePlan> {
+  return request<PurchasePlan>(`/api/v1/purchase-plans/${planId}/request-revision`, {
     method: 'POST',
     body: JSON.stringify({ reason }),
   })

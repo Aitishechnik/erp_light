@@ -12,6 +12,7 @@ from app.models.auth import (
     User,
 )
 from app.models.counterparties import Counterparty, name_key
+from app.models.countries import Country
 from app.models.domain import (
     BATCH_TYPES,
     PRODUCT_KIND_TITLES,
@@ -36,6 +37,7 @@ from app.models.planning import (
     SALES_PLAN_STATUSES,
     PurchasePlan,
     PurchasePlanItem,
+    PurchasePlanSourceEvent,
     SalesPlan,
     SalesPlanApproval,
     SalesPlanCorrection,
@@ -69,12 +71,14 @@ __all__ = [
     "BatchExpense",
     "BatchItem",
     "BatchPayment",
+    "Country",
     "Counterparty",
     "CurrencyRate",
     "ImportSession",
     "Product",
     "PurchasePlan",
     "PurchasePlanItem",
+    "PurchasePlanSourceEvent",
     "SalesPlan",
     "SalesPlanApproval",
     "SalesPlanCorrection",

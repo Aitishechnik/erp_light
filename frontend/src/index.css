@@ -1860,3 +1860,210 @@ button.primary:disabled,
   color: var(--muted);
   font-size: 0.8rem;
 }
+
+/* ── План закупок: позиции, график и уведомление об источнике ───────────── */
+
+.source-alert {
+  display: grid;
+  gap: 0.5rem;
+  border: 1px solid #f0c36d;
+  border-radius: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  margin-bottom: 1rem;
+  background: #fff8e6;
+}
+
+.source-alert-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.75rem;
+}
+
+.source-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.55rem 0.9rem;
+  margin-bottom: 1rem;
+  background: #f3f6fb;
+  font-size: 0.9rem;
+}
+
+.source-history {
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: #fff;
+}
+
+.source-history summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.source-history-entry {
+  margin-top: 0.5rem;
+}
+
+.need-row td {
+  background: #f6f8fb;
+  border-top: 2px solid var(--border);
+  padding: 0.55rem 0.6rem;
+}
+
+.need-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.75rem;
+}
+
+.need-total {
+  font-size: 1.05rem;
+  font-weight: 700;
+  min-width: 6.5rem;
+}
+
+.need-total small {
+  margin-left: 0.25rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.need-title {
+  font-weight: 600;
+}
+
+.need-months {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.need-state {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.need-state.ok {
+  color: #1a7f37;
+}
+
+.need-changed {
+  background: #fff3cd;
+  color: #8a5a00;
+  border-color: #f0c36d;
+}
+
+.need-added {
+  background: #e7f6ec;
+  color: #1a7f37;
+  border-color: #9fd5b0;
+}
+
+.need-removed {
+  background: #fdecea;
+  color: #a61b1b;
+  border-color: #f3b4ae;
+}
+
+.need-row.flash td {
+  animation: need-flash 2s ease-out;
+}
+
+@keyframes need-flash {
+  from {
+    background: #fff3cd;
+  }
+  to {
+    background: #f6f8fb;
+  }
+}
+
+.schedule-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.schedule-chip {
+  display: inline-flex;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.schedule-chip .order {
+  color: var(--muted);
+}
+
+.schedule-chip.overdue {
+  border-color: #e5a3a3;
+  background: #fdecea;
+  color: #a61b1b;
+}
+
+.schedule-chip.overdue .order {
+  color: #a61b1b;
+}
+
+/* Поставщик — длинное имя из 1С: не даём колонке раздувать таблицу. */
+.purchase-table td.supplier-cell {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.purchase-table td.supplier-cell.purchase-supplier select {
+  max-width: 100%;
+}
+
+/* Подпись у поля формы: «Срок доставки, дней» — видна всегда, не только плейсхолдер. */
+.inline-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+/* Подсказка в toolbar не должна подниматься из-за нижнего отступа .hint. */
+.toolbar .hint {
+  margin-bottom: 0;
+}
+
+/* Название позиции и месяцы — одним блоком: левый край сводки не гуляет. */
+.need-title-block {
+  display: flex;
+  flex: 1 1 320px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* «Разложено» — такой же бейдж, как «изменено» и статусы. */
+.need-state {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  margin-left: auto;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.need-state.ok {
+  border-color: #9fd5b0;
+  background: #e7f6ec;
+  color: #1a7f37;
+}
