@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
@@ -11,6 +11,14 @@ const MANAGER: SessionUser = {
   full_name: 'Иван Петров',
   role: 'sales_manager',
   role_title: 'Менеджер по продажам',
+}
+
+const PURCHASE_DIRECTOR: SessionUser = {
+  id: 'pd-1',
+  login: 'purchase',
+  full_name: 'Пётр Закупщиков',
+  role: 'purchase_director',
+  role_title: 'Директор по закупкам',
 }
 
 const STOCK: StockRow[] = [
@@ -88,6 +96,9 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Планирование' }))
     expect(screen.getByRole('button', { name: 'Планирование продаж' })).toBeInTheDocument()
 
+    // Планирование закупок живёт в «Планировании», но менеджеру продаж недоступно.
+    expect(screen.queryByRole('button', { name: 'Планирование закупок' })).not.toBeInTheDocument()
+
     // Закупочные разделы менеджеру продаж недоступны.
     await user.click(screen.getByRole('button', { name: 'Закупки' }))
     expect(screen.getByRole('button', { name: 'Поступления' })).toBeInTheDocument()
@@ -97,6 +108,32 @@ describe('App', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Поступления' }),
     ).toBeInTheDocument()
+  })
+
+  it('планирование закупок живёт в категории «Планирование»', async () => {
+    const user = userEvent.setup()
+    mockApi({ '/api/v1/auth/me': { body: PURCHASE_DIRECTOR }, '/api/v1/stock': { body: [] } })
+    render(<App />)
+
+    const planning = (await screen.findByRole('button', { name: 'Планирование' })).closest(
+      '.nav-group',
+    ) as HTMLElement
+    await user.click(within(planning).getByRole('button', { name: 'Планирование' }))
+
+    // Директору по закупкам планирование продаж недоступно, а планирование закупок — здесь.
+    expect(within(planning).queryByRole('button', { name: 'Планирование продаж' })).toBeNull()
+    expect(
+      within(planning).getByRole('button', { name: 'Планирование закупок' }),
+    ).toBeInTheDocument()
+    expect(within(planning).queryByRole('button', { name: 'Поступления' })).toBeNull()
+
+    // В категории «Закупки» планирования закупок больше нет.
+    const purchases = screen
+      .getByRole('button', { name: 'Закупки' })
+      .closest('.nav-group') as HTMLElement
+    await user.click(within(purchases).getByRole('button', { name: 'Закупки' }))
+    expect(within(purchases).getByRole('button', { name: 'Поступления' })).toBeInTheDocument()
+    expect(within(purchases).queryByRole('button', { name: 'Планирование закупок' })).toBeNull()
   })
 
   it('категория меню раскрывается и сворачивается по стрелке', async () => {

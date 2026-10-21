@@ -47,6 +47,7 @@ const GROUPS: Group[] = [
     title: 'Планирование',
     sections: [
       { id: 'sales', title: 'Планирование продаж', ready: true, roles: SALES_PLAN_ROLES },
+      { id: 'purchase', title: 'Планирование закупок', ready: false, roles: PURCHASE_ROLES },
       { id: 'pricing', title: 'Матрица цен', ready: false },
     ],
   },
@@ -55,7 +56,6 @@ const GROUPS: Group[] = [
     title: 'Закупки',
     sections: [
       { id: 'receipts', title: 'Поступления', ready: true },
-      { id: 'purchase', title: 'Планирование закупок', ready: false, roles: PURCHASE_ROLES },
       { id: 'suppliers', title: 'Поставщики', ready: false },
     ],
   },
