@@ -694,8 +694,8 @@ pnpm typecheck && pnpm lint && pnpm test && pnpm e2e && pnpm build
   4xx/5xx по своим запросам нет; на 1680 и 1440 страница по горизонтали не уезжает,
   таблица помещается (на 1440 — после ограничения ширины поставщика).
   Скриншоты: `artifacts/ui/purchase-plan-director.png` (карточка с запросом
-  пересмотра), `artifacts/ui/purchase-plan-diff-final.png` (diff), `countries-page.png`,
-  `purchase-plan-1440-final.png`. Vision-проверка: наложений и обрезок нет; поправлено
+  пересмотра), `artifacts/ui/purchase-plan-diff-final.png` (diff),
+  `artifacts/ui/countries-page-final.png`. Vision-проверка: наложений и обрезок нет; поправлено
   неподписанное поле срока доставки, выравнивание «Найдено», «разложено» стало
   бейджем, месяцы вынесены под название позиции, длинный поставщик обрезается
   многоточием.
