@@ -263,7 +263,7 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
                 Создать план на {year}
               </button>
             </>
-          ) : (
+          ) : user.role === 'sales_manager' ? (
             <button
               type="button"
               className="primary"
@@ -274,7 +274,7 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
             >
               Создать свой план на {year}
             </button>
-          )}
+          ) : null}
         </div>
       </header>
 

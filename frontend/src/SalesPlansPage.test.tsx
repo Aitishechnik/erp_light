@@ -23,6 +23,14 @@ const MANAGER: SessionUser = {
   role_title: 'Менеджер по продажам',
 }
 
+const PURCHASE: SessionUser = {
+  id: 'pd-1',
+  login: 'purchase',
+  full_name: 'Пётр Закупщиков',
+  role: 'purchase_director',
+  role_title: 'Директор по закупкам',
+}
+
 const CLIENTS: Counterparty[] = [
   {
     id: 'client-1',
@@ -135,6 +143,27 @@ describe('SalesPlansPage', () => {
     await waitFor(() => {
       expect(calls().some((url) => url.includes('/sales-plans/plan-1/approve'))).toBe(true)
     })
+  })
+
+  it('закупщик видит план только на просмотр', async () => {
+    mockApi(
+      routes({
+        '/api/v1/sales-plans': {
+          body: [plan({ status: 'approved', status_title: 'Утверждён' })],
+        },
+      }),
+    )
+    render(<SalesPlansPage user={PURCHASE} />)
+
+    expect(await screen.findByText('Утверждён')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('row-total-SKU-1')).toHaveTextContent('10 шт')
+    })
+    expect(screen.getByLabelText('SKU-1 Декабрь')).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Сохранить' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Утвердить' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Отправить на проверку' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Создать .*план/ })).not.toBeInTheDocument()
   })
 
   it('сохраняет строки с клиентом, товаром и количеством', async () => {

@@ -36,11 +36,11 @@ def test_logout_closes_access(client: TestClient, logout) -> None:
     assert client.get("/api/v1/stock").status_code == 401
 
 
-def test_sales_plans_are_closed_for_purchase_roles(client: TestClient, login) -> None:
+def test_sales_plans_are_visible_to_purchase_roles(client: TestClient, login) -> None:
     login("purchase")
-    assert client.get("/api/v1/sales-plans").status_code == 403
+    assert client.get("/api/v1/sales-plans").status_code == 200
     login("import")
-    assert client.get("/api/v1/sales-plans").status_code == 403
+    assert client.get("/api/v1/sales-plans").status_code == 200
 
 
 def test_password_hash_roundtrip() -> None:

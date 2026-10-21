@@ -2,7 +2,8 @@
 
 Цепочка статусов: черновик → заполняется → на проверке → утверждён.
 Права: менеджер по продажам ведёт свой план, коммерческий директор создаёт план
-на любого менеджера и утверждает/отклоняет, исполнительный директор видит всё.
+на любого менеджера и утверждает/отклоняет, исполнительный директор видит всё,
+закупки (директор по закупкам и импорт) видят все планы только на чтение.
 """
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.auth import (
     ROLE_COMMERCIAL_DIRECTOR,
     ROLE_EXECUTIVE_DIRECTOR,
+    ROLE_IMPORT_MANAGER,
+    ROLE_PURCHASE_DIRECTOR,
     ROLE_SALES_MANAGER,
     User,
 )
@@ -65,8 +68,13 @@ def _is_overseer(user: User) -> bool:
     return user.role in (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR)
 
 
+def _is_purchase_viewer(user: User) -> bool:
+    """Закупки смотрят планы продаж, но не правят их."""
+    return user.role in (ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER)
+
+
 def _check_view(user: User, plan: SalesPlan) -> None:
-    if _is_overseer(user):
+    if _is_overseer(user) or _is_purchase_viewer(user):
         return
     if user.role == ROLE_SALES_MANAGER and plan.manager_id == user.id:
         return
@@ -128,7 +136,7 @@ def _serialize(plan: SalesPlan) -> SalesPlanOut:
 
 
 def list_plans(db: Session, user: User, *, year: int | None = None) -> list[SalesPlanOut]:
-    """Список планов: менеджер видит свои, коммерческий и исполнительный — все."""
+    """Список планов: менеджер видит свои, коммерческий, исполнительный и закупки — все."""
     statement = (
         select(SalesPlan)
         .options(selectinload(SalesPlan.items).selectinload(SalesPlanItem.product))
@@ -137,7 +145,7 @@ def list_plans(db: Session, user: User, *, year: int | None = None) -> list[Sale
     )
     if user.role == ROLE_SALES_MANAGER:
         statement = statement.where(SalesPlan.manager_id == user.id)
-    elif not _is_overseer(user):
+    elif not (_is_overseer(user) or _is_purchase_viewer(user)):
         raise PlanError("Планы продаж вам не видны", status_code=403)
     if year is not None:
         statement = statement.where(SalesPlan.year == year)

@@ -369,11 +369,13 @@ export function counterpartyRoles(row: {
   return roles
 }
 
-/** Роли, которым виден раздел планирования продаж. */
+/** Роли, которым виден раздел планирования продаж (закупки — только просмотр). */
 export const SALES_PLAN_ROLES: Role[] = [
   'sales_manager',
   'commercial_director',
   'executive_director',
+  'purchase_director',
+  'import_manager',
 ]
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {

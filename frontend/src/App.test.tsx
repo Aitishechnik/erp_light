@@ -120,8 +120,10 @@ describe('App', () => {
     ) as HTMLElement
     await user.click(within(planning).getByRole('button', { name: 'Планирование' }))
 
-    // Директору по закупкам планирование продаж недоступно, а планирование закупок — здесь.
-    expect(within(planning).queryByRole('button', { name: 'Планирование продаж' })).toBeNull()
+    // Закупщик видит оба планирования: продаж — только на просмотр.
+    expect(
+      within(planning).getByRole('button', { name: 'Планирование продаж' }),
+    ).toBeInTheDocument()
     expect(
       within(planning).getByRole('button', { name: 'Планирование закупок' }),
     ).toBeInTheDocument()

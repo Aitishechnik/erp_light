@@ -94,6 +94,38 @@ def test_manager_fills_and_commercial_director_approves(
     assert denied.status_code == 409
 
 
+def test_purchase_roles_see_sales_plans_read_only(
+    client: TestClient, login, products: list[Product], clients: list[Counterparty]
+) -> None:
+    login("sales")
+    plan = _create_plan(client, TODAY.year)
+    saved = client.put(
+        f"/api/v1/sales-plans/{plan['id']}/items",
+        json={"items": [_item(products[0], TODAY.month, "10", clients[0])]},
+    )
+    assert saved.status_code == 200, saved.text
+
+    login("purchase")
+    listed = client.get("/api/v1/sales-plans")
+    assert listed.status_code == 200, listed.text
+    assert [row["id"] for row in listed.json()] == [plan["id"]]
+    detail = client.get(f"/api/v1/sales-plans/{plan['id']}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["items"][0]["quantity"] == "10.000"
+
+    # Просмотр — да, правка, создание и утверждение — нет.
+    denied = client.put(
+        f"/api/v1/sales-plans/{plan['id']}/items",
+        json={"items": [_item(products[1], TODAY.month, "5", clients[0])]},
+    )
+    assert denied.status_code == 403, denied.text
+    assert client.post(f"/api/v1/sales-plans/{plan['id']}/approve").status_code == 403
+    assert client.post("/api/v1/sales-plans", json={"year": TODAY.year + 1}).status_code == 403
+
+    login("import")
+    assert client.get("/api/v1/sales-plans").status_code == 200
+
+
 def test_same_product_for_two_clients_is_allowed(
     client: TestClient, login, products: list[Product], clients: list[Counterparty]
 ) -> None:
