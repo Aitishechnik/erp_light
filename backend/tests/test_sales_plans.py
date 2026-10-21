@@ -191,8 +191,9 @@ def test_commercial_director_creates_plan_and_rejects(
 ) -> None:
     login("commercial")
     managers = client.get("/api/v1/users", params={"role": "sales_manager"}).json()
-    assert len(managers) == 1
-    manager_id = managers[0]["id"]
+    # В демо-сиде три менеджера по продажам: sales, sales2, sales3.
+    assert {row["login"] for row in managers} >= {"sales", "sales2", "sales3"}
+    manager_id = next(row["id"] for row in managers if row["login"] == "sales")
 
     plan = _create_plan(client, TODAY.year, manager_id=manager_id)
     assert (

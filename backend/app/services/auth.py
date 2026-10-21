@@ -107,6 +107,8 @@ def delete_session(db: Session, token: str) -> None:
 # Демонстрационные пользователи: по одному на роль.
 DEMO_USERS: tuple[tuple[str, str, str], ...] = (
     (ROLE_SALES_MANAGER, "sales", "Менеджер по продажам (демо)"),
+    (ROLE_SALES_MANAGER, "sales2", "Менеджер по продажам 2 (демо)"),
+    (ROLE_SALES_MANAGER, "sales3", "Менеджер по продажам 3 (демо)"),
     (ROLE_COMMERCIAL_DIRECTOR, "commercial", "Коммерческий директор (демо)"),
     (ROLE_PURCHASE_DIRECTOR, "purchase", "Директор по закупкам (демо)"),
     (ROLE_IMPORT_MANAGER, "import", "Менеджер по закупкам, импорт (демо)"),
