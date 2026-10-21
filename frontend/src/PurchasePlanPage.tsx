@@ -234,11 +234,7 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
   const isExecutive = user.role === 'executive_director'
   const yearEditable = (plan?.editable_months.length ?? 0) > 0
   const canEdit = plan !== null && plan.status === 'draft' && isEditor && yearEditable
-  const canSubmit =
-    canEdit &&
-    drafts.length > 0 &&
-    drafts.every((row) => row.priceRub.trim() !== '') &&
-    plan?.source.state !== 'changed'
+  const canSubmit = canEdit && drafts.length > 0 && plan?.source.state !== 'changed'
   const canApprove = plan !== null && plan.status === 'on_review' && isExecutive
   const canReopen = plan !== null && plan.status === 'approved' && isExecutive
   const canDelete = plan !== null && plan.status === 'draft' && user.role === 'purchase_director'

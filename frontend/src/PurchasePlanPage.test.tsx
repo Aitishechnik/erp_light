@@ -422,4 +422,18 @@ describe('PurchasePlanPage', () => {
       'Запрос на пересмотр отправлен',
     )
   })
+
+  it('не отправляет план без цены и объясняет почему', async () => {
+    const user = userEvent.setup()
+    const baseItem = plan().items[0]
+    if (!baseItem) throw new Error('в плане нет строки')
+    const noPrice = plan({ items: [{ ...baseItem, price_rub: null }] })
+    mockApi(routes([noPrice]))
+    render(<PurchasePlanPage user={DIRECTOR} />)
+
+    await screen.findByTestId('purchase-status')
+    await screen.findByLabelText('Количество FIN-1 1')
+    await user.click(screen.getByRole('button', { name: 'Отправить на согласование' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Укажите цену у всех строк')
+  })
 })
