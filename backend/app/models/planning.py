@@ -188,3 +188,141 @@ class PurchasePlanItem(Base):
     plan: Mapped[PurchasePlan] = relationship(back_populates="items")
     product: Mapped[Product] = relationship(lazy="joined")
     supplier: Mapped[Counterparty | None] = relationship(lazy="joined")
+
+
+# Статусы годового плана отдела продаж: не отправлен → на утверждении ГД →
+# утверждён / требует повторного утверждения.
+SALES_PLAN_APPROVAL_STATUSES = ("draft", "on_review", "approved", "revision")
+
+SALES_PLAN_APPROVAL_STATUS_TITLES = {
+    "draft": "Не отправлен",
+    "on_review": "На утверждении ГД",
+    "approved": "Утверждён ГД",
+    "revision": "Требует повторного утверждения",
+}
+
+
+class SalesPlanApproval(Base):
+    """Годовой план отдела продаж: собирается из утверждённых планов менеджеров.
+
+    Финальное утверждение — за генеральным директором. Любое изменение плана
+    менеджера снимает утверждение: документ переходит в `revision`.
+    """
+
+    __tablename__ = "sales_plan_approvals"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    year: Mapped[int] = mapped_column(Integer, nullable=False, unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft", index=True)
+    submitted_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approved_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    submitted_by: Mapped[User | None] = relationship(foreign_keys=[submitted_by_id], lazy="joined")
+    approved_by: Mapped[User | None] = relationship(foreign_keys=[approved_by_id], lazy="joined")
+
+
+# Статусы корректировки утверждённого плана менеджера.
+SALES_PLAN_CORRECTION_STATUSES = ("draft", "on_review", "approved", "rejected")
+
+SALES_PLAN_CORRECTION_STATUS_TITLES = {
+    "draft": "Черновик корректировки",
+    "on_review": "Корректировка на утверждении",
+    "approved": "Корректировка утверждена",
+    "rejected": "Корректировка отклонена",
+}
+
+
+class SalesPlanCorrection(Base):
+    """Предложение корректировки утверждённого плана менеджера.
+
+    Хранит только изменения («клиент × товар × месяц → новое количество»), а не копию
+    всего плана. Применяется коммерческим директором; после применения годовой план
+    отдела требует повторного утверждения ГД.
+    """
+
+    __tablename__ = "sales_plan_corrections"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    plan_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("sales_plans.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_by_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft", index=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    base_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reviewed_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    plan: Mapped[SalesPlan] = relationship(lazy="joined")
+    created_by: Mapped[User] = relationship(foreign_keys=[created_by_id], lazy="joined")
+    reviewed_by: Mapped[User | None] = relationship(foreign_keys=[reviewed_by_id], lazy="joined")
+    items: Mapped[list[SalesPlanCorrectionItem]] = relationship(
+        back_populates="correction", cascade="all, delete-orphan"
+    )
+
+
+class SalesPlanCorrectionItem(Base):
+    """Изменение корректировки: новое количество; 0 — удалить строку плана."""
+
+    __tablename__ = "sales_plan_correction_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "correction_id",
+            "client_id",
+            "product_id",
+            "month",
+            name="sales_plan_correction_item_client_product_month",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    correction_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("sales_plan_corrections.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("counterparties.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("products.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    month: Mapped[int] = mapped_column(Integer, nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False, default=Decimal("0"))
+    current_quantity: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 3), nullable=True, comment="Количество в плане на момент предложения"
+    )
+    notes: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    correction: Mapped[SalesPlanCorrection] = relationship(back_populates="items")
+    client: Mapped[Counterparty] = relationship(lazy="joined")
+    product: Mapped[Product] = relationship(lazy="joined")

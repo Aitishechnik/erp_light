@@ -191,6 +191,86 @@ function plan(overrides: Record<string, unknown> = {}) {
   }
 }
 
+const COMMERCIAL = {
+  id: 'cd-1',
+  login: 'commercial',
+  full_name: 'Коммерческий директор',
+  role: 'commercial_director',
+  role_title: 'Коммерческий директор',
+}
+
+const CORRECTION = {
+  id: 'corr-1',
+  plan_id: 'plan-1',
+  status: 'draft',
+  status_title: 'Черновик корректировки',
+  created_by_name: 'Иван Петров',
+  reviewed_by_name: null,
+  reviewed_at: null,
+  reason: null,
+  review_reason: null,
+  created_at: '2026-10-21T10:00:00Z',
+  updated_at: '2026-10-21T10:00:00Z',
+  items: [
+    {
+      id: 'ci-1',
+      client_id: 'client-1',
+      client_name: 'ООО Ромашка',
+      product_id: 'p-1',
+      product_code: 'SKU-1',
+      product_name: 'Товар 1',
+      unit: 'шт',
+      month: 10,
+      quantity: '20.000',
+      current_quantity: '10.000',
+      notes: null,
+    },
+  ],
+}
+
+function annual(overrides: Record<string, unknown> = {}) {
+  return {
+    year: YEAR,
+    status: 'draft',
+    status_title: 'Не отправлен',
+    submitted_by_name: null,
+    submitted_at: null,
+    approved_by_name: null,
+    approved_at: null,
+    notes: null,
+    is_stale: false,
+    all_approved: true,
+    missing_managers: [],
+    managers: [
+      {
+        manager_id: 'sm-1',
+        manager_name: 'Иван Петров',
+        plan_id: 'plan-1',
+        plan_status: 'approved',
+        plan_status_title: 'Утверждён',
+        approved: true,
+        positions: 1,
+        clients: 1,
+      },
+    ],
+    items: [
+      {
+        manager_id: 'sm-1',
+        manager_name: 'Иван Петров',
+        client_id: 'client-1',
+        client_name: 'ООО Ромашка',
+        product_id: 'p-1',
+        product_code: 'SKU-1',
+        product_name: 'Товар 1',
+        unit: 'шт',
+        month: 10,
+        quantity: '10.000',
+      },
+    ],
+    ...overrides,
+  }
+}
+
 async function mockSession(page: Page, user: Record<string, unknown> = MANAGER): Promise<void> {
   await page.route('**/api/v1/auth/me', (route) => route.fulfill({ json: user }))
 }
@@ -541,6 +621,77 @@ test('закупщик ведёт план закупок сырья и отпр
 
   await page.getByRole('button', { name: 'Отправить на утверждение' }).click()
   await expect(page.getByTestId('purchase-status')).toHaveText('На проверке')
+})
+
+test('коммерческий директор отправляет годовой план отдела на утверждение ГД', async ({ page }) => {
+  let submitted = false
+  await mockSession(page, COMMERCIAL)
+  await page.route('**/api/v1/annual-sales-plans**', (route) => {
+    if (route.request().method() === 'POST') {
+      submitted = true
+      return route.fulfill({
+        json: annual({ status: 'on_review', status_title: 'На утверждении ГД' }),
+      })
+    }
+    return route.fulfill({
+      json: annual({
+        status: submitted ? 'on_review' : 'draft',
+        status_title: submitted ? 'На утверждении ГД' : 'Не отправлен',
+      }),
+    })
+  })
+
+  await page.goto('/')
+  await openSection(page, 'Планирование', 'Годовой план отдела')
+  await expect(page.getByTestId('annual-status')).toContainText('Не отправлен')
+  await expect(page.getByTestId('annual-managers')).toContainText('Иван Петров')
+
+  await page.getByRole('button', { name: 'Отправить на утверждение ГД' }).click()
+  await expect(page.getByTestId('annual-status')).toContainText('На утверждении ГД')
+})
+
+test('менеджер предлагает корректировку утверждённого плана', async ({ page }) => {
+  let created = false
+  await mockSession(page)
+  await page.route('**/api/v1/sales-plans', (route) =>
+    route.fulfill({
+      json: [
+        plan({
+          status: 'approved',
+          status_title: 'Утверждён',
+          items: [
+            {
+              id: 'item-1',
+              client_id: 'client-1',
+              client_name: 'ООО Ромашка',
+              product_id: 'p-1',
+              product_code: 'SKU-1',
+              product_name: 'Товар 1',
+              product_kind: 'goods',
+              unit: 'шт',
+              month: 10,
+              quantity: '10.000',
+              notes: null,
+            },
+          ],
+        }),
+      ],
+    }),
+  )
+  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [CLIENT] }))
+  await page.route('**/api/v1/sales-plan-corrections**', (route) => {
+    if (route.request().method() === 'POST') {
+      created = true
+      return route.fulfill({ status: 201, json: CORRECTION })
+    }
+    return route.fulfill({ json: created ? [CORRECTION] : [] })
+  })
+
+  await page.goto('/')
+  await openSection(page, 'Планирование', 'Планирование продаж')
+  await page.getByRole('button', { name: 'Предложить корректировку' }).click()
+  await expect(page.getByTestId('correction-box')).toContainText('Черновик корректировки')
 })
 
 test('поступление заводится в календаре, себестоимость считается сразу', async ({ page }) => {

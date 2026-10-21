@@ -320,6 +320,11 @@ button.primary {
   color: var(--accent);
 }
 
+.status-revision {
+  background: #fff0e5;
+  color: #b54708;
+}
+
 input.cell {
   width: 3.1rem;
   padding: 0.1rem 0.2rem;
@@ -1822,6 +1827,36 @@ button.primary:disabled,
 }
 
 .purchase-table td:first-child .unit {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.annual-items-head {
+  margin-top: 1rem;
+}
+
+.annual-items-head .sep {
+  flex: 1;
+}
+
+.correction-box {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+  background: #fff;
+}
+
+.correction-box h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.correction-box .purchase-table {
+  margin-bottom: 0.5rem;
+}
+
+.correction-box .purchase-table table td .unit {
   color: var(--muted);
   font-size: 0.8rem;
 }

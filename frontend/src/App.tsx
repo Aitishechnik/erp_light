@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react'
-import { logout as apiLogout, fetchMe, type Role, SALES_PLAN_ROLES, type SessionUser } from './api'
+import { AnnualSalesPlanPage } from './AnnualSalesPlanPage'
+import {
+  ANNUAL_SALES_PLAN_ROLES,
+  logout as apiLogout,
+  fetchMe,
+  type Role,
+  SALES_PLAN_ROLES,
+  type SessionUser,
+} from './api'
 import { CounterpartiesPage } from './CounterpartiesPage'
 import { ImportsPage } from './ImportsPage'
 import { LoginPage } from './LoginPage'
@@ -11,6 +19,7 @@ import { StockPage } from './StockPage'
 
 type SectionId =
   | 'sales'
+  | 'annual'
   | 'purchase'
   | 'pricing'
   | 'receipts'
@@ -48,6 +57,7 @@ const GROUPS: Group[] = [
     title: 'Планирование',
     sections: [
       { id: 'sales', title: 'Планирование продаж', ready: true, roles: SALES_PLAN_ROLES },
+      { id: 'annual', title: 'Годовой план отдела', ready: true, roles: ANNUAL_SALES_PLAN_ROLES },
       { id: 'purchase', title: 'План закупок сырья', ready: true, roles: PURCHASE_ROLES },
       { id: 'pricing', title: 'Матрица цен', ready: false },
     ],
@@ -195,6 +205,7 @@ export function App() {
       <main className={current.id === 'receipts' ? 'content content-receipts' : 'content'}>
         {current.id === 'stock' && current.ready ? <StockPage /> : null}
         {current.id === 'sales' && current.ready ? <SalesPlansPage user={user} /> : null}
+        {current.id === 'annual' && current.ready ? <AnnualSalesPlanPage user={user} /> : null}
         {current.id === 'purchase' && current.ready ? <PurchasePlanPage user={user} /> : null}
         {current.id === 'nomenclature' && current.ready ? <NomenclaturePage /> : null}
         {current.id === 'counterparties' && current.ready ? <CounterpartiesPage /> : null}

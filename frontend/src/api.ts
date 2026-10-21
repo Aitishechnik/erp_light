@@ -77,6 +77,87 @@ export type SalesPlanItemIn = {
   quantity: string
 }
 
+export type AnnualSalesPlanStatus = 'draft' | 'on_review' | 'approved' | 'revision'
+
+export type AnnualSalesPlanManager = {
+  manager_id: string
+  manager_name: string
+  plan_id: string | null
+  plan_status: string | null
+  plan_status_title: string | null
+  approved: boolean
+  positions: number
+  clients: number
+}
+
+export type AnnualSalesPlanItem = {
+  manager_id: string
+  manager_name: string
+  client_id: string
+  client_name: string
+  product_id: string
+  product_code: string
+  product_name: string
+  unit: string
+  month: number
+  quantity: string
+}
+
+export type AnnualSalesPlan = {
+  year: number
+  status: AnnualSalesPlanStatus
+  status_title: string
+  submitted_by_name: string | null
+  submitted_at: string | null
+  approved_by_name: string | null
+  approved_at: string | null
+  notes: string | null
+  is_stale: boolean
+  all_approved: boolean
+  missing_managers: string[]
+  managers: AnnualSalesPlanManager[]
+  items: AnnualSalesPlanItem[]
+}
+
+export type SalesPlanCorrectionStatus = 'draft' | 'on_review' | 'approved' | 'rejected'
+
+export type SalesPlanCorrectionItem = {
+  id: string
+  client_id: string
+  client_name: string
+  product_id: string
+  product_code: string
+  product_name: string
+  unit: string
+  month: number
+  quantity: string
+  current_quantity: string
+  notes: string | null
+}
+
+export type SalesPlanCorrection = {
+  id: string
+  plan_id: string
+  status: SalesPlanCorrectionStatus
+  status_title: string
+  created_by_name: string
+  reviewed_by_name: string | null
+  reviewed_at: string | null
+  reason: string | null
+  review_reason: string | null
+  created_at: string
+  updated_at: string
+  items: SalesPlanCorrectionItem[]
+}
+
+export type SalesPlanCorrectionItemIn = {
+  client_id: string
+  product_id: string
+  month: number
+  quantity: string
+  notes?: string | null
+}
+
 export type PurchasePlanStatus = 'draft' | 'on_review' | 'approved'
 
 export type PurchasePlanItem = {
@@ -627,6 +708,88 @@ export function rejectSalesPlan(planId: string, reason: string): Promise<SalesPl
 
 export function deleteSalesPlan(planId: string): Promise<void> {
   return request<void>(`/api/v1/sales-plans/${planId}`, { method: 'DELETE' })
+}
+
+/** Роли, которым виден годовой план отдела продаж. */
+export const ANNUAL_SALES_PLAN_ROLES: Role[] = [
+  'sales_manager',
+  'commercial_director',
+  'executive_director',
+  'purchase_director',
+]
+
+export function fetchAnnualSalesPlan(year: number): Promise<AnnualSalesPlan> {
+  return request<AnnualSalesPlan>(`/api/v1/annual-sales-plans?year=${year}`)
+}
+
+export function annualSalesPlanAction(
+  year: number,
+  action: 'submit' | 'approve',
+): Promise<AnnualSalesPlan> {
+  return request<AnnualSalesPlan>(`/api/v1/annual-sales-plans/${year}/${action}`, {
+    method: 'POST',
+  })
+}
+
+export function rejectAnnualSalesPlan(year: number, reason: string): Promise<AnnualSalesPlan> {
+  return request<AnnualSalesPlan>(`/api/v1/annual-sales-plans/${year}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  })
+}
+
+export function reopenAnnualSalesPlan(year: number, reason: string): Promise<AnnualSalesPlan> {
+  return request<AnnualSalesPlan>(`/api/v1/annual-sales-plans/${year}/reopen`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  })
+}
+
+export function fetchSalesPlanCorrections(planId: string): Promise<SalesPlanCorrection[]> {
+  return request<SalesPlanCorrection[]>(`/api/v1/sales-plan-corrections?plan_id=${planId}`)
+}
+
+export function createSalesPlanCorrection(planId: string): Promise<SalesPlanCorrection> {
+  return request<SalesPlanCorrection>('/api/v1/sales-plan-corrections', {
+    method: 'POST',
+    body: JSON.stringify({ plan_id: planId }),
+  })
+}
+
+export function saveSalesPlanCorrectionItems(
+  correctionId: string,
+  items: SalesPlanCorrectionItemIn[],
+): Promise<SalesPlanCorrection> {
+  return request<SalesPlanCorrection>(`/api/v1/sales-plan-corrections/${correctionId}/items`, {
+    method: 'PUT',
+    body: JSON.stringify({ items }),
+  })
+}
+
+export function submitSalesPlanCorrection(correctionId: string): Promise<SalesPlanCorrection> {
+  return request<SalesPlanCorrection>(`/api/v1/sales-plan-corrections/${correctionId}/submit`, {
+    method: 'POST',
+  })
+}
+
+export function approveSalesPlanCorrection(correctionId: string): Promise<SalesPlanCorrection> {
+  return request<SalesPlanCorrection>(`/api/v1/sales-plan-corrections/${correctionId}/approve`, {
+    method: 'POST',
+  })
+}
+
+export function rejectSalesPlanCorrection(
+  correctionId: string,
+  reason: string,
+): Promise<SalesPlanCorrection> {
+  return request<SalesPlanCorrection>(`/api/v1/sales-plan-corrections/${correctionId}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  })
+}
+
+export function deleteSalesPlanCorrection(correctionId: string): Promise<void> {
+  return request<void>(`/api/v1/sales-plan-corrections/${correctionId}`, { method: 'DELETE' })
 }
 
 /** План закупок сырья: один ручной план на год, утверждает исполнительный директор. */

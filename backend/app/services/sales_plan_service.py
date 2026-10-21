@@ -30,6 +30,7 @@ from app.models.planning import (
 )
 from app.schemas.planning import SalesPlanCreate, SalesPlanItemIn, SalesPlanItemOut, SalesPlanOut
 from app.services.plan_freeze import check_months_editable, editable_months
+from app.services.sales_plan_approval_service import invalidate as invalidate_annual
 
 EDITABLE_BY_OWNER = ("draft", "filling")
 
@@ -242,9 +243,12 @@ def update_items(
             )
         )
 
-    if plan.status == "approved":
+    was_approved = plan.status == "approved"
+    if was_approved:
         plan.status = "on_review"
     db.commit()
+    if was_approved:
+        invalidate_annual(db, plan.year, f"изменён план менеджера {plan.manager.full_name}")
     return _serialize(_require(db, plan_id))
 
 
@@ -281,6 +285,7 @@ def approve(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
         raise PlanError("Утвердить можно только план на проверке", status_code=409)
     plan.status = "approved"
     db.commit()
+    invalidate_annual(db, plan.year, f"утверждён план менеджера {plan.manager.full_name}")
     return _serialize(_require(db, plan_id))
 
 
