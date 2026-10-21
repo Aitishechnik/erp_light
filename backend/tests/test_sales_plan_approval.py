@@ -160,7 +160,7 @@ def test_change_invalidates_gd_approval(
     assert annual.status_code == 200, annual.text
     assert annual.json()["status"] == "revision"
     assert annual.json()["is_stale"] is True
-    assert annual.json()["status_title"] == "Требует повторного утверждения"
+    assert annual.json()["status_title"] == "Требует повторного согласования"
 
     login("executive")
     assert client.post(f"/api/v1/annual-sales-plans/{YEAR}/approve").status_code == 409

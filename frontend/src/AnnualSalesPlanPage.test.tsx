@@ -84,7 +84,7 @@ function calls(): string[] {
 }
 
 describe('AnnualSalesPlanPage', () => {
-  it('коммерческий директор отправляет годовой план на утверждение ГД', async () => {
+  it('коммерческий директор отправляет годовой план на финальное согласование', async () => {
     const user = userEvent.setup()
     mockApi({
       'POST **/annual-sales-plans': { body: annual({ status: 'on_review' }) },
@@ -95,23 +95,25 @@ describe('AnnualSalesPlanPage', () => {
     expect(await screen.findByTestId('annual-status')).toHaveTextContent('Не отправлен')
     expect(screen.getByTestId('annual-managers')).toHaveTextContent('Иван Петров')
     expect(screen.getByTestId('annual-items')).toHaveTextContent('SKU-1')
-    await user.click(screen.getByRole('button', { name: 'Отправить на утверждение ГД' }))
+    await user.click(screen.getByRole('button', { name: 'Отправить на финальное согласование' }))
     await waitFor(() => {
       expect(calls().some((url) => url.includes('/annual-sales-plans/'))).toBe(true)
     })
   })
 
-  it('генеральный директор утверждает план на утверждении', async () => {
+  it('генеральный директор финально согласует план', async () => {
     const user = userEvent.setup()
     mockApi({
       'POST **/annual-sales-plans': { body: annual({ status: 'approved' }) },
       '/annual-sales-plans': {
-        body: annual({ status: 'on_review', status_title: 'На утверждении ГД' }),
+        body: annual({ status: 'on_review', status_title: 'На финальном согласовании' }),
       },
     })
     render(<AnnualSalesPlanPage user={EXECUTIVE} />)
 
-    expect(await screen.findByTestId('annual-status')).toHaveTextContent('На утверждении ГД')
+    expect(await screen.findByTestId('annual-status')).toHaveTextContent(
+      'На финальном согласовании',
+    )
     await user.click(screen.getByRole('button', { name: 'Утвердить' }))
     await waitFor(() => {
       expect(calls().some((url) => url.includes('/annual-sales-plans/'))).toBe(true)
@@ -130,20 +132,20 @@ describe('AnnualSalesPlanPage', () => {
     render(<AnnualSalesPlanPage user={COMMERCIAL} />)
 
     expect(await screen.findByTestId('annual-missing')).toHaveTextContent('Менеджер по продажам 3')
-    expect(screen.queryByRole('button', { name: 'Отправить на утверждение ГД' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Отправить на финальное согласование' })).toBeNull()
   })
 
   it('менеджер и закупки видят план только на чтение', async () => {
     mockApi({
       '/annual-sales-plans': {
-        body: annual({ status: 'approved', status_title: 'Утверждён ГД' }),
+        body: annual({ status: 'approved', status_title: 'Финально согласован' }),
       },
     })
     render(<AnnualSalesPlanPage user={SALES} />)
 
-    expect(await screen.findByTestId('annual-status')).toHaveTextContent('Утверждён ГД')
+    expect(await screen.findByTestId('annual-status')).toHaveTextContent('Финально согласован')
     expect(screen.queryByRole('button', { name: 'Утвердить' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Отправить на утверждение ГД' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Отправить на финальное согласование' })).toBeNull()
     expect(screen.getByTestId('annual-items')).toBeInTheDocument()
   })
 
@@ -152,16 +154,14 @@ describe('AnnualSalesPlanPage', () => {
       '/annual-sales-plans': {
         body: annual({
           status: 'approved',
-          status_title: 'Утверждён ГД',
+          status_title: 'Финально согласован',
           is_stale: true,
         }),
       },
     })
     render(<AnnualSalesPlanPage user={EXECUTIVE} />)
 
-    expect(await screen.findByTestId('annual-stale')).toHaveTextContent(
-      'нужно повторное утверждение',
-    )
+    expect(await screen.findByTestId('annual-stale')).toHaveTextContent('нужно повторное финальное')
     expect(screen.getByRole('button', { name: 'Вернуть в работу' })).toBeInTheDocument()
   })
 })

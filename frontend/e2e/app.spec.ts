@@ -623,20 +623,22 @@ test('закупщик ведёт план закупок сырья и отпр
   await expect(page.getByTestId('purchase-status')).toHaveText('На проверке')
 })
 
-test('коммерческий директор отправляет годовой план отдела на утверждение ГД', async ({ page }) => {
+test('коммерческий директор отправляет годовой план отдела на финальное согласование', async ({
+  page,
+}) => {
   let submitted = false
   await mockSession(page, COMMERCIAL)
   await page.route('**/api/v1/annual-sales-plans**', (route) => {
     if (route.request().method() === 'POST') {
       submitted = true
       return route.fulfill({
-        json: annual({ status: 'on_review', status_title: 'На утверждении ГД' }),
+        json: annual({ status: 'on_review', status_title: 'На финальном согласовании' }),
       })
     }
     return route.fulfill({
       json: annual({
         status: submitted ? 'on_review' : 'draft',
-        status_title: submitted ? 'На утверждении ГД' : 'Не отправлен',
+        status_title: submitted ? 'На финальном согласовании' : 'Не отправлен',
       }),
     })
   })
@@ -646,8 +648,8 @@ test('коммерческий директор отправляет годов�
   await expect(page.getByTestId('annual-status')).toContainText('Не отправлен')
   await expect(page.getByTestId('annual-managers')).toContainText('Иван Петров')
 
-  await page.getByRole('button', { name: 'Отправить на утверждение ГД' }).click()
-  await expect(page.getByTestId('annual-status')).toContainText('На утверждении ГД')
+  await page.getByRole('button', { name: 'Отправить на финальное согласование' }).click()
+  await expect(page.getByTestId('annual-status')).toContainText('На финальном согласовании')
 })
 
 test('менеджер предлагает корректировку утверждённого плана', async ({ page }) => {

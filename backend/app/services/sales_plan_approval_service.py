@@ -251,7 +251,7 @@ def submit(db: Session, user: User, year: int) -> AnnualSalesPlanOut:
         .one_or_none()
     )
     if approval is not None and approval.status in ("on_review", "approved"):
-        raise AnnualPlanError("Годовой план уже отправлен или утверждён", status_code=409)
+        raise AnnualPlanError("Годовой план уже отправлен или согласован", status_code=409)
 
     source_hash = current_hash(db, year)
     if approval is None:
@@ -272,11 +272,13 @@ def submit(db: Session, user: User, year: int) -> AnnualSalesPlanOut:
 def approve(db: Session, user: User, year: int) -> AnnualSalesPlanOut:
     if user.role != ROLE_EXECUTIVE_DIRECTOR:
         raise AnnualPlanError(
-            "Утверждает годовой план только генеральный директор", status_code=403
+            "Финально согласует годовой план только генеральный директор", status_code=403
         )
     approval = _require(db, year)
     if approval.status != "on_review":
-        raise AnnualPlanError("Утвердить можно только план на утверждении", status_code=409)
+        raise AnnualPlanError(
+            "Согласовать можно только план на финальном согласовании", status_code=409
+        )
     managers = _active_managers(db)
     plans = _plans(db, year)
     summaries = _manager_rows(managers, plans)
@@ -308,7 +310,9 @@ def reject(db: Session, user: User, year: int, reason: str) -> AnnualSalesPlanOu
         )
     approval = _require(db, year)
     if approval.status != "on_review":
-        raise AnnualPlanError("Вернуть можно только план на утверждении", status_code=409)
+        raise AnnualPlanError(
+            "Вернуть можно только план на финальном согласовании", status_code=409
+        )
     approval.status = "revision"
     approval.approved_by_id = None
     approval.approved_by = None
@@ -327,7 +331,9 @@ def reopen(db: Session, user: User, year: int, reason: str) -> AnnualSalesPlanOu
         )
     approval = _require(db, year)
     if approval.status != "approved":
-        raise AnnualPlanError("Вернуть в работу можно только утверждённый план", status_code=409)
+        raise AnnualPlanError(
+            "Вернуть в работу можно только финально согласованный план", status_code=409
+        )
     approval.status = "revision"
     approval.approved_by_id = None
     approval.approved_by = None
@@ -357,6 +363,6 @@ def invalidate(db: Session, year: int, reason: str) -> None:
     approval.approved_at = None
     approval.notes = _append_note(
         approval.notes,
-        f"Состав планов изменился: {reason}. Требуется повторное утверждение.",
+        f"Состав планов изменился: {reason}. Требуется повторное согласование.",
     )
     db.commit()

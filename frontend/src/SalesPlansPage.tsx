@@ -388,7 +388,7 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
     if (!correction) return
     void run(
       () => approveSalesPlanCorrection(correction.id),
-      'Корректировка утверждена — годовой план отдела требует повторного утверждения ГД',
+      'Корректировка утверждена — годовой план отдела требует повторного согласования',
     )
   }
 
@@ -805,7 +805,8 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
 
                   {correction.status === 'approved' ? (
                     <p className="hint saved">
-                      Изменения применены к плану. Годовой план отдела нужно утвердить заново у ГД.
+                      Изменения применены к плану. Годовой план отдела нужно отправить на финальное
+                      согласование заново.
                     </p>
                   ) : null}
                 </>

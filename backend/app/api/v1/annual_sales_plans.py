@@ -1,4 +1,4 @@
-"""API годового плана отдела продаж (финальное утверждение ГД)."""
+"""API годового плана отдела продаж (финальное согласование ГД)."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def get_annual(
 
 @router.post("/annual-sales-plans/{year}/submit", response_model=AnnualSalesPlanOut)
 def submit(year: int, user: CurrentUser, db: DbSession) -> AnnualSalesPlanOut:
-    """Коммерческий директор отправляет годовой план на утверждение ГД."""
+    """Коммерческий директор отправляет годовой план на финальное согласование."""
     try:
         return service.submit(db, user, year)
     except AnnualPlanError as exc:
@@ -40,7 +40,7 @@ def submit(year: int, user: CurrentUser, db: DbSession) -> AnnualSalesPlanOut:
 
 @router.post("/annual-sales-plans/{year}/approve", response_model=AnnualSalesPlanOut)
 def approve(year: int, user: CurrentUser, db: DbSession) -> AnnualSalesPlanOut:
-    """Генеральный директор утверждает финальную версию плана отдела."""
+    """Генеральный директор финально согласует план отдела."""
     try:
         return service.approve(db, user, year)
     except AnnualPlanError as exc:

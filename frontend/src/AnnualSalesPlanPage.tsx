@@ -81,8 +81,8 @@ export function AnnualSalesPlanPage({ user }: { user: SessionUser }) {
       <header className="page-head">
         <h1>Годовой план отдела продаж</h1>
         <p className="hint">
-          Собирается из утверждённых планов всех менеджеров. Финально утверждает генеральный
-          директор; любое изменение плана менеджера требует повторного утверждения.
+          Собирается из утверждённых планов всех менеджеров. Финально согласует генеральный
+          директор; любое изменение плана менеджера требует повторного согласования.
         </p>
         <div className="toolbar">
           <button
@@ -145,7 +145,7 @@ export function AnnualSalesPlanPage({ user }: { user: SessionUser }) {
 
       {annual.is_stale ? (
         <p className="hint warn" data-testid="annual-stale">
-          Состав или данные утверждённых планов изменились — нужно повторное утверждение ГД.
+          Состав или данные утверждённых планов изменились — нужно повторное финальное согласование.
         </p>
       ) : null}
       {annual.missing_managers.length > 0 ? (
@@ -165,11 +165,11 @@ export function AnnualSalesPlanPage({ user }: { user: SessionUser }) {
             onClick={() =>
               run(
                 () => annualSalesPlanAction(year, 'submit'),
-                'Годовой план отправлен на утверждение ГД',
+                'План отправлен на финальное согласование',
               )
             }
           >
-            Отправить на утверждение ГД
+            Отправить на финальное согласование
           </button>
         ) : null}
         {canApprove ? (
@@ -178,7 +178,7 @@ export function AnnualSalesPlanPage({ user }: { user: SessionUser }) {
             className="primary"
             disabled={busy || annual.is_stale}
             onClick={() =>
-              run(() => annualSalesPlanAction(year, 'approve'), 'Годовой план утверждён ГД')
+              run(() => annualSalesPlanAction(year, 'approve'), 'Годовой план финально согласован')
             }
           >
             Утвердить
@@ -221,7 +221,7 @@ export function AnnualSalesPlanPage({ user }: { user: SessionUser }) {
           </button>
         ) : null}
         {!isCommercial && !isExecutive ? (
-          <span className="hint">Просмотр: утверждает коммерческий директор и ГД</span>
+          <span className="hint">Просмотр: финально согласует генеральный директор</span>
         ) : null}
       </div>
 
