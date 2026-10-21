@@ -57,6 +57,53 @@ const PRODUCTS = [
   { id: 'p-1', code: 'SKU-1', name: 'Товар 1', kind: 'goods', unit: 'шт', is_active: true },
 ]
 
+const PURCHASE_DIRECTOR = {
+  id: 'pd-1',
+  login: 'purchase',
+  full_name: 'Пётр Закупщиков',
+  role: 'purchase_director',
+  role_title: 'Директор по закупкам',
+}
+
+const RAW_PRODUCTS = [
+  {
+    id: 'raw-1',
+    code: 'RAW-1',
+    name: 'Орех грецкий, вес',
+    kind: 'raw',
+    unit: 'кг',
+    is_active: true,
+  },
+]
+
+const RAW_SUPPLIER = {
+  id: 'sup-1',
+  name: 'ООО Импорт',
+  inn: null,
+  note: null,
+  is_customer: false,
+  is_local_supplier: false,
+  is_import_supplier: true,
+  source: '1c',
+  is_active: true,
+}
+
+const RAW_STOCK = [
+  {
+    batch_item_id: 'raw-item-1',
+    batch_number: 'ИТ-0000001',
+    batch_date: '2026-10-10',
+    product_code: 'RAW-1',
+    product_name: 'Орех грецкий, вес',
+    product_kind: 'raw',
+    unit: 'кг',
+    quantity_on_hand: '50.000',
+    unit_cost: '100.00',
+    value_rub: '5000.00',
+    snapshot_date: null,
+  },
+]
+
 const RECEIPT = {
   id: 'b1',
   batch_number: 'P-500',
@@ -401,6 +448,99 @@ test('менеджер заполняет план продаж по клиен�
 
   await page.getByRole('button', { name: 'Отправить на проверку' }).click()
   await expect(page.getByText('На проверке')).toBeVisible()
+})
+
+test('закупщик ведёт план закупок сырья и отправляет его на утверждение', async ({ page }) => {
+  const year = new Date().getFullYear()
+  const month = new Date().getMonth() + 1
+  let plans: Record<string, unknown>[] = []
+
+  function purchasePlan(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      id: 'pp-1',
+      year,
+      status: 'draft',
+      status_title: 'Черновик',
+      created_by_name: 'Директор по закупкам',
+      approved_by_name: null,
+      approved_at: null,
+      notes: null,
+      created_at: '2026-10-21T10:00:00Z',
+      updated_at: '2026-10-21T10:00:00Z',
+      editable_months: [month],
+      items: [],
+      ...overrides,
+    }
+  }
+
+  await mockSession(page, PURCHASE_DIRECTOR)
+  await page.route('**/api/v1/stock', (route) => route.fulfill({ json: RAW_STOCK }))
+  await page.route('**/api/v1/products', (route) => route.fulfill({ json: RAW_PRODUCTS }))
+  await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [RAW_SUPPLIER] }))
+  await page.route('**/api/v1/purchase-plans**', (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    if (path.endsWith('/items')) {
+      const body = request.postDataJSON() as {
+        items: {
+          product_id: string
+          month: number
+          quantity: string
+          price_rub: string | null
+          supplier_id: string | null
+          delivery_days: number
+        }[]
+      }
+      const items = body.items.map((item, index) => ({
+        id: `pi-${index}`,
+        product_id: item.product_id,
+        product_code: 'RAW-1',
+        product_name: 'Орех грецкий, вес',
+        product_kind: 'raw',
+        unit: 'кг',
+        month: item.month,
+        quantity: Number(item.quantity).toFixed(3),
+        price_rub: item.price_rub === null ? null : Number(item.price_rub).toFixed(2),
+        supplier_id: item.supplier_id,
+        supplier_name: 'ООО Импорт',
+        delivery_days: item.delivery_days,
+        order_month: Math.max(1, item.month - Math.ceil(item.delivery_days / 30)),
+        notes: null,
+      }))
+      plans = [purchasePlan({ items })]
+      return route.fulfill({ json: plans[0] })
+    }
+    if (path.endsWith('/submit')) {
+      plans = [purchasePlan({ status: 'on_review', status_title: 'На проверке' })]
+      return route.fulfill({ json: plans[0] })
+    }
+    if (request.method() === 'POST') {
+      plans = [purchasePlan()]
+      return route.fulfill({ status: 201, json: plans[0] })
+    }
+    return route.fulfill({ json: plans })
+  })
+
+  await page.goto('/')
+  await openSection(page, 'Планирование', 'План закупок сырья')
+  await expect(page.getByTestId('purchase-no-plan')).toContainText('плана закупок сырья нет')
+
+  await page.getByRole('button', { name: `Создать план на ${year}` }).click()
+  await expect(page.getByTestId('purchase-status')).toHaveText('Черновик')
+
+  await page.getByLabel('Товар новой строки').selectOption('raw-1')
+  await page.getByLabel('Количество новой строки').fill('12,5')
+  await page.getByLabel('Цена новой строки').fill('300.25')
+  await page.getByLabel('Поставщик новой строки').selectOption('sup-1')
+  await page.getByRole('button', { name: 'Добавить строку' }).click()
+
+  await expect(page.getByTestId('purchase-table')).toContainText('RAW-1')
+  await expect(page.getByTestId('purchase-table')).toContainText('50 кг')
+  await page.getByRole('button', { name: 'Сохранить' }).click()
+  await expect(page.getByTestId('purchase-saved')).toContainText('План сохранён')
+
+  await page.getByRole('button', { name: 'Отправить на утверждение' }).click()
+  await expect(page.getByTestId('purchase-status')).toHaveText('На проверке')
 })
 
 test('поступление заводится в календаре, себестоимость считается сразу', async ({ page }) => {

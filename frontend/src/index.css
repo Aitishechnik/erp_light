@@ -1782,3 +1782,46 @@ button.primary:disabled,
   gap: 10px;
   min-width: 0;
 }
+
+/* ── План закупок сырья ─────────────────────────────────────────────────── */
+
+.purchase-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.65rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: #fff;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.purchase-summary .total {
+  margin-left: auto;
+  font-weight: 600;
+}
+
+.purchase-table {
+  overflow-x: auto;
+}
+
+.purchase-table table {
+  width: 100%;
+}
+
+.purchase-table td,
+.purchase-table th {
+  padding: 0.35rem 0.45rem;
+  font-size: 0.85rem;
+}
+
+.purchase-table input.cell {
+  width: 4.6rem;
+}
+
+.purchase-table td:first-child .unit {
+  color: var(--muted);
+  font-size: 0.8rem;
+}

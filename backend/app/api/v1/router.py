@@ -9,6 +9,7 @@ from app.api.v1 import (
     health,
     imports,
     products,
+    purchase_plans,
     rates,
     sales_plans,
     stock,
@@ -26,3 +27,4 @@ api_router.include_router(rates.router)
 api_router.include_router(batches.router)
 api_router.include_router(stock.router)
 api_router.include_router(sales_plans.router)
+api_router.include_router(purchase_plans.router)

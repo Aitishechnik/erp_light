@@ -109,3 +109,82 @@ class SalesPlanItem(Base):
     plan: Mapped[SalesPlan] = relationship(back_populates="items")
     product: Mapped[Product] = relationship(lazy="joined")
     client: Mapped[Counterparty] = relationship(lazy="joined")
+
+
+# Статусы плана закупок сырья: черновик → на проверке → утверждён.
+PURCHASE_PLAN_STATUSES = ("draft", "on_review", "approved")
+
+PURCHASE_PLAN_STATUS_TITLES = {
+    "draft": "Черновик",
+    "on_review": "На проверке",
+    "approved": "Утверждён",
+}
+
+
+class PurchasePlan(Base):
+    """Годовой план закупок сырья.
+
+    Один план на год, ведётся вручную: строки не связаны со строками плана продаж.
+    Утверждённый план продаж остаётся бизнес-контекстом, а не источником расчёта.
+    """
+
+    __tablename__ = "purchase_plans"
+    __table_args__ = (UniqueConstraint("year", name="purchase_plan_year"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    year: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft", index=True)
+    created_by_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    approved_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    created_by: Mapped[User] = relationship(foreign_keys=[created_by_id], lazy="joined")
+    approved_by: Mapped[User | None] = relationship(foreign_keys=[approved_by_id], lazy="joined")
+    items: Mapped[list[PurchasePlanItem]] = relationship(
+        back_populates="plan", cascade="all, delete-orphan"
+    )
+
+
+class PurchasePlanItem(Base):
+    """Строка плана закупок сырья: сырьё × месяц, цена в рублях.
+
+    Один товар и месяц могут встречаться несколько раз — например, два поставщика
+    с разными ценами и сроками. Месяц заказа считается от срока логистики.
+    """
+
+    __tablename__ = "purchase_plan_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    plan_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("purchase_plans.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("products.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    month: Mapped[int] = mapped_column(Integer, nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(15, 3), nullable=False, default=Decimal("0"))
+    price_rub: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
+    supplier_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    delivery_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    order_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    plan: Mapped[PurchasePlan] = relationship(back_populates="items")
+    product: Mapped[Product] = relationship(lazy="joined")
+    supplier: Mapped[Counterparty | None] = relationship(lazy="joined")

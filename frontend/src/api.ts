@@ -77,6 +77,49 @@ export type SalesPlanItemIn = {
   quantity: string
 }
 
+export type PurchasePlanStatus = 'draft' | 'on_review' | 'approved'
+
+export type PurchasePlanItem = {
+  id: string
+  product_id: string
+  product_code: string
+  product_name: string
+  product_kind: string
+  unit: string
+  month: number
+  quantity: string
+  price_rub: string | null
+  supplier_id: string | null
+  supplier_name: string | null
+  delivery_days: number
+  order_month: number | null
+  notes: string | null
+}
+
+export type PurchasePlan = {
+  id: string
+  year: number
+  status: PurchasePlanStatus
+  status_title: string
+  created_by_name: string
+  approved_by_name: string | null
+  approved_at: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+  editable_months: number[]
+  items: PurchasePlanItem[]
+}
+
+export type PurchasePlanItemIn = {
+  product_id: string
+  month: number
+  quantity: string
+  price_rub: string | null
+  supplier_id: string | null
+  delivery_days: number
+}
+
 export type CounterpartyRole = 'customer' | 'local_supplier' | 'import_supplier'
 
 export type Counterparty = {
@@ -584,6 +627,55 @@ export function rejectSalesPlan(planId: string, reason: string): Promise<SalesPl
 
 export function deleteSalesPlan(planId: string): Promise<void> {
   return request<void>(`/api/v1/sales-plans/${planId}`, { method: 'DELETE' })
+}
+
+/** План закупок сырья: один ручной план на год, утверждает исполнительный директор. */
+export function fetchPurchasePlans(year?: number): Promise<PurchasePlan[]> {
+  const query = year ? `?year=${year}` : ''
+  return request<PurchasePlan[]>(`/api/v1/purchase-plans${query}`)
+}
+
+export function createPurchasePlan(year: number): Promise<PurchasePlan> {
+  return request<PurchasePlan>('/api/v1/purchase-plans', {
+    method: 'POST',
+    body: JSON.stringify({ year }),
+  })
+}
+
+export function savePurchasePlanItems(
+  planId: string,
+  items: PurchasePlanItemIn[],
+): Promise<PurchasePlan> {
+  return request<PurchasePlan>(`/api/v1/purchase-plans/${planId}/items`, {
+    method: 'PUT',
+    body: JSON.stringify({ items }),
+  })
+}
+
+export function submitPurchasePlan(planId: string): Promise<PurchasePlan> {
+  return request<PurchasePlan>(`/api/v1/purchase-plans/${planId}/submit`, { method: 'POST' })
+}
+
+export function approvePurchasePlan(planId: string): Promise<PurchasePlan> {
+  return request<PurchasePlan>(`/api/v1/purchase-plans/${planId}/approve`, { method: 'POST' })
+}
+
+export function rejectPurchasePlan(planId: string, reason: string): Promise<PurchasePlan> {
+  return request<PurchasePlan>(`/api/v1/purchase-plans/${planId}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  })
+}
+
+export function reopenPurchasePlan(planId: string, reason: string): Promise<PurchasePlan> {
+  return request<PurchasePlan>(`/api/v1/purchase-plans/${planId}/reopen`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  })
+}
+
+export function deletePurchasePlan(planId: string): Promise<void> {
+  return request<void>(`/api/v1/purchase-plans/${planId}`, { method: 'DELETE' })
 }
 
 /** Текст ошибки для показа пользователю. */

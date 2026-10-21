@@ -97,12 +97,12 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Планирование продаж' })).toBeInTheDocument()
 
     // Планирование закупок живёт в «Планировании», но менеджеру продаж недоступно.
-    expect(screen.queryByRole('button', { name: 'Планирование закупок' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'План закупок сырья' })).not.toBeInTheDocument()
 
     // Закупочные разделы менеджеру продаж недоступны.
     await user.click(screen.getByRole('button', { name: 'Закупки' }))
     expect(screen.getByRole('button', { name: 'Поступления' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Планирование закупок' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'План закупок сырья' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Поступления' }))
     expect(
@@ -110,7 +110,7 @@ describe('App', () => {
     ).toBeInTheDocument()
   })
 
-  it('планирование закупок живёт в категории «Планирование»', async () => {
+  it('план закупок сырья живёт в категории «Планирование»', async () => {
     const user = userEvent.setup()
     mockApi({ '/api/v1/auth/me': { body: PURCHASE_DIRECTOR }, '/api/v1/stock': { body: [] } })
     render(<App />)
@@ -124,9 +124,7 @@ describe('App', () => {
     expect(
       within(planning).getByRole('button', { name: 'Планирование продаж' }),
     ).toBeInTheDocument()
-    expect(
-      within(planning).getByRole('button', { name: 'Планирование закупок' }),
-    ).toBeInTheDocument()
+    expect(within(planning).getByRole('button', { name: 'План закупок сырья' })).toBeInTheDocument()
     expect(within(planning).queryByRole('button', { name: 'Поступления' })).toBeNull()
 
     // В категории «Закупки» планирования закупок больше нет.
@@ -135,7 +133,7 @@ describe('App', () => {
       .closest('.nav-group') as HTMLElement
     await user.click(within(purchases).getByRole('button', { name: 'Закупки' }))
     expect(within(purchases).getByRole('button', { name: 'Поступления' })).toBeInTheDocument()
-    expect(within(purchases).queryByRole('button', { name: 'Планирование закупок' })).toBeNull()
+    expect(within(purchases).queryByRole('button', { name: 'План закупок сырья' })).toBeNull()
   })
 
   it('категория меню раскрывается и сворачивается по стрелке', async () => {
