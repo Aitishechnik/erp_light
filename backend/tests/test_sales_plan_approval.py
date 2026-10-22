@@ -1,5 +1,6 @@
 """Годовой план отдела продаж и корректировки утверждённых планов."""
 
+import uuid
 from datetime import date
 from typing import Any
 
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models.counterparties import Counterparty
 from app.models.domain import Product
+from app.models.planning import SalesPlanItem
 
 TODAY = date.today()
 YEAR = TODAY.year
@@ -314,3 +316,238 @@ def test_correction_rejects_stale_base(
     stale = client.post(f"/api/v1/sales-plan-corrections/{correction_id}/submit")
     assert stale.status_code == 409, stale.text
     assert "План изменился" in stale.json()["detail"]
+
+
+def test_full_copy_correction_adds_and_removes_positions(
+    client: TestClient,
+    login,
+    db_session: Session,
+) -> None:
+    products = [
+        Product(code="SKU-A", name="Товар A", kind="finished", unit="шт"),
+        Product(code="SKU-B", name="Товар B", kind="finished", unit="шт"),
+        Product(code="SKU-C", name="Товар C", kind="finished", unit="шт"),
+    ]
+    client_a = Counterparty(name="ООО Ромашка", name_key="ооо ромашка", is_customer=True)
+    client_b = Counterparty(name="ООО Вектор", name_key="ооо вектор", is_customer=True)
+    db_session.add_all([*products, client_a, client_b])
+    db_session.commit()
+
+    plan_ids = _make_all_plans(client, login, products, client_a)
+    _approve_annual(client, login)
+    plan_id = plan_ids["sales"]
+
+    login("sales2")
+    forbidden = client.post("/api/v1/sales-plan-corrections", json={"plan_id": plan_id})
+    assert forbidden.status_code == 403, forbidden.text
+
+    login("sales")
+    correction = client.post("/api/v1/sales-plan-corrections", json={"plan_id": plan_id})
+    assert correction.status_code == 201, correction.text
+    correction_id = correction.json()["id"]
+    # Черновик сразу содержит полную копию строк плана.
+    assert [(row["product_id"], row["quantity"]) for row in correction.json()["items"]] == [
+        (str(products[0].id), "10.000")
+    ]
+
+    saved = client.put(
+        f"/api/v1/sales-plan-corrections/{correction_id}/items",
+        json={
+            "items": [
+                {
+                    "client_id": str(client_a.id),
+                    "product_id": str(products[0].id),
+                    "month": TODAY.month,
+                    "quantity": "25",
+                },
+                {
+                    "client_id": str(client_b.id),
+                    "product_id": str(products[1].id),
+                    "month": TODAY.month,
+                    "quantity": "7",
+                },
+            ]
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    assert client.post(f"/api/v1/sales-plan-corrections/{correction_id}/submit").status_code == 200
+    login("commercial")
+    assert client.post(f"/api/v1/sales-plan-corrections/{correction_id}/approve").status_code == 200
+
+    plan = client.get(f"/api/v1/sales-plans/{plan_id}").json()
+    quantities = {(row["client_id"], row["product_id"]): row["quantity"] for row in plan["items"]}
+    assert quantities == {
+        (str(client_a.id), str(products[0].id)): "25.000",
+        (str(client_b.id), str(products[1].id)): "7.000",
+    }
+
+    # Вторая корректировка удаляет позицию: 0 в полной копии.
+    login("sales")
+    second = client.post("/api/v1/sales-plan-corrections", json={"plan_id": plan_id})
+    second_id = second.json()["id"]
+    saved = client.put(
+        f"/api/v1/sales-plan-corrections/{second_id}/items",
+        json={
+            "items": [
+                {
+                    "client_id": str(client_a.id),
+                    "product_id": str(products[0].id),
+                    "month": TODAY.month,
+                    "quantity": "25",
+                },
+                {
+                    "client_id": str(client_b.id),
+                    "product_id": str(products[1].id),
+                    "month": TODAY.month,
+                    "quantity": "0",
+                },
+            ]
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    client.post(f"/api/v1/sales-plan-corrections/{second_id}/submit")
+    login("commercial")
+    assert client.post(f"/api/v1/sales-plan-corrections/{second_id}/approve").status_code == 200
+    plan = client.get(f"/api/v1/sales-plans/{plan_id}").json()
+    assert [(row["client_id"], row["product_id"]) for row in plan["items"]] == [
+        (str(client_a.id), str(products[0].id))
+    ]
+
+
+def test_commercial_can_create_and_apply_correction(
+    client: TestClient,
+    login,
+    db_session: Session,
+) -> None:
+    products = [
+        Product(code="SKU-A", name="Товар A", kind="finished", unit="шт"),
+        Product(code="SKU-B", name="Товар B", kind="finished", unit="шт"),
+        Product(code="SKU-C", name="Товар C", kind="finished", unit="шт"),
+    ]
+    client_row = Counterparty(name="ООО Ромашка", name_key="ооо ромашка", is_customer=True)
+    db_session.add_all([*products, client_row])
+    db_session.commit()
+    plan_id = _make_all_plans(client, login, products, client_row)["sales"]
+    _approve_annual(client, login)
+
+    login("commercial")
+    created = client.post("/api/v1/sales-plan-corrections", json={"plan_id": plan_id})
+    assert created.status_code == 201, created.text
+    correction_id = created.json()["id"]
+    saved = client.put(
+        f"/api/v1/sales-plan-corrections/{correction_id}/items",
+        json={
+            "items": [
+                {
+                    "client_id": str(client_row.id),
+                    "product_id": str(products[0].id),
+                    "month": TODAY.month,
+                    "quantity": "30",
+                }
+            ]
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    # Применить без отправки нельзя.
+    assert client.post(f"/api/v1/sales-plan-corrections/{correction_id}/approve").status_code == 409
+    assert client.post(f"/api/v1/sales-plan-corrections/{correction_id}/submit").status_code == 200
+    assert client.post(f"/api/v1/sales-plan-corrections/{correction_id}/approve").status_code == 200
+    plan = client.get(f"/api/v1/sales-plans/{plan_id}").json()
+    assert plan["items"][0]["quantity"] == "30.000"
+
+
+def test_executive_can_propose_correction_but_not_approve(
+    client: TestClient,
+    login,
+    db_session: Session,
+) -> None:
+    products = [
+        Product(code="SKU-A", name="Товар A", kind="finished", unit="шт"),
+        Product(code="SKU-B", name="Товар B", kind="finished", unit="шт"),
+        Product(code="SKU-C", name="Товар C", kind="finished", unit="шт"),
+    ]
+    client_row = Counterparty(name="ООО Ромашка", name_key="ооо ромашка", is_customer=True)
+    db_session.add_all([*products, client_row])
+    db_session.commit()
+    plan_id = _make_all_plans(client, login, products, client_row)["sales"]
+    _approve_annual(client, login)
+
+    login("executive")
+    created = client.post("/api/v1/sales-plan-corrections", json={"plan_id": plan_id})
+    assert created.status_code == 201, created.text
+    correction_id = created.json()["id"]
+    saved = client.put(
+        f"/api/v1/sales-plan-corrections/{correction_id}/items",
+        json={
+            "items": [
+                {
+                    "client_id": str(client_row.id),
+                    "product_id": str(products[0].id),
+                    "month": TODAY.month,
+                    "quantity": "40",
+                }
+            ]
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    assert client.post(f"/api/v1/sales-plan-corrections/{correction_id}/submit").status_code == 200
+    assert client.post(f"/api/v1/sales-plan-corrections/{correction_id}/approve").status_code == 403
+
+    login("commercial")
+    assert client.post(f"/api/v1/sales-plan-corrections/{correction_id}/approve").status_code == 200
+
+
+def test_correction_keeps_frozen_months_untouched(
+    client: TestClient,
+    login,
+    db_session: Session,
+) -> None:
+    products = [
+        Product(code="SKU-A", name="Товар A", kind="finished", unit="шт"),
+        Product(code="SKU-B", name="Товар B", kind="finished", unit="шт"),
+        Product(code="SKU-C", name="Товар C", kind="finished", unit="шт"),
+    ]
+    client_row = Counterparty(name="ООО Ромашка", name_key="ооо ромашка", is_customer=True)
+    db_session.add_all([*products, client_row])
+    db_session.commit()
+    plan_ids = _make_all_plans(client, login, products, client_row)
+    _approve_annual(client, login)
+
+    # Январь уже утверждённого плана (заморожен); добавляем строку напрямую,
+    # чтобы проверить, что корректировка его не копирует и не меняет.
+    db_session.add(
+        SalesPlanItem(
+            plan_id=uuid.UUID(plan_ids["sales"]),
+            client_id=client_row.id,
+            product_id=products[1].id,
+            month=1,
+            quantity="5",
+        )
+    )
+    db_session.commit()
+
+    login("sales")
+    created = client.post("/api/v1/sales-plan-corrections", json={"plan_id": plan_ids["sales"]})
+    correction_id = created.json()["id"]
+    assert all(row["month"] != 1 for row in created.json()["items"])
+    blocked = client.put(
+        f"/api/v1/sales-plan-corrections/{correction_id}/items",
+        json={
+            "items": [
+                {
+                    "client_id": str(client_row.id),
+                    "product_id": str(products[1].id),
+                    "month": 1,
+                    "quantity": "99",
+                },
+                {
+                    "client_id": str(client_row.id),
+                    "product_id": str(products[0].id),
+                    "month": TODAY.month,
+                    "quantity": "10",
+                },
+            ]
+        },
+    )
+    assert blocked.status_code == 409, blocked.text
+    assert "Замороженные месяцы" in blocked.json()["detail"]

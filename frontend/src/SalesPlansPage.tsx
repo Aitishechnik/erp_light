@@ -40,15 +40,6 @@ type DraftRow = {
 /** Черновики строк по клиентам: ключ — id клиента. */
 type Drafts = Record<string, DraftRow[]>
 
-/** Строка предложения корректировки: новое количество для клиента × товара × месяца. */
-type PatchRow = {
-  key: string
-  clientId: string
-  productId: string
-  month: number
-  quantity: string
-}
-
 const QTY_PATTERN = /^\d+(?:[.,]\d{1,3})?$/
 
 function normalize(raw: string): string {
@@ -58,16 +49,6 @@ function normalize(raw: string): string {
 /** «10.000» → «10», «15.500» → «15.5»: в поле ввода лишние нули не нужны. */
 function trimQuantity(raw: string): string {
   return raw.includes('.') ? raw.replace(/\.?0+$/, '') : raw
-}
-
-function patchRowsFromCorrection(correction: SalesPlanCorrection): PatchRow[] {
-  return correction.items.map((item) => ({
-    key: item.id,
-    clientId: item.client_id,
-    productId: item.product_id,
-    month: item.month,
-    quantity: trimQuantity(item.quantity),
-  }))
 }
 
 function draftsFromPlan(plan: SalesPlan): Drafts {
@@ -94,6 +75,122 @@ function draftsFromPlan(plan: SalesPlan): Drafts {
   return drafts
 }
 
+function correctionKey(clientId: string, productId: string, month: number): string {
+  return `${clientId}|${productId}|${month}`
+}
+
+/** Полная копия плана для корректировки: план + правки черновика. */
+function draftsFromCorrection(plan: SalesPlan, correction: SalesPlanCorrection): Drafts {
+  const drafts = draftsFromPlan(plan)
+  const editable = new Set(plan.editable_months)
+  for (const item of correction.items) {
+    if (!editable.has(item.month)) continue
+    const rows = drafts[item.client_id] ?? []
+    let row = rows.find((candidate) => candidate.productId === item.product_id)
+    if (!row) {
+      row = {
+        productId: item.product_id,
+        code: item.product_code,
+        name: item.product_name,
+        unit: item.unit,
+        months: {},
+      }
+      rows.push(row)
+    }
+    if (Number(item.quantity) > 0) {
+      row.months[item.month] = trimQuantity(item.quantity)
+    } else {
+      delete row.months[item.month]
+    }
+    drafts[item.client_id] = rows
+  }
+  for (const [clientId, rows] of Object.entries(drafts)) {
+    const kept = rows.filter((row) => Object.keys(row.months).length > 0)
+    if (kept.length === 0) {
+      delete drafts[clientId]
+    } else {
+      drafts[clientId] = kept.sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+    }
+  }
+  return drafts
+}
+
+/**
+ * Полный набор строк корректировки. Для каждой строки плана на редактируемых
+ * месяцах присылаем значение или 0 (удаление), поэтому сервер видит полную копию
+ * и заменяет ею редактируемые месяцы, а не только перечисленные изменения.
+ */
+function collectCorrectionItems(
+  plan: SalesPlan,
+  drafts: Drafts,
+  onError: (message: string) => void,
+): SalesPlanCorrectionItemIn[] | null {
+  const editable = plan.editable_months
+  const planKeys = new Map<string, { clientId: string; productId: string; month: number }>()
+  for (const item of plan.items) {
+    if (!editable.includes(item.month)) continue
+    planKeys.set(correctionKey(item.client_id, item.product_id, item.month), {
+      clientId: item.client_id,
+      productId: item.product_id,
+      month: item.month,
+    })
+  }
+
+  const items: SalesPlanCorrectionItemIn[] = []
+  const sent = new Set<string>()
+  for (const [clientId, rows] of Object.entries(drafts)) {
+    for (const row of rows) {
+      for (const month of editable) {
+        const key = correctionKey(clientId, row.productId, month)
+        const raw = normalize(row.months[month] ?? '')
+        if (raw === '') {
+          if (planKeys.has(key)) {
+            items.push({ client_id: clientId, product_id: row.productId, month, quantity: '0' })
+            sent.add(key)
+          }
+          continue
+        }
+        if (!QTY_PATTERN.test(raw)) {
+          onError(`Количество «${row.months[month]}» в строке ${row.name} — не число`)
+          return null
+        }
+        if (Number(raw) > 0) {
+          items.push({ client_id: clientId, product_id: row.productId, month, quantity: raw })
+          sent.add(key)
+        } else if (planKeys.has(key)) {
+          items.push({ client_id: clientId, product_id: row.productId, month, quantity: '0' })
+          sent.add(key)
+        }
+      }
+    }
+  }
+  for (const [key, parts] of planKeys) {
+    if (sent.has(key)) continue
+    items.push({
+      client_id: parts.clientId,
+      product_id: parts.productId,
+      month: parts.month,
+      quantity: '0',
+    })
+  }
+  return items
+}
+
+/** Сколько строк черновика отличаются от утверждённого плана (для подсказки). */
+function countCorrectionChanges(plan: SalesPlan, drafts: Drafts): number {
+  const items = collectCorrectionItems(plan, drafts, () => {})
+  if (items === null) return 0
+  const planQuantities = new Map<string, string>()
+  for (const item of plan.items) {
+    if (!plan.editable_months.includes(item.month)) continue
+    planQuantities.set(correctionKey(item.client_id, item.product_id, item.month), item.quantity)
+  }
+  return items.filter((item) => {
+    const key = correctionKey(item.client_id, item.product_id, item.month)
+    return Number(item.quantity) !== Number(planQuantities.get(key) ?? 0)
+  }).length
+}
+
 export function SalesPlansPage({ user }: { user: SessionUser }) {
   const thisYear = new Date().getFullYear()
   const [year, setYear] = useState(thisYear)
@@ -110,7 +207,10 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
   const [rejectReason, setRejectReason] = useState('')
   const [corrections, setCorrections] = useState<SalesPlanCorrection[]>([])
   const [correction, setCorrection] = useState<SalesPlanCorrection | null>(null)
-  const [patchRows, setPatchRows] = useState<PatchRow[]>([])
+  const [correctionDrafts, setCorrectionDrafts] = useState<Drafts>({})
+  const [correctionClientId, setCorrectionClientId] = useState('')
+  const [correctionClientToAdd, setCorrectionClientToAdd] = useState('')
+  const [correctionProductToAdd, setCorrectionProductToAdd] = useState('')
   const [correctionReason, setCorrectionReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -165,10 +265,11 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
   }, [plan])
 
   useEffect(() => {
-    if (!plan || !(isOwner || isCommercialDirector)) {
+    if (!plan || !(isOwner || isCommercialDirector || isExecutive)) {
       setCorrections([])
       setCorrection(null)
-      setPatchRows([])
+      setCorrectionDrafts({})
+      setCorrectionClientId('')
       return
     }
     fetchSalesPlanCorrections(plan.id)
@@ -179,14 +280,19 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
           rows[0] ??
           null
         setCorrection(open)
-        setPatchRows(open?.status === 'draft' ? patchRowsFromCorrection(open) : [])
+        const next = open?.status === 'draft' ? draftsFromCorrection(plan, open) : {}
+        setCorrectionDrafts(next)
+        setCorrectionClientId((current) =>
+          current && next[current] ? current : (Object.keys(next)[0] ?? ''),
+        )
       })
       .catch(() => {
         setCorrections([])
         setCorrection(null)
-        setPatchRows([])
+        setCorrectionDrafts({})
+        setCorrectionClientId('')
       })
-  }, [plan, isOwner, isCommercialDirector])
+  }, [plan, isOwner, isCommercialDirector, isExecutive])
 
   const run = async (action: () => Promise<unknown>, message?: string) => {
     setBusy(true)
@@ -273,6 +379,7 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
   const planClients = Object.keys(drafts)
   const canEdit =
     plan !== null &&
+    plan.status !== 'approved' &&
     (isCommercialDirector || (isOwner && ['draft', 'filling'].includes(plan.status)))
   const canSubmit = plan !== null && isOwner && ['draft', 'filling'].includes(plan.status)
   const canApprove = plan !== null && isCommercialDirector && plan.status === 'on_review'
@@ -281,67 +388,100 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
 
   const openCorrection =
     corrections.find((row) => row.status === 'draft' || row.status === 'on_review') ?? null
+  const canProposeCorrection = isOwner || isCommercialDirector || isExecutive
   const canCreateCorrection =
-    plan !== null && isOwner && plan.status === 'approved' && openCorrection === null
-  const correctionEditable = correction !== null && correction.status === 'draft' && isOwner
+    plan !== null && canProposeCorrection && plan.status === 'approved' && openCorrection === null
+  const correctionEditable =
+    correction !== null && correction.status === 'draft' && canProposeCorrection
   const canReviewCorrection =
     correction !== null && correction.status === 'on_review' && isCommercialDirector
 
-  const currentQuantity = (row: PatchRow): string => {
-    const item = plan?.items.find(
-      (candidate) =>
-        candidate.client_id === row.clientId &&
-        candidate.product_id === row.productId &&
-        candidate.month === row.month,
-    )
-    return item ? trimQuantity(item.quantity) : '0'
+  const correctionEditableMonths = plan?.editable_months ?? []
+  const correctionClients = Object.keys(correctionDrafts)
+  const correctionRows = correctionClientId ? (correctionDrafts[correctionClientId] ?? []) : []
+  const correctionChanged =
+    correction?.items.filter((item) => Number(item.quantity) !== Number(item.current_quantity)) ??
+    []
+  const correctionDraftChanged =
+    plan && correction?.status === 'draft' ? countCorrectionChanges(plan, correctionDrafts) : 0
+
+  const setCorrectionRows = (updater: (current: DraftRow[]) => DraftRow[]) => {
+    setCorrectionDrafts((current) => ({
+      ...current,
+      [correctionClientId]: updater(current[correctionClientId] ?? []),
+    }))
   }
 
-  const addPatchRow = () => {
-    const client = activeClients[0]?.id ?? ''
-    const product = products[0]?.id ?? ''
-    const month = editable[0] ?? 1
-    setPatchRows((current) => [
+  const setCorrectionMonth = (productId: string, month: number, value: string) => {
+    setCorrectionRows((current) =>
+      current.map((row) =>
+        row.productId === productId ? { ...row, months: { ...row.months, [month]: value } } : row,
+      ),
+    )
+  }
+
+  const addCorrectionClient = () => {
+    if (!correctionClientToAdd) return
+    setCorrectionDrafts((current) => ({
+      ...current,
+      [correctionClientToAdd]: current[correctionClientToAdd] ?? [],
+    }))
+    setCorrectionClientId(correctionClientToAdd)
+    setCorrectionClientToAdd('')
+  }
+
+  const removeCorrectionClient = () => {
+    if (!correctionClientId) return
+    const hasFrozen = (correctionDrafts[correctionClientId] ?? []).some((row) =>
+      Object.keys(row.months).some((month) => !correctionEditableMonths.includes(Number(month))),
+    )
+    if (hasFrozen) {
+      setError('У клиента есть замороженные месяцы — удалить его из корректировки нельзя')
+      return
+    }
+    if (!confirm(`Убрать клиента «${clientName(correctionClientId)}» из корректировки?`)) return
+    setCorrectionDrafts((current) => {
+      const next = { ...current }
+      delete next[correctionClientId]
+      return next
+    })
+    setCorrectionClientId('')
+  }
+
+  const addCorrectionRow = () => {
+    const product = products.find((row) => row.id === correctionProductToAdd)
+    if (!product || !correctionClientId) return
+    if (correctionRows.some((row) => row.productId === product.id)) return
+    setCorrectionRows((current) => [
       ...current,
       {
-        key: `patch-${Date.now()}-${current.length}`,
-        clientId: client,
-        productId: product,
-        month,
-        quantity: '',
+        productId: product.id,
+        code: product.code,
+        name: product.name,
+        unit: product.unit,
+        months: {},
       },
     ])
+    setCorrectionProductToAdd('')
   }
 
-  const updatePatchRow = (key: string, patch: Partial<PatchRow>) => {
-    setPatchRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)))
-  }
-
-  const removePatchRow = (key: string) => {
-    setPatchRows((current) => current.filter((row) => row.key !== key))
-  }
-
-  const collectPatch = (): SalesPlanCorrectionItemIn[] | null => {
-    const items: SalesPlanCorrectionItemIn[] = []
-    for (const row of patchRows) {
-      if (!row.clientId || !row.productId) {
-        setError('В корректировке выберите клиента и товар')
-        return null
-      }
-      const quantity = normalize(row.quantity)
-      if (!QTY_PATTERN.test(quantity)) {
-        setError(`Количество «${row.quantity}» — неотрицательное число`)
-        return null
-      }
-      items.push({
-        client_id: row.clientId,
-        product_id: row.productId,
-        month: row.month,
-        quantity,
-      })
+  const removeCorrectionRow = (productId: string) => {
+    const row = correctionRows.find((candidate) => candidate.productId === productId)
+    const hasFrozen =
+      row !== undefined &&
+      Object.keys(row.months).some((month) => !correctionEditableMonths.includes(Number(month)))
+    if (hasFrozen) {
+      setError('У позиции есть замороженные месяцы — удалить её из корректировки нельзя')
+      return
     }
-    return items
+    setCorrectionRows((current) => current.filter((candidate) => candidate.productId !== productId))
   }
+
+  const correctionRowQuantity = (row: DraftRow): number =>
+    correctionEditableMonths.reduce(
+      (sum, month) => sum + Number(normalize(row.months[month] ?? '') || 0),
+      0,
+    )
 
   const startCorrection = () => {
     if (!plan) return
@@ -349,28 +489,37 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
       const created = await createSalesPlanCorrection(plan.id)
       setCorrections((current) => [created, ...current])
       setCorrection(created)
-      setPatchRows([])
+      const next = draftsFromCorrection(plan, created)
+      setCorrectionDrafts(next)
+      setCorrectionClientId(Object.keys(next)[0] ?? '')
     }, 'Черновик корректировки создан')
   }
 
   const saveCorrection = () => {
-    if (!correction) return
-    const items = collectPatch()
+    if (!plan || !correction) return
+    const items = collectCorrectionItems(plan, correctionDrafts, setError)
     if (!items) return
     void run(async () => {
       const updated = await saveSalesPlanCorrectionItems(correction.id, items)
       setCorrection(updated)
-      setPatchRows(patchRowsFromCorrection(updated))
+      const next = draftsFromCorrection(plan, updated)
+      setCorrectionDrafts(next)
+      setCorrectionClientId((current) =>
+        current && next[current] ? current : (Object.keys(next)[0] ?? ''),
+      )
     }, 'Корректировка сохранена')
   }
 
   const sendCorrection = () => {
-    if (!correction) return
-    const items = collectPatch()
+    if (!plan || !correction) return
+    const items = collectCorrectionItems(plan, correctionDrafts, setError)
     if (!items) return
     void run(async () => {
       await saveSalesPlanCorrectionItems(correction.id, items)
-      await submitSalesPlanCorrection(correction.id)
+      const submitted = await submitSalesPlanCorrection(correction.id)
+      setCorrection(submitted)
+      setCorrectionDrafts({})
+      setCorrectionClientId('')
     }, 'Корректировка отправлена коммерческому директору')
   }
 
@@ -380,7 +529,8 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
     void run(async () => {
       await deleteSalesPlanCorrection(correction.id)
       setCorrection(null)
-      setPatchRows([])
+      setCorrectionDrafts({})
+      setCorrectionClientId('')
     }, 'Корректировка отменена')
   }
 
@@ -588,7 +738,9 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
                     disabled={busy}
                     onClick={startCorrection}
                   >
-                    Предложить корректировку
+                    {isCommercialDirector
+                      ? 'Исправить утверждённый план'
+                      : 'Предложить корректировку'}
                   </button>
                 ) : null}
               </div>
@@ -598,127 +750,181 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
                   {correction.review_reason ? (
                     <p className="hint warn">Причина отклонения: {correction.review_reason}</p>
                   ) : null}
+                  <p className="hint">
+                    Полная копия плана: можно менять объёмы, добавлять и удалять клиентов и товары.
+                    Замороженные месяцы недоступны.
+                  </p>
 
                   {correctionEditable ? (
                     <>
-                      <div className="purchase-table">
-                        <table data-testid="correction-table">
-                          <thead>
+                      <div className="toolbar">
+                        <span className="hint">Клиент:</span>
+                        {correctionClients.length === 0 ? (
+                          <span className="hint" data-testid="correction-no-clients">
+                            в корректировке нет клиентов — добавьте клиента
+                          </span>
+                        ) : (
+                          correctionClients.map((id) => (
+                            <button
+                              key={id}
+                              type="button"
+                              className={id === correctionClientId ? 'chip active' : 'chip'}
+                              onClick={() => setCorrectionClientId(id)}
+                            >
+                              {clientName(id)}
+                            </button>
+                          ))
+                        )}
+                        <span className="sep" />
+                        <select
+                          aria-label="Добавить клиента в корректировку"
+                          value={correctionClientToAdd}
+                          onChange={(event) => setCorrectionClientToAdd(event.target.value)}
+                          disabled={busy}
+                        >
+                          <option value="">— добавить клиента —</option>
+                          {activeClients
+                            .filter(
+                              (row) =>
+                                !correctionClients.includes(row.id) ||
+                                row.id === correctionClientToAdd,
+                            )
+                            .map((row) => (
+                              <option key={row.id} value={row.id}>
+                                {row.name}
+                              </option>
+                            ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={busy || !correctionClientToAdd}
+                          onClick={addCorrectionClient}
+                        >
+                          Добавить
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy || !correctionClientId}
+                          onClick={removeCorrectionClient}
+                        >
+                          Убрать клиента
+                        </button>
+                      </div>
+
+                      <div className="toolbar">
+                        <select
+                          aria-label="Добавить товар в корректировку"
+                          value={correctionProductToAdd}
+                          onChange={(event) => setCorrectionProductToAdd(event.target.value)}
+                          disabled={busy || !correctionClientId}
+                        >
+                          <option value="">— выберите товар —</option>
+                          {products
+                            .filter(
+                              (product) =>
+                                !correctionRows.some((row) => row.productId === product.id),
+                            )
+                            .map((product) => (
+                              <option key={product.id} value={product.id}>
+                                {product.code} · {product.name}
+                              </option>
+                            ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={busy || !correctionProductToAdd || !correctionClientId}
+                          onClick={addCorrectionRow}
+                        >
+                          Добавить строку
+                        </button>
+                        <span className="sep" />
+                        <span className="hint" data-testid="correction-current-client">
+                          {correctionClientId
+                            ? `Строки клиента: ${clientName(correctionClientId)}`
+                            : 'клиент не выбран'}
+                        </span>
+                        <span className="hint" data-testid="correction-changed-count">
+                          изменено строк: {correctionDraftChanged}
+                        </span>
+                      </div>
+
+                      <table className="plan-table" data-testid="correction-table">
+                        <thead>
+                          <tr>
+                            <th scope="col">Товар</th>
+                            {MONTH_SHORT.map((title, index) => (
+                              <th
+                                key={title}
+                                scope="col"
+                                className="num"
+                                title={MONTH_TITLES[index]}
+                              >
+                                {title}
+                              </th>
+                            ))}
+                            <th scope="col" className="num">
+                              Итого
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {correctionRows.length === 0 ? (
                             <tr>
-                              <th scope="col">Клиент</th>
-                              <th scope="col">Товар</th>
-                              <th scope="col">Месяц</th>
-                              <th scope="col" className="num">
-                                Сейчас
-                              </th>
-                              <th scope="col" className="num">
-                                Новое
-                              </th>
-                              <th scope="col" aria-label="Действия" />
+                              <td colSpan={14} className="hint" data-testid="correction-empty">
+                                {correctionClientId
+                                  ? 'У клиента пока нет строк — добавьте товар.'
+                                  : 'Добавьте клиента в корректировку.'}
+                              </td>
                             </tr>
-                          </thead>
-                          <tbody>
-                            {patchRows.length === 0 ? (
-                              <tr>
-                                <td colSpan={6} className="hint">
-                                  Добавьте изменение: клиент, товар, месяц и новое количество.
+                          ) : (
+                            correctionRows.map((row) => (
+                              <tr key={row.productId}>
+                                <td>
+                                  {row.code} · {row.name}
+                                  <span className="unit">, {row.unit}</span>
+                                  <button
+                                    type="button"
+                                    className="mini correction-remove"
+                                    aria-label={`Убрать строку ${row.name}`}
+                                    title="Убрать строку"
+                                    disabled={busy}
+                                    onClick={() => removeCorrectionRow(row.productId)}
+                                  >
+                                    Убрать
+                                  </button>
                                 </td>
-                              </tr>
-                            ) : (
-                              patchRows.map((row, index) => {
-                                const product = products.find(
-                                  (candidate) => candidate.id === row.productId,
-                                )
-                                return (
-                                  <tr key={row.key}>
-                                    <td>
-                                      <select
-                                        aria-label={`Клиент корректировки ${index + 1}`}
-                                        value={row.clientId}
-                                        onChange={(event) =>
-                                          updatePatchRow(row.key, {
-                                            clientId: event.target.value,
-                                          })
-                                        }
-                                      >
-                                        {activeClients.map((client) => (
-                                          <option key={client.id} value={client.id}>
-                                            {client.name}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </td>
-                                    <td>
-                                      <select
-                                        aria-label={`Товар корректировки ${index + 1}`}
-                                        value={row.productId}
-                                        onChange={(event) =>
-                                          updatePatchRow(row.key, {
-                                            productId: event.target.value,
-                                          })
-                                        }
-                                      >
-                                        {products.map((candidate) => (
-                                          <option key={candidate.id} value={candidate.id}>
-                                            {candidate.code} · {candidate.name}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </td>
-                                    <td>
-                                      <select
-                                        aria-label={`Месяц корректировки ${index + 1}`}
-                                        value={row.month}
-                                        onChange={(event) =>
-                                          updatePatchRow(row.key, {
-                                            month: Number(event.target.value),
-                                          })
-                                        }
-                                      >
-                                        {editable.map((month) => (
-                                          <option key={month} value={month}>
-                                            {MONTH_TITLES[month - 1]}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </td>
-                                    <td className="num">
-                                      {formatQuantity(currentQuantity(row))}
-                                      {product ? ` ${product.unit}` : ''}
-                                    </td>
-                                    <td className="num">
+                                {MONTH_SHORT.map((title, index) => {
+                                  const month = index + 1
+                                  const frozen = !correctionEditableMonths.includes(month)
+                                  return (
+                                    <td key={title} className="num">
                                       <input
                                         className="cell"
-                                        aria-label={`Новое количество ${index + 1}`}
-                                        value={row.quantity}
+                                        aria-label={`Корректировка ${row.code} ${MONTH_TITLES[index]}`}
+                                        title={frozen ? 'Месяц заморожен' : MONTH_TITLES[index]}
+                                        value={row.months[month] ?? ''}
+                                        disabled={busy || frozen}
                                         onChange={(event) =>
-                                          updatePatchRow(row.key, {
-                                            quantity: event.target.value,
-                                          })
+                                          setCorrectionMonth(
+                                            row.productId,
+                                            month,
+                                            event.target.value,
+                                          )
                                         }
                                       />
                                     </td>
-                                    <td>
-                                      <button
-                                        type="button"
-                                        className="mini"
-                                        aria-label={`Убрать изменение ${index + 1}`}
-                                        onClick={() => removePatchRow(row.key)}
-                                      >
-                                        Убрать
-                                      </button>
-                                    </td>
-                                  </tr>
-                                )
-                              })
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
+                                  )
+                                })}
+                                <td className="num" data-testid={`correction-total-${row.code}`}>
+                                  {formatQuantity(String(correctionRowQuantity(row)))} {row.unit}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+
                       <div className="toolbar">
-                        <button type="button" disabled={busy} onClick={addPatchRow}>
-                          Добавить изменение
-                        </button>
                         <button
                           type="button"
                           className="primary"
@@ -729,7 +935,7 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
                         </button>
                         <button
                           type="button"
-                          disabled={busy || patchRows.length === 0}
+                          disabled={busy || correctionDraftChanged === 0}
                           onClick={sendCorrection}
                         >
                           Отправить коммерческому директору
@@ -757,25 +963,33 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
                           </tr>
                         </thead>
                         <tbody>
-                          {correction.items.map((item) => (
-                            <tr key={item.id}>
-                              <td>{item.client_name}</td>
-                              <td>
-                                {item.product_code} · {item.product_name}
-                                <span className="unit">, {item.unit}</span>
+                          {correctionChanged.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} className="hint">
+                                Изменений нет.
                               </td>
-                              <td>{MONTH_TITLES[item.month - 1]}</td>
-                              <td className="num">
-                                {formatQuantity(item.current_quantity)} {item.unit}
-                              </td>
-                              <td className="num">
-                                {Number(item.quantity) === 0
-                                  ? 'удалить'
-                                  : `${formatQuantity(item.quantity)} ${item.unit}`}
-                              </td>
-                              <td>{item.notes ?? '—'}</td>
                             </tr>
-                          ))}
+                          ) : (
+                            correctionChanged.map((item) => (
+                              <tr key={item.id}>
+                                <td>{item.client_name}</td>
+                                <td>
+                                  {item.product_code} · {item.product_name}
+                                  <span className="unit">, {item.unit}</span>
+                                </td>
+                                <td>{MONTH_TITLES[item.month - 1]}</td>
+                                <td className="num">
+                                  {formatQuantity(item.current_quantity)} {item.unit}
+                                </td>
+                                <td className="num">
+                                  {Number(item.quantity) === 0
+                                    ? 'удалить'
+                                    : `${formatQuantity(item.quantity)} ${item.unit}`}
+                                </td>
+                                <td>{item.notes ?? '—'}</td>
+                              </tr>
+                            ))
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -809,133 +1023,145 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
                       согласование заново.
                     </p>
                   ) : null}
+                  {correction.status === 'rejected' ? (
+                    <p className="hint warn">
+                      Корректировка отклонена, план не изменён. Можно создать новую.
+                    </p>
+                  ) : null}
                 </>
               ) : (
                 <p className="hint">
-                  Утверждённый план нельзя править напрямую — предложите корректировку.
+                  Утверждённый план нельзя править напрямую — создайте корректировку: в ней можно
+                  менять объёмы и состав позиций.
                 </p>
               )}
             </div>
           ) : null}
 
-          <div className="toolbar">
-            <span className="hint">Клиент:</span>
-            {planClients.length === 0 ? (
-              <span className="hint" data-testid="plan-no-clients">
-                в плане пока нет клиентов — добавьте клиента
-              </span>
-            ) : (
-              planClients.map((id) => (
-                <button
-                  key={id}
-                  type="button"
-                  className={id === clientId ? 'chip active' : 'chip'}
-                  onClick={() => setClientId(id)}
+          {correctionEditable ? null : (
+            <>
+              <div className="toolbar">
+                <span className="hint">Клиент:</span>
+                {planClients.length === 0 ? (
+                  <span className="hint" data-testid="plan-no-clients">
+                    в плане пока нет клиентов — добавьте клиента
+                  </span>
+                ) : (
+                  planClients.map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className={id === clientId ? 'chip active' : 'chip'}
+                      onClick={() => setClientId(id)}
+                    >
+                      {clientName(id)}
+                    </button>
+                  ))
+                )}
+                <span className="sep" />
+                <select
+                  aria-label="Добавить клиента"
+                  value={clientToAdd}
+                  onChange={(event) => setClientToAdd(event.target.value)}
+                  disabled={!canEdit}
                 >
-                  {clientName(id)}
+                  <option value="">— добавить клиента —</option>
+                  {activeClients
+                    .filter((row) => !planClients.includes(row.id) || row.id === clientToAdd)
+                    .map((row) => (
+                      <option key={row.id} value={row.id}>
+                        {row.name}
+                      </option>
+                    ))}
+                </select>
+                <button type="button" disabled={!clientToAdd || !canEdit} onClick={addClientToPlan}>
+                  Добавить
                 </button>
-              ))
-            )}
-            <span className="sep" />
-            <select
-              aria-label="Добавить клиента"
-              value={clientToAdd}
-              onChange={(event) => setClientToAdd(event.target.value)}
-              disabled={!canEdit}
-            >
-              <option value="">— добавить клиента —</option>
-              {activeClients
-                .filter((row) => !planClients.includes(row.id) || row.id === clientToAdd)
-                .map((row) => (
-                  <option key={row.id} value={row.id}>
-                    {row.name}
-                  </option>
-                ))}
-            </select>
-            <button type="button" disabled={!clientToAdd || !canEdit} onClick={addClientToPlan}>
-              Добавить
-            </button>
-          </div>
+              </div>
 
-          <div className="toolbar">
-            <select
-              aria-label="Добавить товар"
-              value={productToAdd}
-              onChange={(event) => setProductToAdd(event.target.value)}
-              disabled={!canEdit || !clientId}
-            >
-              <option value="">— выберите товар —</option>
-              {products
-                .filter((product) => !rows.some((row) => row.productId === product.id))
-                .map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {product.code} · {product.name}
-                  </option>
-                ))}
-            </select>
-            <button type="button" disabled={!productToAdd || !canEdit} onClick={addRow}>
-              Добавить строку
-            </button>
-            <span className="sep" />
-            <span className="hint" data-testid="current-client">
-              {clientId ? `Строки клиента: ${clientName(clientId)}` : 'клиент не выбран'}
-            </span>
-          </div>
+              <div className="toolbar">
+                <select
+                  aria-label="Добавить товар"
+                  value={productToAdd}
+                  onChange={(event) => setProductToAdd(event.target.value)}
+                  disabled={!canEdit || !clientId}
+                >
+                  <option value="">— выберите товар —</option>
+                  {products
+                    .filter((product) => !rows.some((row) => row.productId === product.id))
+                    .map((product) => (
+                      <option key={product.id} value={product.id}>
+                        {product.code} · {product.name}
+                      </option>
+                    ))}
+                </select>
+                <button type="button" disabled={!productToAdd || !canEdit} onClick={addRow}>
+                  Добавить строку
+                </button>
+                <span className="sep" />
+                <span className="hint" data-testid="current-client">
+                  {clientId ? `Строки клиента: ${clientName(clientId)}` : 'клиент не выбран'}
+                </span>
+              </div>
 
-          <table className="plan-table" data-testid="plan-table">
-            <thead>
-              <tr>
-                <th scope="col">Товар</th>
-                {MONTH_SHORT.map((title, index) => (
-                  <th key={title} scope="col" className="num" title={MONTH_TITLES[index]}>
-                    {title}
-                  </th>
-                ))}
-                <th scope="col" className="num">
-                  Итого
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={14} className="hint" data-testid="plan-empty">
-                    {clientId
-                      ? 'Строк по этому клиенту пока нет — добавьте товар.'
-                      : 'Добавьте клиента в план.'}
-                  </td>
-                </tr>
-              ) : (
-                rows.map((row) => (
-                  <tr key={row.productId}>
-                    <td>
-                      {row.code} · {row.name}
-                      <span className="unit">, {row.unit}</span>
-                    </td>
-                    {MONTH_SHORT.map((title, index) => {
-                      const month = index + 1
-                      const frozen = !editable.includes(month)
-                      return (
-                        <td key={title} className="num">
-                          <input
-                            className="cell"
-                            aria-label={`${row.code} ${MONTH_TITLES[index]}`}
-                            title={frozen ? 'Месяц заморожен' : MONTH_TITLES[index]}
-                            value={row.months[month] ?? ''}
-                            disabled={!canEdit || frozen}
-                            onChange={(event) => setMonth(row.productId, month, event.target.value)}
-                          />
-                        </td>
-                      )
-                    })}
-                    <td className="num" data-testid={`row-total-${row.code}`}>
-                      {formatQuantity(String(rowQuantity(row)))} {row.unit}
-                    </td>
+              <table className="plan-table" data-testid="plan-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Товар</th>
+                    {MONTH_SHORT.map((title, index) => (
+                      <th key={title} scope="col" className="num" title={MONTH_TITLES[index]}>
+                        {title}
+                      </th>
+                    ))}
+                    <th scope="col" className="num">
+                      Итого
+                    </th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {rows.length === 0 ? (
+                    <tr>
+                      <td colSpan={14} className="hint" data-testid="plan-empty">
+                        {clientId
+                          ? 'Строк по этому клиенту пока нет — добавьте товар.'
+                          : 'Добавьте клиента в план.'}
+                      </td>
+                    </tr>
+                  ) : (
+                    rows.map((row) => (
+                      <tr key={row.productId}>
+                        <td>
+                          {row.code} · {row.name}
+                          <span className="unit">, {row.unit}</span>
+                        </td>
+                        {MONTH_SHORT.map((title, index) => {
+                          const month = index + 1
+                          const frozen = !editable.includes(month)
+                          return (
+                            <td key={title} className="num">
+                              <input
+                                className="cell"
+                                aria-label={`${row.code} ${MONTH_TITLES[index]}`}
+                                title={frozen ? 'Месяц заморожен' : MONTH_TITLES[index]}
+                                value={row.months[month] ?? ''}
+                                disabled={!canEdit || frozen}
+                                onChange={(event) =>
+                                  setMonth(row.productId, month, event.target.value)
+                                }
+                              />
+                            </td>
+                          )
+                        })}
+                        <td className="num" data-testid={`row-total-${row.code}`}>
+                          {formatQuantity(String(rowQuantity(row)))} {row.unit}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </>
+          )}
         </>
       ) : null}
     </section>

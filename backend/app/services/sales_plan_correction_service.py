@@ -1,9 +1,12 @@
 """Корректировка утверждённого плана менеджера.
 
-Менеджер не правит утверждённый план напрямую: он предлагает набор изменений
-(«клиент × товар × месяц → новое количество»). Коммерческий директор принимает
-изменения (они применяются к плану) или отклоняет с причиной. Применение снимает
-утверждение годового плана отдела — его повторно утверждает генеральный директор.
+Утверждённый план напрямую не правится. Корректировка — полная редактируемая копия
+строк плана на редактируемые месяцы: можно менять объёмы, добавлять и удалять
+клиентов, товары и позиции. Черновик правит владелец плана, коммерческий директор
+или исполнительный директор; отправляет его на утверждение один из них, а
+утверждает коммерческий директор. Применение заменяет строки плана на редактируемых
+месяцах и снимает утверждение годового плана отдела — его повторно утверждает
+генеральный директор.
 """
 
 from __future__ import annotations
@@ -36,8 +39,10 @@ from app.schemas.planning import (
     SalesPlanCorrectionItemOut,
     SalesPlanCorrectionOut,
 )
-from app.services.plan_freeze import check_months_editable
+from app.services.plan_freeze import check_months_editable, editable_months
 from app.services.sales_plan_approval_service import invalidate
+
+PlanKey = tuple[uuid.UUID, uuid.UUID, int]
 
 
 class CorrectionError(Exception):
@@ -98,11 +103,16 @@ def _require_correction(db: Session, correction_id: uuid.UUID) -> SalesPlanCorre
     return correction
 
 
-def _check_owner(user: User, plan: SalesPlan) -> None:
-    if not (user.role == ROLE_SALES_MANAGER and plan.manager_id == user.id):
-        raise CorrectionError(
-            "Предложить корректировку может только владелец плана", status_code=403
-        )
+def _check_can_propose(user: User, plan: SalesPlan) -> None:
+    """Корректировку предлагает владелец, коммерческий или исполнительный директор."""
+    if user.role in (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR):
+        return
+    if user.role == ROLE_SALES_MANAGER and plan.manager_id == user.id:
+        return
+    raise CorrectionError(
+        "Создать корректировку может владелец плана, коммерческий или " "исполнительный директор",
+        status_code=403,
+    )
 
 
 def _check_commercial(user: User) -> None:
@@ -127,8 +137,26 @@ def _plan_hash(plan: SalesPlan) -> str:
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
 
 
-def _plan_quantities(plan: SalesPlan) -> dict[tuple[uuid.UUID, uuid.UUID, int], SalesPlanItem]:
+def _plan_quantities(plan: SalesPlan) -> dict[PlanKey, SalesPlanItem]:
     return {(item.client_id, item.product_id, item.month): item for item in plan.items}
+
+
+def _editable_plan_items(plan: SalesPlan) -> dict[PlanKey, SalesPlanItem]:
+    allowed = set(editable_months(plan.year))
+    return {key: item for key, item in _plan_quantities(plan).items() if item.month in allowed}
+
+
+def _correction_keys(correction: SalesPlanCorrection) -> set[PlanKey]:
+    return {(item.client_id, item.product_id, item.month) for item in correction.items}
+
+
+def _is_full_copy(plan_items: dict[PlanKey, SalesPlanItem], keys: set[PlanKey]) -> bool:
+    """Полная копия покрывает все строки плана на редактируемых месяцах.
+
+    Старые корректировки (до перехода на полную копию) хранили только изменения:
+    для них набор ключей — подмножество, и применяем их как точечный патч.
+    """
+    return set(plan_items).issubset(keys)
 
 
 def _check_client(db: Session, client_id: uuid.UUID) -> None:
@@ -197,7 +225,7 @@ def _serialize(correction: SalesPlanCorrection) -> SalesPlanCorrectionOut:
 
 def create(db: Session, user: User, payload: SalesPlanCorrectionCreate) -> SalesPlanCorrectionOut:
     plan = _require_plan(db, payload.plan_id)
-    _check_owner(user, plan)
+    _check_can_propose(user, plan)
     if plan.status != "approved":
         raise CorrectionError(
             "Корректировку можно предложить только к утверждённому плану", status_code=409
@@ -222,6 +250,20 @@ def create(db: Session, user: User, payload: SalesPlanCorrectionCreate) -> Sales
         base_hash=_plan_hash(plan),
     )
     db.add(correction)
+    db.flush()
+    # Полная копия: в черновик сразу попадают все строки редактируемых месяцев.
+    for item in _editable_plan_items(plan).values():
+        db.add(
+            SalesPlanCorrectionItem(
+                correction_id=correction.id,
+                client_id=item.client_id,
+                product_id=item.product_id,
+                month=item.month,
+                quantity=item.quantity,
+                current_quantity=item.quantity,
+                notes=item.notes,
+            )
+        )
     db.commit()
     return _serialize(_require_correction(db, correction.id))
 
@@ -234,7 +276,7 @@ def update_items(
 ) -> SalesPlanCorrectionOut:
     correction = _require_correction(db, correction_id)
     plan = correction.plan
-    _check_owner(user, plan)
+    _check_can_propose(user, plan)
     if correction.status != "draft":
         raise CorrectionError("Править можно только черновик корректировки", status_code=409)
     if plan.status != "approved":
@@ -250,8 +292,9 @@ def update_items(
     except ValueError as exc:
         raise CorrectionError(str(exc), status_code=409) from exc
 
-    plan_items = _plan_quantities(plan)
-    seen: set[tuple[uuid.UUID, uuid.UUID, int]] = set()
+    plan_items = _editable_plan_items(plan)
+    seen: set[PlanKey] = set()
+    proposed: dict[PlanKey, SalesPlanCorrectionItemIn] = {}
     for item in items:
         key = (item.client_id, item.product_id, item.month)
         if key in seen:
@@ -259,28 +302,83 @@ def update_items(
         seen.add(key)
         _check_client(db, item.client_id)
         _check_product(db, item.product_id)
-        if item.quantity == 0 and key not in plan_items:
-            raise CorrectionError("Удалять нечего: такой строки в плане нет")
+        if item.quantity > 0:
+            proposed[key] = item
+
+    # Полная копия приходит, когда клиент присылает строку на каждый месяц плана,
+    # включая нули для удалённых позиций. Иначе — старый точечный патч.
+    full_copy = set(plan_items).issubset(seen)
+    stored: list[SalesPlanCorrectionItem] = []
+    if full_copy:
+        for key, plan_item in plan_items.items():
+            proposed_item = proposed.get(key)
+            if proposed_item is None:
+                stored.append(
+                    SalesPlanCorrectionItem(
+                        correction_id=correction.id,
+                        client_id=key[0],
+                        product_id=key[1],
+                        month=key[2],
+                        quantity=0,
+                        current_quantity=plan_item.quantity,
+                        notes=None,
+                    )
+                )
+            else:
+                stored.append(
+                    SalesPlanCorrectionItem(
+                        correction_id=correction.id,
+                        client_id=key[0],
+                        product_id=key[1],
+                        month=key[2],
+                        quantity=proposed_item.quantity,
+                        current_quantity=plan_item.quantity,
+                        notes=(
+                            proposed_item.notes
+                            if proposed_item.notes is not None
+                            else plan_item.notes
+                        ),
+                    )
+                )
+        for key, item in proposed.items():
+            if key in plan_items:
+                continue
+            stored.append(
+                SalesPlanCorrectionItem(
+                    correction_id=correction.id,
+                    client_id=key[0],
+                    product_id=key[1],
+                    month=key[2],
+                    quantity=item.quantity,
+                    current_quantity=0,
+                    notes=item.notes,
+                )
+            )
+    else:
+        for item in items:
+            key = (item.client_id, item.product_id, item.month)
+            if item.quantity == 0 and key not in plan_items:
+                raise CorrectionError("Удалять нечего: такой строки в плане нет")
+            maybe_plan_item = plan_items.get(key)
+            stored.append(
+                SalesPlanCorrectionItem(
+                    correction_id=correction.id,
+                    client_id=key[0],
+                    product_id=key[1],
+                    month=key[2],
+                    quantity=item.quantity,
+                    current_quantity=(
+                        maybe_plan_item.quantity if maybe_plan_item is not None else 0
+                    ),
+                    notes=item.notes,
+                )
+            )
 
     for existing in list(correction.items):
         db.delete(existing)
     db.flush()
-    for item in items:
-        db.add(
-            SalesPlanCorrectionItem(
-                correction_id=correction.id,
-                client_id=item.client_id,
-                product_id=item.product_id,
-                month=item.month,
-                quantity=item.quantity,
-                current_quantity=(
-                    plan_items[(item.client_id, item.product_id, item.month)].quantity
-                    if (item.client_id, item.product_id, item.month) in plan_items
-                    else 0
-                ),
-                notes=item.notes,
-            )
-        )
+    for row in stored:
+        db.add(row)
     db.commit()
     return _serialize(_require_correction(db, correction_id))
 
@@ -288,7 +386,7 @@ def update_items(
 def submit(db: Session, user: User, correction_id: uuid.UUID) -> SalesPlanCorrectionOut:
     correction = _require_correction(db, correction_id)
     plan = correction.plan
-    _check_owner(user, plan)
+    _check_can_propose(user, plan)
     if correction.status != "draft":
         raise CorrectionError("Отправить можно только черновик корректировки", status_code=409)
     if plan.status != "approved":
@@ -300,12 +398,17 @@ def submit(db: Session, user: User, correction_id: uuid.UUID) -> SalesPlanCorrec
         )
     if not correction.items:
         raise CorrectionError("Корректировка пустая: добавьте хотя бы одно изменение")
-    plan_items = _plan_quantities(plan)
-    changed = any(
-        plan_items.get((item.client_id, item.product_id, item.month)) is None
-        or plan_items[(item.client_id, item.product_id, item.month)].quantity != item.quantity
-        for item in correction.items
-    )
+    plan_items = _editable_plan_items(plan)
+    changed = False
+    for item in correction.items:
+        key = (item.client_id, item.product_id, item.month)
+        if key in plan_items:
+            if plan_items[key].quantity != item.quantity:
+                changed = True
+                break
+        elif item.quantity != 0:
+            changed = True
+            break
     if not changed:
         raise CorrectionError("В корректировке нет изменений относительно плана")
     correction.status = "on_review"
@@ -334,19 +437,19 @@ def approve(db: Session, user: User, correction_id: uuid.UUID) -> SalesPlanCorre
     except ValueError as exc:
         raise CorrectionError(str(exc), status_code=409) from exc
 
-    plan_items = _plan_quantities(plan)
-    for item in correction.items:
-        key = (item.client_id, item.product_id, item.month)
-        existing = plan_items.get(key)
-        if item.quantity == 0:
-            if existing is not None:
+    plan_items = _editable_plan_items(plan)
+    keys = _correction_keys(correction)
+    full_copy = _is_full_copy(plan_items, keys)
+    if full_copy:
+        # Полная копия: редактируемые месяцы заменяются целиком.
+        allowed = set(editable_months(plan.year))
+        for existing in list(plan.items):
+            if existing.month in allowed:
                 db.delete(existing)
-            continue
-        if existing is not None:
-            existing.quantity = item.quantity
-            if item.notes is not None:
-                existing.notes = item.notes
-        else:
+        db.flush()
+        for item in correction.items:
+            if item.quantity <= 0:
+                continue
             db.add(
                 SalesPlanItem(
                     plan_id=plan.id,
@@ -357,6 +460,31 @@ def approve(db: Session, user: User, correction_id: uuid.UUID) -> SalesPlanCorre
                     notes=item.notes,
                 )
             )
+    else:
+        # Старый точечный патч: трогаем только перечисленные строки.
+        for item in correction.items:
+            key = (item.client_id, item.product_id, item.month)
+            patch_item = plan_items.get(key)
+            if item.quantity == 0:
+                if patch_item is not None:
+                    db.delete(patch_item)
+                continue
+            if patch_item is not None:
+                patch_item.quantity = item.quantity
+                if item.notes is not None:
+                    patch_item.notes = item.notes
+            else:
+                db.add(
+                    SalesPlanItem(
+                        plan_id=plan.id,
+                        client_id=item.client_id,
+                        product_id=item.product_id,
+                        month=item.month,
+                        quantity=item.quantity,
+                        notes=item.notes,
+                    )
+                )
+
     plan.updated_at = datetime.now(UTC)
     correction.status = "approved"
     correction.reviewed_by_id = user.id
@@ -388,7 +516,7 @@ def reject(
 
 def delete_correction(db: Session, user: User, correction_id: uuid.UUID) -> None:
     correction = _require_correction(db, correction_id)
-    _check_owner(user, correction.plan)
+    _check_can_propose(user, correction.plan)
     if correction.status != "draft":
         raise CorrectionError("Удалить можно только черновик корректировки", status_code=409)
     db.delete(correction)

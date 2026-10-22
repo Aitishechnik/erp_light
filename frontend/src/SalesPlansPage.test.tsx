@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Counterparty, SalesPlan, SalesPlanCorrection, SessionUser } from './api'
@@ -21,6 +21,14 @@ const MANAGER: SessionUser = {
   full_name: 'Иван Петров',
   role: 'sales_manager',
   role_title: 'Менеджер по продажам',
+}
+
+const EXECUTIVE: SessionUser = {
+  id: 'ed-1',
+  login: 'executive',
+  full_name: 'Исполнительный директор',
+  role: 'executive_director',
+  role_title: 'Исполнительный директор',
 }
 
 const PURCHASE: SessionUser = {
@@ -198,6 +206,25 @@ describe('SalesPlansPage', () => {
     expect(screen.queryByRole('button', { name: /Создать .*план/ })).not.toBeInTheDocument()
   })
 
+  it('утверждённый план не правится напрямую, только через корректировку', async () => {
+    mockApi(
+      routes({
+        '/api/v1/sales-plan-corrections': { body: [] },
+        '/api/v1/sales-plans': {
+          body: [plan({ status: 'approved', status_title: 'Утверждён' })],
+        },
+      }),
+    )
+    render(<SalesPlansPage user={COMMERCIAL} />)
+
+    expect(
+      await screen.findByRole('button', { name: 'Исправить утверждённый план' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Сохранить' })).not.toBeInTheDocument()
+    await screen.findByTestId('plan-table')
+    expect(screen.getByLabelText('SKU-1 Декабрь')).toBeDisabled()
+  })
+
   it('сохраняет строки с клиентом, товаром и количеством', async () => {
     const user = userEvent.setup()
     mockApi(
@@ -301,7 +328,7 @@ describe('SalesPlansPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('correction-box')).toHaveTextContent('Черновик корректировки')
     })
-    expect(screen.getByTestId('correction-table')).toHaveTextContent('10 шт')
+    expect(screen.getByLabelText('Корректировка SKU-1 Декабрь')).toHaveValue('20')
     await user.click(screen.getByRole('button', { name: 'Отправить коммерческому директору' }))
 
     await waitFor(() => {
@@ -358,5 +385,114 @@ describe('SalesPlansPage', () => {
         true,
       )
     })
+  })
+
+  it('коммерческий директор открывает корректировку чужого утверждённого плана', async () => {
+    const user = userEvent.setup()
+    mockApi(
+      routes({
+        'POST /api/v1/sales-plan-corrections': { status: 201, body: correction() },
+        '/api/v1/sales-plan-corrections': { body: [] },
+        '/api/v1/sales-plans': {
+          body: [plan({ status: 'approved', status_title: 'Утверждён' })],
+        },
+      }),
+    )
+    render(<SalesPlansPage user={COMMERCIAL} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Исправить утверждённый план' }))
+    await waitFor(() => {
+      expect(calls().some((url) => url.includes('/sales-plan-corrections'))).toBe(true)
+    })
+  })
+
+  it('исполнительный директор предлагает корректировку плана менеджера', async () => {
+    const user = userEvent.setup()
+    mockApi(
+      routes({
+        'POST /api/v1/sales-plan-corrections': { status: 201, body: correction() },
+        '/api/v1/sales-plan-corrections': { body: [] },
+        '/api/v1/sales-plans': {
+          body: [plan({ status: 'approved', status_title: 'Утверждён' })],
+        },
+      }),
+    )
+    render(<SalesPlansPage user={EXECUTIVE} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Предложить корректировку' }))
+    await waitFor(() => {
+      expect(calls().some((url) => url.includes('/sales-plan-corrections'))).toBe(true)
+    })
+  })
+
+  it('в корректировке можно изменить объём и добавить позицию', async () => {
+    const user = userEvent.setup()
+    mockApi(
+      routes({
+        'PUT /api/v1/sales-plan-corrections/corr-1/items': { body: correction() },
+        '/api/v1/sales-plan-corrections': { body: [correction()] },
+        '/api/v1/sales-plans': {
+          body: [plan({ status: 'approved', status_title: 'Утверждён' })],
+        },
+      }),
+    )
+    render(<SalesPlansPage user={MANAGER} />)
+
+    const december = await screen.findByLabelText('Корректировка SKU-1 Декабрь')
+    await user.clear(december)
+    await user.type(december, '25')
+    const box = screen.getByTestId('correction-box')
+    await user.selectOptions(
+      within(box).getByLabelText('Добавить товар в корректировку'),
+      'SKU-2 · Товар 2',
+    )
+    await user.click(within(box).getByRole('button', { name: 'Добавить строку' }))
+    await user.type(screen.getByLabelText('Корректировка SKU-2 Декабрь'), '5')
+    await user.click(within(box).getByRole('button', { name: 'Сохранить' }))
+
+    await waitFor(() => {
+      expect(calls().some((url) => url.includes('/sales-plan-corrections/corr-1/items'))).toBe(true)
+    })
+    const sent = bodies().find((body) => body.includes('product-2'))
+    expect(sent).toBeDefined()
+    expect(sent).toContain('product-1')
+    expect(sent).toContain('product-2')
+    expect(sent).toContain('25')
+    expect(sent).toContain('5')
+  })
+
+  it('коммерческий директор правит черновик корректировки менеджера', async () => {
+    mockApi(
+      routes({
+        '/api/v1/sales-plan-corrections': { body: [correction()] },
+        '/api/v1/sales-plans': {
+          body: [plan({ status: 'approved', status_title: 'Утверждён' })],
+        },
+      }),
+    )
+    render(<SalesPlansPage user={COMMERCIAL} />)
+
+    expect(await screen.findByLabelText('Корректировка SKU-1 Декабрь')).toHaveValue('20')
+    const box = screen.getByTestId('correction-box')
+    expect(within(box).getByRole('button', { name: 'Сохранить' })).toBeInTheDocument()
+  })
+
+  it('на утверждении показывает только изменённые строки', async () => {
+    mockApi(
+      routes({
+        '/api/v1/sales-plan-corrections': {
+          body: [correction({ status: 'on_review', status_title: 'Корректировка на утверждении' })],
+        },
+        '/api/v1/sales-plans': {
+          body: [plan({ status: 'approved', status_title: 'Утверждён' })],
+        },
+      }),
+    )
+    render(<SalesPlansPage user={MANAGER} />)
+
+    const table = await screen.findByTestId('correction-readonly')
+    expect(table).toHaveTextContent('10 шт')
+    expect(table).toHaveTextContent('20 шт')
+    expect(table).not.toHaveTextContent('Изменений нет')
   })
 })

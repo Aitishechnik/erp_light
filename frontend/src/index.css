@@ -369,6 +369,21 @@ input.cell {
   background: #f9fafb;
 }
 
+/* В корректировке у таблицы есть колонка действий: названию товара нужно больше
+   места, иначе на 1280 px оно переносится на пять строк. */
+.correction-box .plan-table :where(th:first-child, td:first-child) {
+  min-width: 13rem;
+  width: 13rem;
+}
+
+.correction-remove {
+  display: block;
+  margin-top: 0.2rem;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
 .plan-table td:last-child,
 .plan-table th:last-child {
   font-weight: 600;
