@@ -160,6 +160,11 @@ const RECEIPT = {
 }
 
 const YEAR = new Date().getFullYear()
+
+/** Локальная дата ГГГГ-ММ-ДД: toISOString() даёт UTC и может сдвинуть день. */
+function localToday(): string {
+  return new Intl.DateTimeFormat('sv-SE').format(new Date())
+}
 const ALL_MONTHS = Array.from({ length: 12 }, (_, index) => index + 1)
 
 function plan(overrides: Record<string, unknown> = {}) {
@@ -923,7 +928,7 @@ test('пошлина, Risk и общие расходы считаются в к
 })
 
 test('растаможка партии: проценты превращаются в фиксированные рубли', async ({ page }) => {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = localToday()
   const taxed = {
     ...RECEIPT,
     batch_date: today,
@@ -1008,7 +1013,7 @@ test('растаможка партии: проценты превращаютс
 })
 
 test('закупщик грузит позиции партии из файла 1С в черновик', async ({ page }) => {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = localToday()
   const draft = {
     ...RECEIPT,
     batch_date: today,
