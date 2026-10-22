@@ -287,4 +287,7 @@ class SalesPlanCorrectionOut(BaseModel):
     review_reason: str | None
     created_at: datetime
     updated_at: datetime
+    annual_needs_reapproval: bool = Field(
+        description="Годовой план отдела всё ещё требует повторного согласования"
+    )
     items: list[SalesPlanCorrectionItemOut]

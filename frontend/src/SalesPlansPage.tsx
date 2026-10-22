@@ -1019,8 +1019,10 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
 
                   {correction.status === 'approved' ? (
                     <p className="hint saved">
-                      Изменения применены к плану. Годовой план отдела нужно отправить на финальное
-                      согласование заново.
+                      Изменения применены к плану.
+                      {correction.annual_needs_reapproval
+                        ? ' Годовой план отдела нужно отправить на финальное согласование заново.'
+                        : ''}
                     </p>
                   ) : null}
                   {correction.status === 'rejected' ? (

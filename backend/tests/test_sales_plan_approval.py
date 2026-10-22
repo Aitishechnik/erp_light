@@ -237,8 +237,12 @@ def test_manager_correction_goes_through_commercial_and_gd(
     annual = client.get("/api/v1/annual-sales-plans", params={"year": YEAR})
     assert annual.json()["status"] == "revision"
     assert annual.json()["is_stale"] is True
+    pending = client.get(f"/api/v1/sales-plan-corrections/{correction_id}").json()
+    assert pending["annual_needs_reapproval"] is True
 
     _approve_annual(client, login)
+    settled = client.get(f"/api/v1/sales-plan-corrections/{correction_id}").json()
+    assert settled["annual_needs_reapproval"] is False
 
     # Вторая корректировка — коммерческий директор отклоняет.
     login("sales")

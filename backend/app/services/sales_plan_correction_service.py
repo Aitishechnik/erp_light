@@ -29,6 +29,7 @@ from app.models.domain import Product
 from app.models.planning import (
     SALES_PLAN_CORRECTION_STATUS_TITLES,
     SalesPlan,
+    SalesPlanApproval,
     SalesPlanCorrection,
     SalesPlanCorrectionItem,
     SalesPlanItem,
@@ -40,7 +41,7 @@ from app.schemas.planning import (
     SalesPlanCorrectionOut,
 )
 from app.services.plan_freeze import check_months_editable, editable_months
-from app.services.sales_plan_approval_service import invalidate
+from app.services.sales_plan_approval_service import current_hash, invalidate
 
 PlanKey = tuple[uuid.UUID, uuid.UUID, int]
 
@@ -177,7 +178,27 @@ def _check_product(db: Session, product_id: uuid.UUID) -> None:
         raise CorrectionError(f"«{product.name}» отключён — строку по нему не сохранить")
 
 
-def _serialize(correction: SalesPlanCorrection) -> SalesPlanCorrectionOut:
+def _annual_needs_reapproval(db: Session, year: int) -> bool:
+    """Нужно ли ещё раз финально согласовать годовой план после корректировки.
+
+    Показываем подсказку только пока план отдела действительно ждёт повторного
+    согласования: после повторного утверждения ГД она не должна висеть.
+    """
+    approval = (
+        db.execute(select(SalesPlanApproval).where(SalesPlanApproval.year == year))
+        .scalars()
+        .one_or_none()
+    )
+    if approval is None or approval.status == "draft":
+        return False
+    if approval.status == "revision":
+        return True
+    if approval.status in ("on_review", "approved"):
+        return approval.source_hash != current_hash(db, year)
+    return False
+
+
+def _serialize(db: Session, correction: SalesPlanCorrection) -> SalesPlanCorrectionOut:
     plan = correction.plan
     plan_items = _plan_quantities(plan)
     items = [
@@ -219,6 +240,7 @@ def _serialize(correction: SalesPlanCorrection) -> SalesPlanCorrectionOut:
         review_reason=correction.review_reason,
         created_at=correction.created_at,
         updated_at=correction.updated_at,
+        annual_needs_reapproval=_annual_needs_reapproval(db, plan.year),
         items=items,
     )
 
@@ -265,7 +287,7 @@ def create(db: Session, user: User, payload: SalesPlanCorrectionCreate) -> Sales
             )
         )
     db.commit()
-    return _serialize(_require_correction(db, correction.id))
+    return _serialize(db, _require_correction(db, correction.id))
 
 
 def update_items(
@@ -380,7 +402,7 @@ def update_items(
     for row in stored:
         db.add(row)
     db.commit()
-    return _serialize(_require_correction(db, correction_id))
+    return _serialize(db, _require_correction(db, correction_id))
 
 
 def submit(db: Session, user: User, correction_id: uuid.UUID) -> SalesPlanCorrectionOut:
@@ -413,7 +435,7 @@ def submit(db: Session, user: User, correction_id: uuid.UUID) -> SalesPlanCorrec
         raise CorrectionError("В корректировке нет изменений относительно плана")
     correction.status = "on_review"
     db.commit()
-    return _serialize(_require_correction(db, correction_id))
+    return _serialize(db, _require_correction(db, correction_id))
 
 
 def approve(db: Session, user: User, correction_id: uuid.UUID) -> SalesPlanCorrectionOut:
@@ -496,7 +518,7 @@ def approve(db: Session, user: User, correction_id: uuid.UUID) -> SalesPlanCorre
         plan.year,
         f"корректировка плана менеджера {plan.manager.full_name}",
     )
-    return _serialize(_require_correction(db, correction_id))
+    return _serialize(db, _require_correction(db, correction_id))
 
 
 def reject(
@@ -511,7 +533,7 @@ def reject(
     correction.reviewed_at = datetime.now(UTC)
     correction.review_reason = reason or None
     db.commit()
-    return _serialize(_require_correction(db, correction_id))
+    return _serialize(db, _require_correction(db, correction_id))
 
 
 def delete_correction(db: Session, user: User, correction_id: uuid.UUID) -> None:
@@ -544,10 +566,10 @@ def list_for_plan(db: Session, user: User, plan_id: uuid.UUID) -> list[SalesPlan
         .scalars()
         .all()
     )
-    return [_serialize(row) for row in rows]
+    return [_serialize(db, row) for row in rows]
 
 
 def get(db: Session, user: User, correction_id: uuid.UUID) -> SalesPlanCorrectionOut:
     correction = _require_correction(db, correction_id)
     _check_view(user, correction.plan)
-    return _serialize(correction)
+    return _serialize(db, correction)

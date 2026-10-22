@@ -114,6 +114,7 @@ function correction(overrides: Partial<SalesPlanCorrection> = {}): SalesPlanCorr
     review_reason: null,
     created_at: '2026-10-21T10:00:00Z',
     updated_at: '2026-10-21T10:00:00Z',
+    annual_needs_reapproval: false,
     items: [
       {
         id: 'ci-1',
@@ -475,6 +476,55 @@ describe('SalesPlansPage', () => {
     expect(await screen.findByLabelText('Корректировка SKU-1 Декабрь')).toHaveValue('20')
     const box = screen.getByTestId('correction-box')
     expect(within(box).getByRole('button', { name: 'Сохранить' })).toBeInTheDocument()
+  })
+
+  it('напоминает о повторном согласовании, пока годовой план не согласован', async () => {
+    mockApi(
+      routes({
+        '/api/v1/sales-plan-corrections': {
+          body: [
+            correction({
+              status: 'approved',
+              status_title: 'Корректировка утверждена',
+              annual_needs_reapproval: true,
+            }),
+          ],
+        },
+        '/api/v1/sales-plans': {
+          body: [plan({ status: 'approved', status_title: 'Утверждён' })],
+        },
+      }),
+    )
+    render(<SalesPlansPage user={MANAGER} />)
+
+    expect(
+      await screen.findByText(/Годовой план отдела нужно отправить на финальное согласование/),
+    ).toBeInTheDocument()
+  })
+
+  it('не напоминает о согласовании, когда годовой план уже согласован заново', async () => {
+    mockApi(
+      routes({
+        '/api/v1/sales-plan-corrections': {
+          body: [
+            correction({
+              status: 'approved',
+              status_title: 'Корректировка утверждена',
+              annual_needs_reapproval: false,
+            }),
+          ],
+        },
+        '/api/v1/sales-plans': {
+          body: [plan({ status: 'approved', status_title: 'Утверждён' })],
+        },
+      }),
+    )
+    render(<SalesPlansPage user={MANAGER} />)
+
+    expect(await screen.findByText(/Изменения применены к плану/)).toBeInTheDocument()
+    expect(
+      screen.queryByText(/Годовой план отдела нужно отправить на финальное согласование/),
+    ).not.toBeInTheDocument()
   })
 
   it('на утверждении показывает только изменённые строки', async () => {

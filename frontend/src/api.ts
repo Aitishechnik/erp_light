@@ -147,6 +147,7 @@ export type SalesPlanCorrection = {
   review_reason: string | null
   created_at: string
   updated_at: string
+  annual_needs_reapproval: boolean
   items: SalesPlanCorrectionItem[]
 }
 
