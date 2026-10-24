@@ -23,7 +23,7 @@ from app.models.domain import (
     Product,
     StockSnapshot,
 )
-from app.models.planning import PurchasePlanItem
+from app.models.planning import PurchasePlan, PurchasePlanItem
 from app.models.rates import CurrencyRate
 from app.schemas.domain import (
     BatchCreate,
@@ -334,13 +334,30 @@ def check_payments_limit(payload: BatchCreate) -> None:
             )
 
 
+def _lock_plan_item(db: Session, plan_item_id: uuid.UUID) -> PurchasePlanItem | None:
+    """Заблокировать план и вернуть его строку (или None, если её уже нет).
+
+    Правка плана сначала блокирует строку плана, потом считает привязки и удаляет
+    строки. Ссылка из поступления берёт ту же блокировку: если строка удаляется,
+    вторая операция ждёт и видит актуальное состояние — либо 409 «нельзя убрать»,
+    либо 400 «строка не найдена», но не молчаливую потерю ссылки.
+    """
+    plan_id = db.execute(
+        select(PurchasePlanItem.plan_id).where(PurchasePlanItem.id == plan_item_id)
+    ).scalar_one_or_none()
+    if plan_id is None:
+        return None
+    db.execute(select(PurchasePlan.id).where(PurchasePlan.id == plan_id).with_for_update())
+    return db.get(PurchasePlanItem, plan_item_id, populate_existing=True)
+
+
 def _resolve_plan_item(
     db: Session, product_id: uuid.UUID, plan_item_id: uuid.UUID | None
 ) -> uuid.UUID | None:
     """Проверить ссылку на строку плана: она должна быть про то же сырьё."""
     if plan_item_id is None:
         return None
-    link = db.get(PurchasePlanItem, plan_item_id)
+    link = _lock_plan_item(db, plan_item_id)
     if link is None:
         raise ValueError("Строка плана закупок не найдена — обновите карточку")
     if link.product_id != product_id:
@@ -408,7 +425,7 @@ def _update_plan_links(db: Session, batch: Batch, payload: BatchCreate) -> None:
         if row.purchase_plan_item_id is None:
             item.purchase_plan_item_id = None
             continue
-        link = db.get(PurchasePlanItem, row.purchase_plan_item_id)
+        link = _lock_plan_item(db, row.purchase_plan_item_id)
         if link is None:
             raise ValueError("Строка плана закупок не найдена — обновите карточку")
         if link.product_id != item.product_id:
