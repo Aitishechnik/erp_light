@@ -775,7 +775,7 @@ test('менеджер предлагает корректировку утве�
 test('поступление из 1С открывается в календаре, себестоимость считается сразу', async ({
   page,
 }) => {
-  await mockSession(page)
+  await mockSession(page, PURCHASE_DIRECTOR)
   await page.route('**/api/v1/batches**', (route) =>
     route.request().method() === 'PUT'
       ? route.fulfill({ json: RECEIPT })
@@ -856,7 +856,7 @@ test('поступление из 1С открывается в календар
 
 test('пошлина, Risk и общие расходы считаются в карточке партии', async ({ page }) => {
   const posted: Record<string, unknown>[] = []
-  await mockSession(page)
+  await mockSession(page, PURCHASE_DIRECTOR)
   await page.route('**/api/v1/batches**', (route) => {
     if (route.request().method() === 'PUT') {
       posted.push(route.request().postDataJSON() as Record<string, unknown>)
@@ -944,7 +944,7 @@ test('растаможка партии: проценты превращаютс
     items: [{ ...taxed.items[0], duty_fixed_rub: '4000.00', vat_fixed_rub: '18480.00' }],
   }
   const sent: Record<string, unknown>[] = []
-  await mockSession(page)
+  await mockSession(page, PURCHASE_DIRECTOR)
   await page.route('**/api/v1/batches**', (route) => {
     if (route.request().url().endsWith('/customs')) {
       sent.push(route.request().postDataJSON() as Record<string, unknown>)

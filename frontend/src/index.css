@@ -642,6 +642,18 @@ button.primary:disabled,
   border-radius: 0.6rem;
 }
 
+/* Редактируемая часть карточки: для ролей без прав она выключена целиком. */
+.receipt-edit {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.receipt-edit:disabled {
+  opacity: 1;
+}
+
 /* Карточка партии — белая панель справа от календаря. */
 .receipt-form {
   padding: 0;
@@ -2299,4 +2311,27 @@ button.primary:disabled,
 
 .purchase-table .plan-grid td:first-child select {
   max-width: 100%;
+}
+
+/* В режиме чтения значения — обычным тёмным текстом, действия не «призраки». */
+.receipts-page .receipt-form .receipt-edit:disabled input,
+.receipts-page .receipt-form .receipt-edit:disabled select,
+.receipts-page .receipt-form .receipt-edit:disabled textarea {
+  color: var(--text);
+  -webkit-text-fill-color: var(--text);
+  opacity: 1;
+  background: #fff;
+}
+
+.receipts-page .receipt-form .receipt-edit:disabled .edit-only,
+.receipts-page .receipt-form .receipt-edit:disabled .mini {
+  display: none;
+}
+
+.receipts-page .receipt-form .receipt-edit:disabled textarea {
+  resize: none;
+}
+
+.receipts-page .receipt-form .receipt-edit:disabled input {
+  text-overflow: ellipsis;
 }

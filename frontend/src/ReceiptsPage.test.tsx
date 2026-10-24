@@ -837,16 +837,23 @@ describe('ReceiptsPage — позиции из файла «Партия»', () 
     expect(screen.getByTestId('product-code-i0')).toHaveTextContent('код ТОВ1')
   })
 
-  it('менеджер по продажам не видит загрузку позиций из 1С', async () => {
+  it('менеджер по продажам видит поступление только для чтения', async () => {
     const user = userEvent.setup()
     const sales: SessionUser = { ...IMPORT_USER, role: 'sales_manager' }
-    mockApi(routes({ '/api/v1/batches': { body: [draftBatch()] } }))
+    mockApi(routes())
     render(<ReceiptsPage user={sales} />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByTestId('day-receipt-d1'))
+    await openBatch(user)
 
     expect(screen.getByTestId('receipt-form')).toBeInTheDocument()
+    // Карточка открыта, но править и сохранять нечего: всё выключено, кнопок нет.
+    expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Удалить' })).toBeNull()
+    expect(screen.queryByTestId('customs-start')).toBeNull()
+    expect(screen.getByTestId('item-title-i0')).toHaveTextContent('Арахис в глазури')
+    expect(screen.queryByLabelText('Товар i0')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Добавить строку' })).toBeDisabled()
     expect(screen.queryByTestId('batch-items-import')).toBeNull()
   })
 
