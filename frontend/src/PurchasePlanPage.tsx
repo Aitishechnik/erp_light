@@ -774,7 +774,9 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
                             <td>
                               {canEdit ? (
                                 <select
+                                  className="plan-select"
                                   aria-label={`Сырьё ${label}`}
+                                  title={row.productName || undefined}
                                   value={row.productId}
                                   onChange={(event) => {
                                     const chosen = products.find(
@@ -892,7 +894,9 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
                             >
                               {canEdit ? (
                                 <select
+                                  className="plan-select"
                                   aria-label={`Поставщик ${label}`}
+                                  title={row.supplierName || undefined}
                                   value={row.supplierId}
                                   onChange={(event) => {
                                     const chosen = suppliers.find(
@@ -992,11 +996,12 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
                               {canEdit ? (
                                 <button
                                   type="button"
-                                  className="mini"
+                                  className="row-remove"
                                   aria-label={`Убрать ${label}`}
+                                  title="Убрать строку"
                                   onClick={() => removeRow(row.key)}
                                 >
-                                  Убрать
+                                  ×
                                 </button>
                               ) : null}
                             </td>
