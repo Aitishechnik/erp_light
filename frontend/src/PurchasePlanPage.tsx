@@ -55,6 +55,8 @@ function monthYear(year: number, month: number): string {
 
 type DraftRow = {
   key: string
+  /** Строка плана на сервере; пусто у новой. */
+  id: string | null
   salesProductId: string
   productId: string
   productName: string
@@ -66,6 +68,9 @@ type DraftRow = {
   supplierId: string
   supplierName: string
   notes: string
+  /** Поступило по связанным поступлениям и процент исполнения. */
+  factQuantity: string
+  factShare: string
 }
 
 type PreviewEntry = {
@@ -122,6 +127,7 @@ function splitPreview(
 function draftsFromPlan(plan: PurchasePlan): DraftRow[] {
   return plan.items.map((item) => ({
     key: item.id,
+    id: item.id,
     salesProductId: item.sales_product_id,
     productId: item.product_id,
     productName: item.product_name,
@@ -133,6 +139,8 @@ function draftsFromPlan(plan: PurchasePlan): DraftRow[] {
     supplierId: item.supplier_id ?? '',
     supplierName: item.supplier_name ?? '',
     notes: item.notes ?? '',
+    factQuantity: item.fact_quantity,
+    factShare: item.fact_share,
   }))
 }
 
@@ -307,6 +315,7 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
       ...current,
       {
         key: `new-${position.product_id}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        id: null,
         salesProductId: position.product_id,
         productId: '',
         productName: '',
@@ -318,6 +327,8 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
         supplierId: '',
         supplierName: '',
         notes: '',
+        factQuantity: '0',
+        factShare: '0',
       },
     ])
     setError(null)
@@ -346,6 +357,7 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
         return null
       }
       items.push({
+        id: row.id,
         sales_product_id: row.salesProductId,
         product_id: row.productId,
         country_id: row.countryId,
@@ -852,6 +864,18 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
                               ) : (
                                 formatQuantity(row.quantity)
                               )}
+                              {row.id ? (
+                                <span
+                                  className={
+                                    Number(row.factShare) >= 100 ? 'fact-line done' : 'fact-line'
+                                  }
+                                  data-testid={`fact-${row.key}`}
+                                  title="Поступило по явно связанным поступлениям"
+                                >
+                                  поступило {formatQuantity(row.factQuantity)} ·{' '}
+                                  {formatQuantity(row.factShare)} %
+                                </span>
+                              ) : null}
                             </td>
                             <td className="num">
                               {canEdit ? (

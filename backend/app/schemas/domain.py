@@ -51,6 +51,10 @@ class BatchExpenseCreate(BaseModel):
 class BatchItemCreate(BaseModel):
     """Строка партии: товар, количество, цена за единицу и надбавки."""
 
+    id: uuid.UUID | None = Field(
+        default=None,
+        description="Строка партии: по ней находится ссылка на план у растаможенной партии",
+    )
     product_code: str = Field(min_length=1, max_length=64)
     product_name: str | None = None
     product_kind: str = "goods"
@@ -63,6 +67,10 @@ class BatchItemCreate(BaseModel):
     vat_percent: Decimal = Field(default=Decimal("22"), ge=0, le=100, description="НДС, %")
     risk_unit_currency: Decimal = Field(
         default=Decimal("0"), ge=0, description="Risk за единицу в валюте партии"
+    )
+    purchase_plan_item_id: uuid.UUID | None = Field(
+        default=None,
+        description="Строка плана закупок, по которой пришёл товар; пусто — закупка без плана",
     )
 
 
@@ -81,8 +89,8 @@ class BatchPaymentCreate(BaseModel):
 class BatchCreate(BaseModel):
     """Поступление партии: шапка, строки, общие расходы и валютные платежи.
 
-    Строки может не быть только у черновика из выгрузки 1С — правила проверяет API
-    (`batches.post_batch` / `batches.put_batch`), а не схема.
+    Поступления создаются только выгрузкой 1С; схема используется правкой карточки.
+    Строк может не быть только у черновика из выгрузки — правило проверяет API.
     """
 
     batch_number: str = Field(min_length=1, max_length=100)
@@ -187,6 +195,12 @@ class BatchItemOut(BaseModel):
     )
     vat_fixed_rub: Decimal | None = Field(
         default=None, description="НДС строки, ₽: фикс после растаможки, иначе пусто"
+    )
+    purchase_plan_item_id: uuid.UUID | None = Field(
+        default=None, description="Строка плана закупок; пусто — закупка без плана"
+    )
+    purchase_plan_label: str | None = Field(
+        default=None, description="Подпись строки плана: «2026 · Китай · поставщик»"
     )
     invoice_currency: Decimal
     risk_currency: Decimal

@@ -808,31 +808,14 @@ button.primary:disabled,
   margin: 4px 0 2px;
 }
 
-/* Номер партии правится прямо в заголовке — без отдельного поля «Номер». */
-.doc-title-input {
-  min-width: 6ch;
-  max-width: 100%;
-  margin-left: -0.35rem;
-  padding: 0.1rem 0.35rem;
-  border: 1px solid transparent;
-  border-radius: 0.5rem;
-  background: transparent;
+/* Номер партии приходит из 1С и не правится — это заголовок, а не поле. */
+.doc-title {
+  margin: 0;
+  padding: 0.1rem 0;
   color: var(--text);
-  font: inherit;
   font-size: 1.625rem;
   font-weight: 700;
   letter-spacing: -0.02em;
-}
-
-.doc-title-input:hover {
-  border-color: var(--border);
-  background: #fff;
-}
-
-.doc-title-input:focus {
-  outline: none;
-  border-color: var(--accent);
-  background: #fff;
 }
 
 .doc-header-actions {
@@ -845,6 +828,47 @@ button.primary:disabled,
 .status-source {
   background: #f1f3f5;
   color: var(--muted);
+}
+
+/* Поступление, позиции которого связаны со строками плана закупок. */
+.status-plan {
+  background: #eef2ff;
+  color: #3845a5;
+}
+
+/* Ссылка на строку плана — компактный выбор под названием товара. */
+.receipt-items .plan-caption {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.receipt-items .plan-select {
+  display: block;
+  width: 100%;
+  max-width: 22rem;
+  margin-top: 0.05rem;
+  padding: 0.15rem 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: #fff;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.receipt-items .plan-select:disabled {
+  background: #f5f6f8;
+  color: var(--muted);
+  opacity: 1;
+}
+
+.receipt-items .plan-chip {
+  display: block;
+  margin-top: 0.25rem;
+  color: #3845a5;
+  font-size: 0.78rem;
 }
 
 /* Паспорт партии: дата, поставщик, валюта, курс и комментарий. */
@@ -1846,6 +1870,22 @@ button.primary:disabled,
   font-size: 0.8rem;
 }
 
+/* План/факт строки: поступило по явно связанным поступлениям, под количеством. */
+.purchase-table .fact-line {
+  display: block;
+  margin-top: 2px;
+  max-width: 7rem;
+  color: var(--muted);
+  font-size: 0.74rem;
+  white-space: normal;
+  line-height: 1.2;
+}
+
+.purchase-table .fact-line.done {
+  color: #1c6b3a;
+  font-weight: 600;
+}
+
 .annual-items-head {
   margin-top: 1rem;
 }
@@ -2019,6 +2059,11 @@ button.primary:disabled,
 
 .schedule-chip .order {
   color: var(--muted);
+}
+
+/* График заказа в плане: на 1280 px пилюли переносятся, иначе правая колонка уезжает. */
+.purchase-table .schedule-chip {
+  white-space: normal;
 }
 
 .schedule-chip.overdue {

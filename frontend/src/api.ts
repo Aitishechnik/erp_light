@@ -172,6 +172,7 @@ export type PurchasePlanScheduleEntry = {
 export type PurchasePlanItem = {
   id: string
   sales_product_id: string
+  sales_product_name: string
   product_id: string
   product_code: string
   product_name: string
@@ -185,6 +186,10 @@ export type PurchasePlanItem = {
   supplier_id: string | null
   supplier_name: string | null
   notes: string | null
+  /** Поступило по связанным поступлениям, в единицах сырья. */
+  fact_quantity: string
+  /** Исполнение, %: факт ÷ годовое количество × 100. */
+  fact_share: string
   schedule: PurchasePlanScheduleEntry[]
 }
 
@@ -251,6 +256,7 @@ export type PurchasePlan = {
 }
 
 export type PurchasePlanItemIn = {
+  id: string | null
   sales_product_id: string
   product_id: string
   country_id: string
@@ -324,6 +330,10 @@ export type BatchItem = {
   duty_fixed_rub: string | null
   /** НДС строки, ₽: фикс после растаможки, до неё — null. */
   vat_fixed_rub: string | null
+  /** Строка плана закупок; null — закупка без плана. */
+  purchase_plan_item_id: string | null
+  /** Готовая подпись строки плана: «2026 · Китай · поставщик». */
+  purchase_plan_label: string | null
   invoice_currency: string
   risk_currency: string
   duty_rub: string
@@ -401,6 +411,8 @@ export type Batch = {
 }
 
 export type BatchItemIn = {
+  /** Строка партии: нужна, чтобы сменить ссылку на план у растаможенной партии. */
+  id?: string | null
   product_code: string
   product_name?: string | null
   quantity: string
@@ -408,6 +420,8 @@ export type BatchItemIn = {
   duty_percent: string
   vat_percent: string
   risk_unit_currency: string
+  /** Строка плана закупок; null — закупка без плана. */
+  purchase_plan_item_id?: string | null
 }
 
 export type BatchExpenseIn = {
@@ -612,10 +626,6 @@ export function fetchBatches(from?: string, to?: string): Promise<Batch[]> {
   if (to) params.set('to', to)
   const query = params.toString()
   return request<Batch[]>(`/api/v1/batches${query ? `?${query}` : ''}`)
-}
-
-export function createBatch(payload: BatchIn): Promise<Batch> {
-  return request<Batch>('/api/v1/batches', { method: 'POST', body: JSON.stringify(payload) })
 }
 
 export function updateBatch(batchId: string, payload: BatchIn): Promise<Batch> {

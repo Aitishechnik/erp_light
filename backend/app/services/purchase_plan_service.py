@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -28,7 +29,7 @@ from app.models.auth import (
 )
 from app.models.counterparties import Counterparty
 from app.models.countries import Country
-from app.models.domain import Product
+from app.models.domain import BatchItem, Product
 from app.models.planning import (
     PURCHASE_PLAN_STATUS_TITLES,
     SALES_PLAN_APPROVAL_STATUS_TITLES,
@@ -327,9 +328,47 @@ def _positions_out(
     return result
 
 
+ONE_HUNDRED = Decimal("100")
+SHARE = Decimal("0.1")
+ZERO = Decimal("0")
+
+
+def _linked_counts(db: Session, item_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
+    """Сколько позиций поступлений ссылается на каждую строку плана."""
+    if not item_ids:
+        return {}
+    rows = db.execute(
+        select(BatchItem.purchase_plan_item_id, func.count(BatchItem.id))
+        .where(BatchItem.purchase_plan_item_id.in_(item_ids))
+        .group_by(BatchItem.purchase_plan_item_id)
+    ).all()
+    return {row[0]: int(row[1]) for row in rows if row[0] is not None}
+
+
+def _facts(db: Session, item_ids: list[uuid.UUID]) -> dict[uuid.UUID, Decimal]:
+    """Факт по строкам плана: сумма количеств явно связанных позиций поступлений."""
+    if not item_ids:
+        return {}
+    rows = db.execute(
+        select(BatchItem.purchase_plan_item_id, func.sum(BatchItem.quantity))
+        .where(BatchItem.purchase_plan_item_id.in_(item_ids))
+        .group_by(BatchItem.purchase_plan_item_id)
+    ).all()
+    return {row[0]: Decimal(row[1]) for row in rows if row[0] is not None and row[1] is not None}
+
+
+def _fact_share(fact: Decimal, quantity: Decimal) -> Decimal:
+    if quantity <= 0:
+        return ZERO
+    return (fact / quantity * ONE_HUNDRED).quantize(SHARE, rounding=ROUND_HALF_UP)
+
+
 def _items_out(
-    plan: PurchasePlan, source: dict[uuid.UUID, NeedPosition]
+    plan: PurchasePlan,
+    source: dict[uuid.UUID, NeedPosition],
+    facts: dict[uuid.UUID, Decimal] | None = None,
 ) -> list[PurchasePlanItemOut]:
+    fact_by_item = facts or {}
     result: list[PurchasePlanItemOut] = []
     for item in sorted(
         plan.items,
@@ -347,10 +386,12 @@ def _items_out(
             item.delivery_days,
             plan.year,
         )
+        fact = fact_by_item.get(item.id, ZERO)
         result.append(
             PurchasePlanItemOut(
                 id=item.id,
                 sales_product_id=item.sales_product_id,
+                sales_product_name=item.sales_product.name,
                 product_id=item.product_id,
                 product_code=item.product.code,
                 product_name=item.product.name,
@@ -364,6 +405,8 @@ def _items_out(
                 supplier_id=item.supplier_id,
                 supplier_name=item.supplier.name if item.supplier else None,
                 notes=item.notes,
+                fact_quantity=fact,
+                fact_share=_fact_share(fact, item.quantity),
                 schedule=[
                     PurchasePlanScheduleEntryOut(
                         month=entry.month,
@@ -381,6 +424,7 @@ def _items_out(
 
 def _serialize(db: Session, plan: PurchasePlan) -> PurchasePlanOut:
     source = _source_positions(db, plan)
+    facts = _facts(db, [item.id for item in plan.items])
     return PurchasePlanOut(
         id=plan.id,
         year=plan.year,
@@ -395,7 +439,7 @@ def _serialize(db: Session, plan: PurchasePlan) -> PurchasePlanOut:
         editable_months=editable_months(plan.year),
         source=_source_out(db, plan),
         positions=_positions_out(db, plan, source),
-        items=_items_out(plan, source),
+        items=_items_out(plan, source, facts),
     )
 
 
@@ -484,7 +528,13 @@ def update_items(
     plan_id: uuid.UUID,
     items: list[PurchasePlanItemIn],
 ) -> PurchasePlanOut:
-    """Полная замена строк; позиция строки должна быть в плане продаж."""
+    """Сохранить строки: существующие обновляются на месте, новые добавляются.
+
+    Строки плана — цели ссылок поступлений, поэтому у них постоянный ``id``.
+    Убранную строку, с которой связаны поступления, убрать нельзя: сначала
+    закупщик снимает привязку в карточках. У связанной строки нельзя менять
+    сырьё, страну и позицию плана продаж — иначе факт приписался бы другому.
+    """
     plan = _require(db, plan_id)
     _check_editor(user)
     if plan.status != "draft":
@@ -492,8 +542,19 @@ def update_items(
     _check_year_editable(plan)
 
     allowed = _allowed_positions(db, plan)
-    prepared: list[tuple[PurchasePlanItemIn, int]] = []
+    existing = {row.id: row for row in plan.items}
+    linked = set(_linked_counts(db, list(existing)))
+    prepared: list[tuple[PurchasePlanItemIn, int, PurchasePlanItem | None]] = []
+    seen: set[uuid.UUID] = set()
     for item in items:
+        stored: PurchasePlanItem | None = None
+        if item.id is not None:
+            if item.id in seen:
+                raise PlanError("Строка плана повторяется в запросе", status_code=400)
+            seen.add(item.id)
+            stored = existing.get(item.id)
+            if stored is None:
+                raise PlanError("Строка плана не найдена — обновите план", status_code=400)
         if item.sales_product_id not in allowed:
             raise PlanError(
                 "Этой позиции нет в плане продаж — строку по ней не сохранить", status_code=400
@@ -505,26 +566,61 @@ def update_items(
         _check_product(db, item.product_id)
         country = _check_country(db, item.country_id)
         _check_supplier(db, item.supplier_id)
-        prepared.append((item, country.delivery_days))
+        prepared.append((item, country.delivery_days, stored))
 
-    for existing in list(plan.items):
-        db.delete(existing)
-    db.flush()
-
-    for item, delivery_days in prepared:
-        db.add(
-            PurchasePlanItem(
-                plan_id=plan.id,
-                sales_product_id=item.sales_product_id,
-                product_id=item.product_id,
-                country_id=item.country_id,
-                quantity=item.quantity,
-                price_rub=item.price_rub,
-                supplier_id=item.supplier_id,
-                delivery_days=delivery_days,
-                notes=item.notes,
+    for item, _, stored in prepared:
+        if stored is None or stored.id not in linked:
+            continue
+        if (
+            stored.sales_product_id != item.sales_product_id
+            or stored.product_id != item.product_id
+            or stored.country_id != item.country_id
+        ):
+            raise PlanError(
+                f"Строка «{stored.product.name}» ({stored.country.name}) связана с "
+                "поступлениями: сырьё, страну и позицию плана продаж менять нельзя. "
+                "Сначала снимите привязку в карточках поступлений",
+                status_code=409,
             )
-        )
+
+    removed = [row for row_id, row in existing.items() if row_id not in seen]
+    if removed:
+        counts = _linked_counts(db, [row.id for row in removed])
+        if counts:
+            row = next(row for row in removed if row.id in counts)
+            raise PlanError(
+                f"Строку «{row.product.name}» ({row.country.name}) нельзя убрать: "
+                f"с ней связано поступлений: {counts[row.id]}. Сначала снимите привязку "
+                "в карточках поступлений",
+                status_code=409,
+            )
+        for row in removed:
+            db.delete(row)
+
+    for item, delivery_days, stored in prepared:
+        if stored is None:
+            db.add(
+                PurchasePlanItem(
+                    plan_id=plan.id,
+                    sales_product_id=item.sales_product_id,
+                    product_id=item.product_id,
+                    country_id=item.country_id,
+                    quantity=item.quantity,
+                    price_rub=item.price_rub,
+                    supplier_id=item.supplier_id,
+                    delivery_days=delivery_days,
+                    notes=item.notes,
+                )
+            )
+            continue
+        stored.sales_product_id = item.sales_product_id
+        stored.product_id = item.product_id
+        stored.country_id = item.country_id
+        stored.quantity = item.quantity
+        stored.price_rub = item.price_rub
+        stored.supplier_id = item.supplier_id
+        stored.delivery_days = delivery_days
+        stored.notes = item.notes
 
     db.commit()
     return _serialize(db, _require(db, plan_id))
@@ -660,5 +756,11 @@ def delete_plan(db: Session, user: User, plan_id: uuid.UUID) -> None:
     plan = _require(db, plan_id)
     if plan.status != "draft":
         raise PlanError("Удалить можно только черновик", status_code=409)
+    if _linked_counts(db, [row.id for row in plan.items]):
+        raise PlanError(
+            "На строки плана ссылаются поступления — сначала снимите привязки "
+            "в карточках поступлений",
+            status_code=409,
+        )
     db.delete(plan)
     db.commit()

@@ -69,8 +69,13 @@ class SalesPlanOut(BaseModel):
 
 
 class PurchasePlanItemIn(BaseModel):
-    """Строка плана закупок: сырьё, страна и годовое количество."""
+    """Строка плана закупок: сырьё, страна и годовое количество.
 
+    ``id`` приходит у уже сохранённой строки: по нему сервер обновляет её на месте,
+    чтобы ссылки поступлений не терялись при каждом сохранении плана.
+    """
+
+    id: uuid.UUID | None = Field(default=None, description="Строка плана при сохранении")
     sales_product_id: uuid.UUID = Field(description="Позиция годового плана продаж")
     product_id: uuid.UUID = Field(description="Закупаемое сырьё")
     country_id: uuid.UUID = Field(description="Страна происхождения: срок доставки")
@@ -106,6 +111,7 @@ class PurchasePlanScheduleEntryOut(BaseModel):
 class PurchasePlanItemOut(BaseModel):
     id: uuid.UUID
     sales_product_id: uuid.UUID
+    sales_product_name: str
     product_id: uuid.UUID
     product_code: str
     product_name: str
@@ -119,6 +125,12 @@ class PurchasePlanItemOut(BaseModel):
     supplier_id: uuid.UUID | None
     supplier_name: str | None
     notes: str | None
+    fact_quantity: Decimal = Field(
+        default=Decimal("0"), description="Поступило по связанным поступлениям, в единицах сырья"
+    )
+    fact_share: Decimal = Field(
+        default=Decimal("0"), description="Исполнение, %: факт ÷ годовое количество × 100"
+    )
     schedule: list[PurchasePlanScheduleEntryOut]
 
 

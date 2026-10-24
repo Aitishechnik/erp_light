@@ -1,4 +1,8 @@
-"""Сборка представлений партий и остатков + поступления (создание и правка)."""
+"""Сборка представлений партий и остатков + правка поступлений.
+
+Поступления создаются только выгрузкой 1С (``receipt_import_service``); здесь —
+правка карточки, ссылки на план закупок и сериализация.
+"""
 
 from __future__ import annotations
 
@@ -19,6 +23,7 @@ from app.models.domain import (
     Product,
     StockSnapshot,
 )
+from app.models.planning import PurchasePlanItem
 from app.models.rates import CurrencyRate
 from app.schemas.domain import (
     BatchCreate,
@@ -80,6 +85,7 @@ def load_batches(
     statement = (
         select(Batch)
         .options(selectinload(Batch.items).selectinload(BatchItem.product))
+        .options(selectinload(Batch.items).selectinload(BatchItem.purchase_plan_item))
         .options(selectinload(Batch.expenses))
         .options(selectinload(Batch.payments))
         .order_by(Batch.batch_date, Batch.batch_number)
@@ -102,6 +108,7 @@ def load_batch(db: Session, batch_id: uuid.UUID) -> Batch | None:
             select(Batch)
             .where(Batch.id == batch_id)
             .options(selectinload(Batch.items).selectinload(BatchItem.product))
+            .options(selectinload(Batch.items).selectinload(BatchItem.purchase_plan_item))
             .options(selectinload(Batch.expenses))
             .options(selectinload(Batch.payments))
             .execution_options(populate_existing=True)
@@ -147,6 +154,17 @@ def batch_finance(db: Session, batch: Batch) -> tuple[BatchFinance, CurrencyRate
     return finance, rate_row if isinstance(rate_row, CurrencyRate) else None
 
 
+def plan_link_label(item: BatchItem) -> str | None:
+    """Подпись строки плана для карточки: «2026 · Китай · ООО Импорт»."""
+    link = item.purchase_plan_item
+    if link is None:
+        return None
+    parts = [str(link.plan.year), link.country.name]
+    if link.supplier is not None:
+        parts.append(link.supplier.name)
+    return " · ".join(parts)
+
+
 def serialize_batch(
     batch: Batch,
     snapshots: dict[uuid.UUID, StockSnapshot] | None = None,
@@ -179,6 +197,8 @@ def serialize_batch(
                 risk_unit_currency=item.risk_unit_currency,
                 duty_fixed_rub=item.duty_fixed_rub,
                 vat_fixed_rub=item.vat_fixed_rub,
+                purchase_plan_item_id=item.purchase_plan_item_id,
+                purchase_plan_label=plan_link_label(item),
                 invoice_currency=cost.invoice_currency,
                 risk_currency=cost.risk_currency,
                 duty_rub=cost.duty_rub,
@@ -299,6 +319,20 @@ def check_payments_limit(payload: BatchCreate) -> None:
             )
 
 
+def _resolve_plan_item(
+    db: Session, product_id: uuid.UUID, plan_item_id: uuid.UUID | None
+) -> uuid.UUID | None:
+    """Проверить ссылку на строку плана: она должна быть про то же сырьё."""
+    if plan_item_id is None:
+        return None
+    link = db.get(PurchasePlanItem, plan_item_id)
+    if link is None:
+        raise ValueError("Строка плана закупок не найдена — обновите карточку")
+    if link.product_id != product_id:
+        raise ValueError("Строка плана закупок — про другое сырьё")
+    return link.id
+
+
 def _items_expenses_payments(
     db: Session, batch: Batch, payload: BatchCreate, *, with_items: bool = True
 ) -> None:
@@ -307,6 +341,7 @@ def _items_expenses_payments(
         product = _resolve_product(
             db, item.product_code, item.product_name, item.product_kind, item.unit
         )
+        plan_item_id = _resolve_plan_item(db, product.id, item.purchase_plan_item_id)
         db.add(
             BatchItem(
                 batch_id=batch.id,
@@ -316,6 +351,7 @@ def _items_expenses_payments(
                 duty_percent=item.duty_percent,
                 vat_percent=item.vat_percent,
                 risk_unit_currency=item.risk_unit_currency,
+                purchase_plan_item_id=plan_item_id,
             )
         )
     for expense in payload.expenses:
@@ -341,6 +377,30 @@ def _items_expenses_payments(
         )
 
 
+def _update_plan_links(db: Session, batch: Batch, payload: BatchCreate) -> None:
+    """Сменить только ссылки на план у растаможенной партии — строки не трогаем.
+
+    Ссылка не входит в себестоимость, поэтому её можно менять и после растаможки.
+    Строку поступления находим по ``id``: сопоставление по товару здесь ненадёжно.
+    """
+    stored = {row.id: row for row in batch.items}
+    for row in payload.items:
+        if row.id is None:
+            continue
+        item = stored.get(row.id)
+        if item is None:
+            raise ValueError("Строка поступления не найдена — откройте карточку заново")
+        if row.purchase_plan_item_id is None:
+            item.purchase_plan_item_id = None
+            continue
+        link = db.get(PurchasePlanItem, row.purchase_plan_item_id)
+        if link is None:
+            raise ValueError("Строка плана закупок не найдена — обновите карточку")
+        if link.product_id != item.product_id:
+            raise ValueError("Строка плана закупок — про другое сырьё")
+        item.purchase_plan_item_id = link.id
+
+
 def _resolve_batch_rate(db: Session, payload: BatchCreate) -> Decimal | None:
     """Курс для незакрытого остатка. У черновика без позиций и платежей его не считаем.
 
@@ -355,31 +415,6 @@ def _resolve_batch_rate(db: Session, payload: BatchCreate) -> Decimal | None:
         provided=payload.current_exchange_rate,
         allow_fetch=payload.auto_rate,
     )
-
-
-def create_batch(db: Session, payload: BatchCreate) -> Batch:
-    """Новое поступление: курс берём из запроса, иначе из ЦБ на дату."""
-    check_payments_limit(payload)
-    supplier_id, supplier_name = _resolve_supplier(db, payload)
-    rate = _resolve_batch_rate(db, payload)
-    batch = Batch(
-        batch_number=payload.batch_number,
-        batch_type="purchase",
-        batch_date=payload.batch_date,
-        currency=payload.currency,
-        supplier_id=supplier_id,
-        supplier=supplier_name,
-        current_exchange_rate=rate,
-        source="manual",
-        comment=payload.comment,
-    )
-    db.add(batch)
-    db.flush()
-    _items_expenses_payments(db, batch, payload)
-    db.commit()
-    loaded = load_batch(db, batch.id)
-    assert loaded is not None
-    return loaded
 
 
 def _same_items(batch: Batch, payload: BatchCreate) -> bool:
@@ -446,6 +481,9 @@ def update_batch(db: Session, batch_id: uuid.UUID, payload: BatchCreate) -> Batc
         db.delete(payment)
     db.flush()
     _items_expenses_payments(db, batch, payload, with_items=not cleared)
+    if cleared:
+        # Строки растаможенной партии не пересоздаются: ссылки на план меняем по id.
+        _update_plan_links(db, batch, payload)
     db.commit()
     return load_batch(db, batch_id)
 

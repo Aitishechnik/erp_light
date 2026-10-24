@@ -1,4 +1,7 @@
-"""Поступления партий: календарь, карточка, создание, правка, удаление, позиции из 1С."""
+"""Поступления партий: календарь, карточка, правка, удаление, позиции из 1С.
+
+Создаются только выгрузкой 1С (``imports``), поэтому эндпоинта создания нет.
+"""
 
 from __future__ import annotations
 
@@ -19,7 +22,6 @@ from app.services import batch_import_service
 from app.services.batch_service import (
     ITEMS_LOCKED,
     batch_finance,
-    create_batch,
     delete_batch,
     expense_rates,
     latest_snapshots,
@@ -34,7 +36,7 @@ from app.services.import_service import ImportDataError
 
 router = APIRouter(tags=["batches"])
 
-# Заводить и править поступления могут закупки; смотрят все вошедшие.
+# Заполнять и править карточку поступления могут закупки; смотрят все вошедшие.
 Writer = Annotated[User, Depends(require_roles(ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER))]
 # Отмена растаможки — только директор по закупкам.
 Director = Annotated[User, Depends(require_roles(ROLE_PURCHASE_DIRECTOR))]
@@ -77,29 +79,6 @@ def get_batch(batch_id: uuid.UUID, user: CurrentUser, db: DbSession) -> BatchOut
     batch = load_batch(db, batch_id)
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Поступление не найдено")
-    return _out(db, batch)
-
-
-@router.post("/batches", response_model=BatchOut, status_code=status.HTTP_201_CREATED)
-def post_batch(payload: BatchCreate, user: Writer, db: DbSession) -> BatchOut:
-    """Новое поступление. Курс берём из запроса, иначе с сайта ЦБ."""
-    _require_items(payload)
-    exists = (
-        db.execute(select(Batch).where(Batch.batch_number == payload.batch_number))
-        .scalars()
-        .one_or_none()
-    )
-    if exists is not None:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"Поступление «{payload.batch_number}» уже существует",
-        )
-    try:
-        batch = create_batch(db, payload)
-    except RateError as exc:
-        raise HTTPException(exc.status_code, exc.message) from exc
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     return _out(db, batch)
 
 

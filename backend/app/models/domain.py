@@ -12,6 +12,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Date,
@@ -29,6 +30,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
 
+if TYPE_CHECKING:
+    from app.models.planning import PurchasePlanItem
+
 # Виды номенклатуры: соответствуют файлам выгрузки из 1С.
 PRODUCT_KINDS = ("goods", "material", "raw", "finished")
 
@@ -42,7 +46,8 @@ PRODUCT_KIND_TITLES = {
 # Типы партий.
 BATCH_TYPES = ("purchase", "production")
 
-# Источник записи: выгрузка из 1С или ручной ввод.
+# Источник записи: выгрузка из 1С. Ручных поступлений больше не заводим — значение
+# `manual` осталось для старых записей.
 SOURCES = ("1c", "manual")
 
 # Категории валютных платежей: инвойс и рисковая надбавка закрываются отдельно.
@@ -178,12 +183,20 @@ class BatchItem(Base):
         nullable=True,
         comment="НДС строки, ₽: фикс на дату растаможки (пусто — считаем по проценту)",
     )
+    purchase_plan_item_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("purchase_plan_items.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Строка плана закупок, по которой пришёл товар; пусто — закупка без плана",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
     batch: Mapped[Batch] = relationship(back_populates="items")
     product: Mapped[Product] = relationship(back_populates="batch_items", lazy="joined")
+    purchase_plan_item: Mapped[PurchasePlanItem | None] = relationship()
     snapshots: Mapped[list[StockSnapshot]] = relationship(
         back_populates="batch_item", cascade="all, delete-orphan"
     )

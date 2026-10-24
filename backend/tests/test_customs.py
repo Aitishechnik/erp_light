@@ -17,6 +17,7 @@ from httpx import Response
 from openpyxl import Workbook
 
 from app.services import currency_service
+from tests.helpers import create_receipt_draft
 
 DAY = "2026-10-08"
 CUSTOMS_DAY = "2026-10-20"
@@ -59,8 +60,11 @@ def _payload(**overrides: object) -> dict[str, object]:
 
 
 def _create(client: TestClient, **overrides: object) -> dict[str, Any]:
-    response = client.post("/api/v1/batches", json=_payload(**overrides))
-    assert response.status_code == 201, response.text
+    """Поступление как в жизни: черновик из 1С, затем заполнение карточки."""
+    payload = _payload(**overrides)
+    draft = create_receipt_draft(client, str(payload["batch_number"]))
+    response = client.put(f"/api/v1/batches/{draft['id']}", json=payload)
+    assert response.status_code == 200, response.text
     body: dict[str, Any] = response.json()
     return body
 

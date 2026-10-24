@@ -4,6 +4,7 @@
 """
 
 from collections.abc import Callable, Iterator
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,7 +15,11 @@ import app.models  # noqa: F401 — регистрирует таблицы в B
 from app.config import get_settings
 from app.db import Base, get_db
 from app.main import create_app
+from app.models.counterparties import Counterparty
+from app.models.countries import Country
+from app.models.domain import Product
 from app.services.auth import seed_demo_users
+from tests.helpers import put_batch
 
 # Пароль демо-пользователей в тестах; роли — по логину (sales, commercial, ...).
 DEMO_PASSWORD = "test-password"
@@ -75,6 +80,60 @@ def _build_client(engine: Engine) -> TestClient:
 
 
 @pytest.fixture
+def catalog(db_session: Session) -> dict[str, Any]:
+    finished = Product(code="FIN-1", name="Смесь ореховая", kind="finished", unit="шт")
+    finished2 = Product(code="FIN-2", name="Финики", kind="finished", unit="кг")
+    raw = Product(code="RAW-1", name="Арахис", kind="raw", unit="кг")
+    raw2 = Product(code="RAW-2", name="Кокос", kind="raw", unit="кг")
+    material = Product(code="MAT-1", name="Банка 500 г", kind="material", unit="шт")
+    inactive_raw = Product(
+        code="RAW-3", name="Старое сырьё", kind="raw", unit="кг", is_active=False
+    )
+    customer = Counterparty(name="ООО Ромашка", name_key="ооо ромашка", is_customer=True)
+    supplier = Counterparty(name="ООО Импорт", name_key="ооо импорт", is_import_supplier=True)
+    local = Counterparty(name="ООО Локальный", name_key="ооо локальный", is_local_supplier=True)
+    thailand = Country(name="Таиланд", name_key="таиланд", delivery_days=90)
+    china = Country(name="Китай", name_key="китай", delivery_days=65)
+    fast = Country(name="Индия", name_key="индия", delivery_days=30)
+    inactive_country = Country(
+        name="Недоступная", name_key="недоступная", delivery_days=10, is_active=False
+    )
+    db_session.add_all(
+        [
+            finished,
+            finished2,
+            raw,
+            raw2,
+            material,
+            inactive_raw,
+            customer,
+            supplier,
+            local,
+            thailand,
+            china,
+            fast,
+            inactive_country,
+        ]
+    )
+    db_session.commit()
+    return {
+        "fin": finished,
+        "fin2": finished2,
+        "raw": raw,
+        "raw2": raw2,
+        "material": material,
+        "inactive_raw": inactive_raw,
+        "customer": customer,
+        "supplier": supplier,
+        "local": local,
+        "thailand": thailand,
+        "china": china,
+        "fast": fast,
+        "inactive_country": inactive_country,
+    }
+
+
+@pytest.fixture
 def client(engine: Engine, users: None) -> Iterator[TestClient]:
     """Клиент, вошедший как менеджер по закупкам (импорт)."""
     with _build_client(engine) as test_client:
@@ -104,3 +163,18 @@ def logout(client: TestClient) -> Callable[[], None]:
         assert client.post("/api/v1/auth/logout").status_code == 204
 
     return _logout
+
+
+@pytest.fixture
+def make_batch(client: TestClient) -> Callable[..., dict[str, Any]]:
+    """Завести поступление как в жизни: черновик из 1С, затем правка карточки.
+
+    Эндпоинта создания поступления больше нет — тесты идут тем же путём, что и
+    приложение: выгрузка шапки, затем ``PUT /batches/{id}`` со строками.
+    """
+
+    def _make(payload: dict[str, Any]) -> dict[str, Any]:
+        body: dict[str, Any] = put_batch(client, payload)
+        return body
+
+    return _make

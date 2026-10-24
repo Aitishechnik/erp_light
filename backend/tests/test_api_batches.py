@@ -1,4 +1,7 @@
-"""API-сквозной сценарий: ручная партия → себестоимость → остатки."""
+"""API-сквозной сценарий: партия → себестоимость → остатки.
+
+Поступления создаются выгрузкой 1С; фикстура ``make_batch`` повторяет этот путь.
+"""
 
 from decimal import Decimal
 
@@ -39,11 +42,9 @@ def test_health(client: TestClient) -> None:
     assert client.get("/api/v1/health/db").json() == {"status": "ok"}
 
 
-def test_create_batch_computes_cost_and_stock(client: TestClient) -> None:
-    created = client.post("/api/v1/batches", json=BATCH_PAYLOAD)
-    assert created.status_code == 201, created.text
+def test_batch_computes_cost_and_stock(client: TestClient, make_batch) -> None:
+    body = make_batch(BATCH_PAYLOAD)
 
-    body = created.json()
     assert Decimal(body["finance"]["invoice_total_currency"]) == Decimal("1000.00")
     assert Decimal(body["finance"]["expenses_rub"]) == Decimal("500.00")
     assert Decimal(body["finance"]["final_cost_rub"]) == Decimal("1500.00")
@@ -64,19 +65,29 @@ def test_create_batch_computes_cost_and_stock(client: TestClient) -> None:
     assert [batch["batch_number"] for batch in listed.json()] == ["P-001"]
 
 
-def test_products_are_created_from_batch(client: TestClient) -> None:
-    client.post("/api/v1/batches", json=BATCH_PAYLOAD)
+def test_manual_creation_endpoint_is_gone(client: TestClient) -> None:
+    """Ручного создания поступлений больше нет: только выгрузка 1С."""
+    response = client.post("/api/v1/batches", json=BATCH_PAYLOAD)
+    assert response.status_code == 405
+
+
+def test_products_are_created_from_batch(client: TestClient, make_batch) -> None:
+    make_batch(BATCH_PAYLOAD)
     goods = client.get("/api/v1/products", params={"kind": "goods"}).json()
     assert [product["code"] for product in goods] == ["SKU-1"]
     materials = client.get("/api/v1/products", params={"kind": "material"}).json()
     assert [product["code"] for product in materials] == ["SKU-2"]
 
 
-def test_duplicate_batch_number_is_rejected(client: TestClient) -> None:
-    assert client.post("/api/v1/batches", json=BATCH_PAYLOAD).status_code == 201
-    again = client.post("/api/v1/batches", json=BATCH_PAYLOAD)
-    assert again.status_code == 409
-    assert "уже существует" in again.json()["detail"]
+def test_duplicate_batch_number_is_rejected(client: TestClient, make_batch) -> None:
+    make_batch(BATCH_PAYLOAD)
+    second = make_batch({**BATCH_PAYLOAD, "batch_number": "P-002"})
+    # Меняем номер второго на занятый — сервер отвечает 409, как и при выгрузке.
+    response = client.put(
+        f"/api/v1/batches/{second['id']}", json={**BATCH_PAYLOAD, "batch_number": "P-001"}
+    )
+    assert response.status_code == 409
+    assert "уже существует" in response.json()["detail"]
 
 
 def test_unknown_batch_returns_404(client: TestClient) -> None:
@@ -84,8 +95,8 @@ def test_unknown_batch_returns_404(client: TestClient) -> None:
     assert response.status_code == 404
 
 
-def test_invoice_total_is_sum_of_item_prices(client: TestClient) -> None:
+def test_invoice_total_is_sum_of_item_prices(client: TestClient, make_batch) -> None:
     """Инвойс партии не хранится: он всегда равен сумме «цена × количество»."""
-    created = client.post("/api/v1/batches", json=BATCH_PAYLOAD).json()
+    created = make_batch(BATCH_PAYLOAD)
     assert Decimal(created["finance"]["invoice_total_currency"]) == Decimal("1000.00")
     assert Decimal(created["finance"]["risk_total_currency"]) == Decimal("0.00")

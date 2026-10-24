@@ -5,17 +5,18 @@ import {
   type BatchIn,
   type Counterparty,
   cancelCustoms,
-  createBatch,
   deleteBatch,
   type ExpenseCurrency,
   errorMessage,
   fetchBatches,
   fetchCounterparties,
   fetchProducts,
+  fetchPurchasePlans,
   fetchRate,
   formatMoney,
   type PaymentCategory,
   type Product,
+  type PurchasePlan,
   type Role,
   type SessionUser,
   updateBatch,
@@ -32,6 +33,8 @@ function currencyLabel(currency: string): string {
 
 type ItemDraft = {
   key: string
+  /** Строка партии на сервере; пусто у новой строки. */
+  id: string | null
   /** Что видно в поле «Товар»: название позиции. */
   title: string
   /** Код из 1С — то, что уходит на сервер; пустой, если название не нашлось. */
@@ -49,6 +52,10 @@ type ItemDraft = {
   dutyRub: string
   /** НДС строки, ₽: фикс после растаможки (вместо процента). */
   vatRub: string
+  /** Строка плана закупок; пусто — закупка без плана. */
+  planItemId: string
+  /** Подпись сохранённой строки плана — чтобы показать её, если план не в списке. */
+  planLabel: string
 }
 
 /** Ключ сравнения: регистр, «ё» и лишние пробелы не важны. */
@@ -73,6 +80,98 @@ type ExpenseDraft = {
   /** Валюта расхода: только руб. или usd. */
   currency: ExpenseCurrency
   amount: string
+}
+
+/** Вариант строки плана закупок для выбора в позиции поступления. */
+type PlanLine = {
+  id: string
+  productId: string
+  /** Что видно в списке: год, страна и поставщик. */
+  label: string
+  /** Для какого товара плана продаж закупается строка. */
+  detail: string
+}
+
+/** Утверждённые планы: выбирать можно только их строки. */
+function approvedPlanLines(plans: PurchasePlan[]): PlanLine[] {
+  const rows: PlanLine[] = []
+  for (const plan of plans) {
+    if (plan.status !== 'approved') continue
+    for (const line of plan.items) {
+      rows.push({
+        id: line.id,
+        productId: line.product_id,
+        label: `${plan.year} · ${line.country_name}${
+          line.supplier_name ? ` · ${line.supplier_name}` : ''
+        }`,
+        detail: line.sales_product_name,
+      })
+    }
+  }
+  return rows
+}
+
+/**
+ * Ссылка позиции поступления на строку плана закупок.
+ *
+ * Ссылку ставит закупщик: 1С не знает наш план. Предлагаются только строки того же
+ * сырья из утверждённых планов; «не по плану» — обычное поступление.
+ */
+function PlanLink({
+  item,
+  lines,
+  products,
+  mayEdit,
+  disabled,
+  onChange,
+}: {
+  item: ItemDraft
+  lines: PlanLine[]
+  products: Product[]
+  mayEdit: boolean
+  disabled: boolean
+  onChange: (planItemId: string, label: string) => void
+}) {
+  const product = findProduct(products, item.code || item.title)
+  const options = product ? lines.filter((row) => row.productId === product.id) : []
+  const current = item.planItemId ? lines.find((row) => row.id === item.planItemId) : undefined
+
+  if (!mayEdit) {
+    return current || item.planItemId ? (
+      <span className="plan-chip" data-testid={`plan-link-${item.key}`}>
+        план: {item.planLabel || 'строка плана'}
+      </span>
+    ) : null
+  }
+  if (!product) return null
+
+  return (
+    <>
+      <span className="plan-caption">Строка плана</span>
+      <select
+        className="plan-select"
+        aria-label={`Строка плана ${item.key}`}
+        data-testid={`plan-select-${item.key}`}
+        title="Строка плана закупок, по которой пришёл товар"
+        disabled={disabled}
+        value={item.planItemId}
+        onChange={(event) => {
+          const chosen = lines.find((row) => row.id === event.target.value)
+          onChange(event.target.value, chosen?.label ?? '')
+        }}
+      >
+        <option value="">— не по плану —</option>
+        {options.map((row) => (
+          <option key={row.id} value={row.id}>
+            {row.label} · для «{row.detail}»
+          </option>
+        ))}
+        {current === undefined && item.planItemId ? (
+          <option value={item.planItemId}>{item.planLabel || 'сохранённая строка плана'}</option>
+        ) : null}
+      </select>
+    </>
+  )
 }
 
 type PaymentDraft = {
@@ -408,6 +507,7 @@ function draftFrom(batch: Batch): Draft {
     comment: batch.comment ?? '',
     items: batch.items.map((item, index) => ({
       key: `i${index}`,
+      id: item.id,
       title: item.product_name,
       code: item.product_code,
       quantity: trim(item.quantity),
@@ -418,6 +518,8 @@ function draftFrom(batch: Batch): Draft {
       risk: trim(item.risk_unit_currency),
       dutyRub: item.duty_fixed_rub === null ? '' : trim(item.duty_fixed_rub),
       vatRub: item.vat_fixed_rub === null ? '' : trim(item.vat_fixed_rub),
+      planItemId: item.purchase_plan_item_id ?? '',
+      planLabel: item.purchase_plan_label ?? '',
     })),
     payments: batch.payments.map((payment, index) => ({
       key: `p${index}`,
@@ -436,40 +538,6 @@ function draftFrom(batch: Batch): Draft {
     isDraft,
     customsDate: batch.customs_date ?? '',
     customsRate: batch.customs_rate === null ? '' : trim(batch.customs_rate),
-  }
-}
-
-function emptyDraft(day: string): Draft {
-  return {
-    id: null,
-    number: '',
-    date: day,
-    currency: 'RUB',
-    supplierId: '',
-    supplierText: '',
-    rate: '1',
-    // Курс ещё не выбирали: подпись покажет «введён вручную», пока не нажмут «Курс ЦБ».
-    rateDate: '',
-    comment: '',
-    items: [
-      {
-        key: 'i0',
-        title: '',
-        code: '',
-        quantity: '',
-        price: '',
-        duty: '0',
-        vat: '22',
-        risk: '0',
-        dutyRub: '',
-        vatRub: '',
-      },
-    ],
-    payments: [],
-    expenses: [],
-    isDraft: false,
-    customsDate: '',
-    customsRate: '',
   }
 }
 
@@ -499,6 +567,7 @@ function snapshot(source: Draft): string {
       row.risk,
       row.dutyRub,
       row.vatRub,
+      row.planItemId,
     ]),
     payments: source.payments.map((row) => [
       row.date,
@@ -523,6 +592,8 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   const [savedHint, setSavedHint] = useState<string | null>(null)
   const [suppliers, setSuppliers] = useState<Counterparty[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  /** Утверждённые планы закупок: из них выбирается строка для позиции. */
+  const [plans, setPlans] = useState<PurchasePlan[]>([])
   const [rateHint, setRateHint] = useState<string | null>(null)
   const [itemsFile, setItemsFile] = useState<File | null>(null)
   const [itemsHint, setItemsHint] = useState<string | null>(null)
@@ -574,6 +645,15 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   }, [])
 
   useEffect(() => {
+    // Строки плана выбирают те же роли, что заполняют карточку. Остальным планы
+    // недоступны (403) — у них ссылка показывается готовой подписью с сервера.
+    if (!mayLoadItems) return
+    fetchPurchasePlans()
+      .then(setPlans)
+      .catch(() => setPlans([]))
+  }, [mayLoadItems])
+
+  useEffect(() => {
     // Курс ЦБ на сегодня нужен расходам в usd; без него такой расход не оценён.
     fetchRate('USD')
       .then((rate) => setUsdRate(rate.rate))
@@ -600,6 +680,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   }, [batches])
 
   const dayBatches = byDay.get(day) ?? []
+  const planLineOptions = useMemo(() => approvedPlanLines(plans), [plans])
   const cost = draft ? liveCost(draft, usdRate === null ? null : number(usdRate)) : null
   const hasRisk = (cost?.risk.total ?? 0) > 0
   /** Партия растаможена: пошлина и НДС — фикс в рублях, строки только для чтения. */
@@ -621,22 +702,6 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
     setDay(`${next}-01`)
   }
 
-  const startCreate = (target = day) => {
-    if (dirty && !window.confirm('В карточке есть несохранённые изменения. Начать новое?')) {
-      return
-    }
-    setOpenSections(['items'])
-    setRateHint(null)
-    setError(null)
-    setItemsFile(null)
-    setItemsHint(null)
-    setCustoms(null)
-    const fresh = emptyDraft(target)
-    setDraft(fresh)
-    setSavedSnapshot(snapshot(fresh))
-    setSavedHint(null)
-  }
-
   const startEdit = (batch: Batch) => {
     setOpenSections(['items'])
     setRateHint(null)
@@ -656,6 +721,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
    */
   const loadItems = async () => {
     if (!draft?.id || !itemsFile) return
+    const hadPlanLinks = draft.items.some((row) => row.planItemId !== '')
     setBusy(true)
     setError(null)
     setItemsHint(null)
@@ -670,7 +736,8 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
       const replaced = result.report.rows_updated
       setItemsHint(
         `Из файла загружено строк: ${result.report.rows_created}` +
-          (replaced ? `, заменено прежних: ${replaced}` : ''),
+          (replaced ? `, заменено прежних: ${replaced}` : '') +
+          (hadPlanLinks ? '. Привязки к плану сняты — свяжите позиции заново.' : ''),
       )
     } catch (err) {
       setError(errorMessage(err))
@@ -827,7 +894,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (!draft) return
+    if (!draft?.id) return
     const current = liveCost(draft, usdRate === null ? null : number(usdRate))
     if (current.limitInvoiceExceeded || current.limitRiskExceeded) {
       setError('Сумма валютных платежей больше суммы партии по этой категории')
@@ -836,12 +903,14 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
     const items = draft.items
       .filter((item) => item.code.trim() !== '' && number(item.quantity) > 0)
       .map((item) => ({
+        id: item.id,
         product_code: item.code.trim(),
         quantity: item.quantity.replace(',', '.'),
         unit_price_currency: (item.price || '0').replace(',', '.'),
         duty_percent: (item.duty || '0').replace(',', '.'),
         vat_percent: (item.vat || '0').replace(',', '.'),
         risk_unit_currency: (item.risk || '0').replace(',', '.'),
+        purchase_plan_item_id: item.planItemId || null,
       }))
     if (items.length === 0 && !draft.isDraft) {
       setError('Добавьте хотя бы одну строку: товар и количество')
@@ -880,7 +949,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
     setBusy(true)
     setError(null)
     try {
-      const saved = draft.id ? await updateBatch(draft.id, payload) : await createBatch(payload)
+      const saved = await updateBatch(draft.id, payload)
       // Карточка не закрывается, а показывает то, что записал сервер: сразу видно
       // результат и можно переходить к растаможке — она работает по сохранённым строкам.
       const fresh = draftFrom(saved)
@@ -992,9 +1061,6 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
         </button>
       </div>
       <span className="spacer" />
-      <button type="button" className="primary" onClick={() => startCreate(day)}>
-        Новое поступление
-      </button>
     </header>
   )
 
@@ -1055,6 +1121,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
         ) : null}
         {dayBatches.map((batch) => {
           const isDraft = batch.source === '1c' && batch.items.length === 0
+          const planned = batch.items.filter((item) => item.purchase_plan_item_id).length
           const active = draft?.id === batch.id
           return (
             <button
@@ -1069,6 +1136,17 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                 {isDraft ? (
                   <span className="badge status-draft" data-testid="draft-badge">
                     черновик
+                  </span>
+                ) : null}
+                {planned > 0 ? (
+                  <span
+                    className="badge status-plan"
+                    data-testid="plan-badge"
+                    title="Позиции связаны со строками плана закупок"
+                  >
+                    {planned === batch.items.length
+                      ? 'по плану'
+                      : `по плану ${planned} из ${batch.items.length}`}
                   </span>
                 ) : null}
                 {batch.customs_date ? (
@@ -1112,12 +1190,9 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
               </h2>
               <p className="hint">
                 {dayBatches.length === 0
-                  ? 'Можно добавить поступление на этот день или выбрать другой день в календаре.'
+                  ? 'Поступления загружаются из 1С: «Загрузка данных» → «Импортные поступления». Или выберите другой день в календаре.'
                   : 'Слева — все поступления этого дня. Нажмите на любое, чтобы открыть его.'}
               </p>
-              <button type="button" className="primary" onClick={() => startCreate(day)}>
-                Добавить поступление
-              </button>
             </div>
           </div>
         </div>
@@ -1152,15 +1227,13 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
             <header className="doc-header">
               <div className="doc-header-main">
                 <div className="doc-title-row">
-                  <input
-                    className="doc-title-input"
+                  <h2
+                    className="doc-title"
+                    data-testid="receipt-number"
                     aria-label="Номер поступления"
-                    placeholder="Новый номер"
-                    value={draft.number}
-                    size={Math.max(draft.number.length, 8)}
-                    onChange={(event) => setDraft({ ...draft, number: event.target.value })}
-                    required
-                  />
+                  >
+                    {draft.number}
+                  </h2>
                   {draft.isDraft ? <span className="badge status-draft">черновик</span> : null}
                   {draft.customsDate ? (
                     <span className="badge status-clearance" data-testid="customs-badge">
@@ -1182,7 +1255,8 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                   <p className="hint" data-testid="draft-hint">
                     Черновик из выгрузки 1С: заполнены номер, дата, поставщик и комментарий.
                     Загрузите файл «Партия» из 1С или добавьте позиции вручную — и поступление
-                    станет обычным.
+                    станет обычным. Если закупка шла по плану, свяжите позиции со строками плана
+                    закупок.
                   </p>
                 ) : null}
               </div>
@@ -1303,11 +1377,6 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                 растаможка посчитает суммы по сохранённым строкам.
               </p>
             ) : null}
-            {draft.customsDate === '' && !draft.id ? (
-              <p className="hint" data-testid="customs-need-save">
-                Растаможка доступна после сохранения поступления.
-              </p>
-            ) : null}
 
             <section className="numbers" aria-label="Итоги партии">
               <div className="numbers-cell numbers-main">
@@ -1406,6 +1475,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                                 ...draft.items,
                                 {
                                   key: nextKey('i'),
+                                  id: null,
                                   title: '',
                                   code: '',
                                   quantity: '',
@@ -1415,6 +1485,8 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                                   risk: '0',
                                   dutyRub: '',
                                   vatRub: '',
+                                  planItemId: '',
+                                  planLabel: '',
                                 },
                               ],
                             })
@@ -1496,11 +1568,25 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                                         // В поле — название; код под полем всегда тот, что уйдёт на сервер.
                                         const title = event.target.value
                                         const found = findProduct(products, title)
+                                        // Сменили товар — чужая строка плана больше не подходит.
+                                        const keepPlan =
+                                          found !== undefined &&
+                                          planLineOptions.some(
+                                            (line) =>
+                                              line.id === item.planItemId &&
+                                              line.productId === found.id,
+                                          )
                                         setDraft({
                                           ...draft,
                                           items: draft.items.map((row) =>
                                             row.key === item.key
-                                              ? { ...row, title, code: found?.code ?? '' }
+                                              ? {
+                                                  ...row,
+                                                  title,
+                                                  code: found?.code ?? '',
+                                                  planItemId: keepPlan ? row.planItemId : '',
+                                                  planLabel: keepPlan ? row.planLabel : '',
+                                                }
                                               : row,
                                           ),
                                         })
@@ -1523,6 +1609,23 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
                                     ) : null}
                                   </>
                                 )}
+                                <PlanLink
+                                  item={item}
+                                  lines={planLineOptions}
+                                  products={products}
+                                  mayEdit={mayLoadItems}
+                                  disabled={locked}
+                                  onChange={(planItemId, label) =>
+                                    setDraft({
+                                      ...draft,
+                                      items: draft.items.map((row) =>
+                                        row.key === item.key
+                                          ? { ...row, planItemId, planLabel: label }
+                                          : row,
+                                      ),
+                                    })
+                                  }
+                                />
                               </td>
                               <td className="num">
                                 {cleared ? (

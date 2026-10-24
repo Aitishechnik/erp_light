@@ -146,6 +146,8 @@ const RECEIPT = {
       risk_unit_currency: '0.0000',
       duty_fixed_rub: null,
       vat_fixed_rub: null,
+      purchase_plan_item_id: null,
+      purchase_plan_label: null,
       invoice_currency: '1000.00',
       risk_currency: '0.00',
       duty_rub: '0.00',
@@ -767,15 +769,18 @@ test('менеджер предлагает корректировку утве�
   await expect(page.getByTestId('correction-box')).toContainText('Черновик корректировки')
 })
 
-test('поступление заводится в календаре, себестоимость считается сразу', async ({ page }) => {
+test('поступление из 1С открывается в календаре, себестоимость считается сразу', async ({
+  page,
+}) => {
   await mockSession(page)
   await page.route('**/api/v1/batches**', (route) =>
-    route.request().method() === 'POST'
-      ? route.fulfill({ status: 201, json: RECEIPT })
-      : route.fulfill({ json: [] }),
+    route.request().method() === 'PUT'
+      ? route.fulfill({ json: RECEIPT })
+      : route.fulfill({ json: [{ ...RECEIPT, batch_date: localToday() }] }),
   )
   await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [] }))
   await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/purchase-plans**', (route) => route.fulfill({ json: [] }))
   await page.route('**/api/v1/rates/USD', (route) =>
     route.fulfill({
       json: { code: 'USD', rate_date: '2026-10-14', rate: '90.5000', nominal: 1, source: 'cbr' },
@@ -786,13 +791,9 @@ test('поступление заводится в календаре, себе�
   await openSection(page, 'Закупки', 'Поступления')
   await expect(page.getByTestId('receipts-calendar')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Добавить поступление' }).click()
-  await page.getByLabel('Номер поступления').fill('P-500')
-  await page.getByLabel('Валюта').fill('USD')
-  await page.getByLabel('Курс', { exact: true }).fill('90')
-  await page.getByLabel('Товар i0').fill('SKU-1')
-  await page.getByLabel('Количество i0').fill('10')
-  await page.getByLabel('Стоимость за ед. i0').fill('100')
+  // Поступления создаются выгрузкой 1С: открываем уже загруженное поступление.
+  await page.getByTestId('day-receipt-b1').click()
+  await expect(page.getByTestId('receipt-number')).toHaveText('P-500')
   // НДС не в теме этого сценария: обнуляем, чтобы суммы остались круглыми.
   await page.getByLabel('НДС i0').fill('0')
 
@@ -854,14 +855,15 @@ test('пошлина, Risk и общие расходы считаются в к
   const posted: Record<string, unknown>[] = []
   await mockSession(page)
   await page.route('**/api/v1/batches**', (route) => {
-    if (route.request().method() === 'POST') {
+    if (route.request().method() === 'PUT') {
       posted.push(route.request().postDataJSON() as Record<string, unknown>)
-      return route.fulfill({ status: 201, json: RECEIPT })
+      return route.fulfill({ json: RECEIPT })
     }
-    return route.fulfill({ json: [] })
+    return route.fulfill({ json: [{ ...RECEIPT, batch_date: localToday() }] })
   })
   await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [] }))
   await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/purchase-plans**', (route) => route.fulfill({ json: [] }))
   await page.route('**/api/v1/rates/USD', (route) =>
     route.fulfill({
       json: { code: 'USD', rate_date: '2026-10-14', rate: '90.5000', nominal: 1, source: 'cbr' },
@@ -870,9 +872,7 @@ test('пошлина, Risk и общие расходы считаются в к
 
   await page.goto('/')
   await openSection(page, 'Закупки', 'Поступления')
-  await page.getByRole('button', { name: 'Добавить поступление' }).click()
-  await page.getByLabel('Номер поступления').fill('P-600')
-  await page.getByLabel('Валюта').fill('USD')
+  await page.getByTestId('day-receipt-b1').click()
   await page.getByLabel('Курс', { exact: true }).fill('90')
   await page.getByLabel('Товар i0').fill('SKU-1')
   await page.getByLabel('Количество i0').fill('10')

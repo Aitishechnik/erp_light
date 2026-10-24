@@ -115,6 +115,7 @@ function plan(overrides: Partial<PurchasePlan> = {}): PurchasePlan {
       {
         id: 'item-1',
         sales_product_id: 'fin-1',
+        sales_product_name: 'Смесь ореховая',
         product_id: 'raw-1',
         product_code: 'RAW-1',
         product_name: 'Орех грецкий, вес',
@@ -128,6 +129,8 @@ function plan(overrides: Partial<PurchasePlan> = {}): PurchasePlan {
         supplier_id: 'sup-1',
         supplier_name: 'ООО Импорт',
         notes: null,
+        fact_quantity: '10.000',
+        fact_share: '33.3',
         schedule: [
           {
             month: 1,
@@ -205,6 +208,9 @@ describe('PurchasePlanPage', () => {
     expect(screen.getByTestId('position-FIN-1')).toHaveTextContent('разложено')
     expect(await screen.findByLabelText('Количество FIN-1 1')).toHaveValue('30')
     expect(screen.getByTestId('purchase-plan-card')).toHaveTextContent(/15\s*000,00/)
+    // План/факт: 10 кг из 30 — только по явной ссылке поступления на строку.
+    expect(screen.getByTestId('fact-item-1')).toHaveTextContent('поступило 10')
+    expect(screen.getByTestId('fact-item-1')).toHaveTextContent('33,3')
     // График: 10 кг на январь и 20 кг на февраль, заказ за 90 дней до потребности.
     const table = screen.getByTestId('purchase-table')
     expect(table).toHaveTextContent('янв 10')
@@ -228,6 +234,8 @@ describe('PurchasePlanPage', () => {
     expect(sent).toContain('"country_id":"cn-1"')
     expect(sent).toContain('"quantity":"12.5"')
     expect(sent).toContain('"price_rub":"300.25"')
+    // Сохранённая строка уходит со своим id — ссылки поступлений не теряются.
+    expect(sent).toContain('"id":"item-1"')
     expect(await screen.findByTestId('purchase-saved')).toHaveTextContent('План сохранён')
   })
 

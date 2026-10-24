@@ -103,6 +103,8 @@ function batch(overrides: Partial<Batch> = {}): Batch {
         risk_unit_currency: '0.0000',
         duty_fixed_rub: null,
         vat_fixed_rub: null,
+        purchase_plan_item_id: null,
+        purchase_plan_label: null,
         invoice_currency: '1000.00',
         risk_currency: '0.00',
         duty_rub: '0.00',
@@ -227,27 +229,23 @@ describe('ReceiptsPage', () => {
     expect(screen.getByTestId('payment-rub-p0')).toHaveTextContent('48 000,00')
   })
 
-  it('создаёт поступление и отправляет строки с товаром', async () => {
+  it('заполняет поступление из 1С строками и сохраняет карточку', async () => {
     const user = userEvent.setup()
     mockApi({
-      'POST /api/v1/batches': {
-        status: 201,
-        body: batch({ id: 'b2', batch_number: 'P-200' }),
-      },
-      ...routes({ '/api/v1/batches': { body: [batch()] } }),
+      'PUT /api/v1/batches/d1': { body: batch({ id: 'd1', batch_number: 'ИТ-00000388' }) },
+      ...routes({ '/api/v1/batches': { body: [draftBatch()] } }),
     })
     render(<ReceiptsPage />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByRole('button', { name: 'Добавить поступление' }))
+    await openBatch(user, 'd1')
+    // Номер пришёл из 1С — он не поле ввода.
+    expect(screen.getByTestId('receipt-number')).toHaveTextContent('ИТ-00000388')
 
-    await user.type(screen.getByLabelText('Номер поступления'), 'P-200')
-    await user.selectOptions(screen.getByLabelText('Поставщик'), 's1')
-    await user.clear(screen.getByLabelText('Валюта'))
-    await user.type(screen.getByLabelText('Валюта'), 'USD')
-    await user.type(screen.getByLabelText('Товар i0'), 'ТОВ1')
-    await user.type(screen.getByLabelText('Количество i0'), '5')
-    await user.type(screen.getByLabelText('Стоимость за ед. i0'), '50')
+    await user.click(screen.getByRole('button', { name: 'Добавить строку' }))
+    await user.type(screen.getByLabelText('Товар inew1'), 'ТОВ1')
+    await user.type(screen.getByLabelText('Количество inew1'), '5')
+    await user.type(screen.getByLabelText('Стоимость за ед. inew1'), '50')
     await user.clear(screen.getByLabelText('Курс'))
     await user.type(screen.getByLabelText('Курс'), '95')
     await user.click(screen.getByRole('button', { name: 'Сохранить' }))
@@ -255,12 +253,14 @@ describe('ReceiptsPage', () => {
     await waitFor(() => {
       expect(bodies().some((body) => body.includes('"product_code":"ТОВ1"'))).toBe(true)
     })
-    const sent = bodies().find((body) => body.includes('P-200')) ?? ''
+    const sent = bodies().find((body) => body.includes('"product_code":"ТОВ1"')) ?? ''
     expect(sent).toContain('"supplier_id":"s1"')
     expect(sent).toContain('"current_exchange_rate":"95"')
     expect(sent).toContain('"quantity":"5"')
     expect(sent).toContain('"unit_price_currency":"50"')
     expect(sent).toContain('"vat_percent":"22"')
+    // План не выбран — уходит явный null, а не выдуманная ссылка.
+    expect(sent).toContain('"purchase_plan_item_id":null')
 
     // Карточка не закрывается: после сохранения в ней уже сохранённая партия,
     // и «Растаможен» доступен сразу — таможня работает по сохранённым строкам.
@@ -271,22 +271,82 @@ describe('ReceiptsPage', () => {
 
   it('показывает ошибку сервера при сохранении', async () => {
     const user = userEvent.setup()
-    mockApi(
-      routes({
-        '/api/v1/batches': { status: 409, body: { detail: 'Поступление «P-100» уже существует' } },
-      }),
-    )
+    mockApi({
+      'PUT /api/v1/batches/b1': {
+        status: 409,
+        body: { detail: 'Поступление «P-100» уже существует' },
+      },
+      ...routes(),
+    })
     render(<ReceiptsPage />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByRole('button', { name: 'Добавить поступление' }))
-    await user.type(screen.getByLabelText('Номер поступления'), 'P-100')
-    await user.type(screen.getByLabelText('Товар i0'), 'ТОВ1')
-    await user.type(screen.getByLabelText('Количество i0'), '1')
-    await user.type(screen.getByLabelText('Стоимость за ед. i0'), '10')
+    await openBatch(user)
+    const price = screen.getByLabelText('Стоимость за ед. i0')
+    await user.clear(price)
+    await user.type(price, '111')
     await user.click(screen.getByRole('button', { name: 'Сохранить' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('уже существует')
+  })
+
+  it('связывает позицию поступления со строкой плана закупок', async () => {
+    const user = userEvent.setup()
+    const linked = batch()
+    const [item] = linked.items
+    if (!item) throw new Error('у партии нет строк')
+    linked.items = [
+      { ...item, purchase_plan_item_id: 'pl1', purchase_plan_label: '2026 · Китай · Импорт Трейд' },
+    ]
+    mockApi({
+      'PUT /api/v1/batches/b1': { body: linked },
+      ...routes({
+        '/api/v1/purchase-plans': {
+          body: [
+            {
+              status: 'approved',
+              year: 2026,
+              items: [
+                {
+                  id: 'pl1',
+                  product_id: 'p1',
+                  country_name: 'Китай',
+                  supplier_name: 'Импорт Трейд',
+                  sales_product_name: 'Смесь ореховая',
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    })
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await openBatch(user)
+    // Предлагается строка того же сырья; «не по плану» — вариант по умолчанию.
+    const select = await screen.findByTestId('plan-select-i0')
+    expect(select).toHaveValue('')
+    await user.selectOptions(select, 'pl1')
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }))
+
+    await waitFor(() => {
+      expect(bodies().some((body) => body.includes('"purchase_plan_item_id":"pl1"'))).toBe(true)
+    })
+    // После сохранения на сервере позиция показывает подпись строки плана.
+    expect(screen.getByTestId('plan-select-i0')).toHaveValue('pl1')
+  })
+
+  it('помечает в списке дня поступление, связанное с планом', async () => {
+    const planned = batch()
+    const [item] = planned.items
+    if (!item) throw new Error('у партии нет строк')
+    planned.items = [{ ...item, purchase_plan_item_id: 'pl1', purchase_plan_label: '2026 · Китай' }]
+    mockApi(routes({ '/api/v1/batches': { body: [planned] } }))
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('day-receipt-b1')
+    expect(screen.getByTestId('plan-badge')).toHaveTextContent('по плану')
   })
 
   it('подписывает курс остатка: ЦБ с датой или введён вручную', async () => {
@@ -313,6 +373,7 @@ describe('ReceiptsPage', () => {
     const user = userEvent.setup()
     mockApi(
       routes({
+        '/api/v1/batches': { body: [draftBatch()] },
         '/api/v1/rates/USD': {
           body: {
             code: 'USD',
@@ -327,9 +388,7 @@ describe('ReceiptsPage', () => {
     render(<ReceiptsPage />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByRole('button', { name: 'Добавить поступление' }))
-    await user.clear(screen.getByLabelText('Валюта'))
-    await user.type(screen.getByLabelText('Валюта'), 'USD')
+    await openBatch(user, 'd1')
     await user.click(screen.getByRole('button', { name: 'Обновить курс ЦБ' }))
 
     await waitFor(() => {
@@ -352,30 +411,29 @@ describe('ReceiptsPage — план и лимит', () => {
 
   it('будущий платёж — план: в себестоимость не входит', async () => {
     const user = userEvent.setup()
-    mockApi(routes())
+    mockApi(routes({ '/api/v1/batches': { body: [draftBatch()] } }))
     render(<ReceiptsPage />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByRole('button', { name: 'Добавить поступление' }))
-    await user.clear(screen.getByLabelText('Валюта'))
-    await user.type(screen.getByLabelText('Валюта'), 'USD')
-    await user.type(screen.getByLabelText('Товар i0'), 'ТОВ1')
-    await user.type(screen.getByLabelText('Количество i0'), '10')
-    await user.type(screen.getByLabelText('Стоимость за ед. i0'), '100')
+    await openBatch(user, 'd1')
+    await user.click(screen.getByRole('button', { name: 'Добавить строку' }))
+    await user.type(screen.getByLabelText('Товар inew1'), 'ТОВ1')
+    await user.type(screen.getByLabelText('Количество inew1'), '10')
+    await user.type(screen.getByLabelText('Стоимость за ед. inew1'), '100')
     await user.clear(screen.getByLabelText('Курс'))
     await user.type(screen.getByLabelText('Курс'), '90')
     // НДС не про план — обнуляем, чтобы считался только инвойс.
-    await user.clear(screen.getByLabelText('НДС i0'))
-    await user.type(screen.getByLabelText('НДС i0'), '0')
+    await user.clear(screen.getByLabelText('НДС inew1'))
+    await user.type(screen.getByLabelText('НДС inew1'), '0')
 
     await user.click(screen.getByRole('button', { name: 'Платежи' }))
     await user.click(screen.getByRole('button', { name: 'Добавить валютный платёж' }))
     const pay = screen.getByTestId('receipt-payments').querySelector('tbody tr')
     expect(pay).not.toBeNull()
-    await user.clear(screen.getByLabelText('Дата платежа pnew1'))
-    await user.type(screen.getByLabelText('Дата платежа pnew1'), FUTURE)
-    await user.type(screen.getByLabelText('Сумма платежа pnew1'), '400')
-    await user.type(screen.getByLabelText('Курс платежа pnew1'), '80')
+    await user.clear(screen.getByLabelText('Дата платежа pnew2'))
+    await user.type(screen.getByLabelText('Дата платежа pnew2'), FUTURE)
+    await user.type(screen.getByLabelText('Сумма платежа pnew2'), '400')
+    await user.type(screen.getByLabelText('Курс платежа pnew2'), '80')
 
     // Платёж виден как план, но факт и себестоимость считаются без него.
     expect(screen.getByTestId('receipt-planned')).toHaveTextContent('400,00')
@@ -386,18 +444,21 @@ describe('ReceiptsPage — план и лимит', () => {
 
   it('платёж больше стоимости товаров — предупреждение и блокировка сохранения', async () => {
     const user = userEvent.setup()
-    mockApi(routes())
+    mockApi(routes({ '/api/v1/batches': { body: [draftBatch()] } }))
     render(<ReceiptsPage />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByRole('button', { name: 'Добавить поступление' }))
-    await user.type(screen.getByLabelText('Товар i0'), 'ТОВ1')
-    await user.type(screen.getByLabelText('Количество i0'), '10')
-    await user.type(screen.getByLabelText('Стоимость за ед. i0'), '100')
+    await openBatch(user, 'd1')
+    await user.click(screen.getByRole('button', { name: 'Добавить строку' }))
+    await user.type(screen.getByLabelText('Товар inew1'), 'ТОВ1')
+    await user.type(screen.getByLabelText('Количество inew1'), '10')
+    await user.type(screen.getByLabelText('Стоимость за ед. inew1'), '100')
+    await user.clear(screen.getByLabelText('Курс'))
+    await user.type(screen.getByLabelText('Курс'), '90')
     await user.click(screen.getByRole('button', { name: 'Платежи' }))
     await user.click(screen.getByRole('button', { name: 'Добавить валютный платёж' }))
-    await user.type(screen.getByLabelText('Сумма платежа pnew1'), '1500')
-    await user.type(screen.getByLabelText('Курс платежа pnew1'), '80')
+    await user.type(screen.getByLabelText('Сумма платежа pnew2'), '1500')
+    await user.type(screen.getByLabelText('Курс платежа pnew2'), '80')
 
     expect(screen.getByTestId('receipt-limit-error')).toHaveTextContent('больше')
     expect(screen.getByTestId('receipt-limit')).toHaveTextContent('0,00')
@@ -482,6 +543,8 @@ describe('ReceiptsPage — план и лимит', () => {
           risk_unit_currency: '3.0000',
           duty_fixed_rub: null,
           vat_fixed_rub: null,
+          purchase_plan_item_id: null,
+          purchase_plan_label: null,
           invoice_currency: '124000.00',
           risk_currency: '60000.00',
           duty_rub: '0.00',
@@ -546,24 +609,23 @@ describe('ReceiptsPage — план и лимит', () => {
 describe('ReceiptsPage — пошлина, НДС, Risk и общие расходы', () => {
   it('считает цену за единицу по новой формуле', async () => {
     const user = userEvent.setup()
-    mockApi(routes())
+    mockApi(routes({ '/api/v1/batches': { body: [draftBatch()] } }))
     render(<ReceiptsPage />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByRole('button', { name: 'Добавить поступление' }))
-    await user.clear(screen.getByLabelText('Валюта'))
-    await user.type(screen.getByLabelText('Валюта'), 'USD')
+    await openBatch(user, 'd1')
+    await user.click(screen.getByRole('button', { name: 'Добавить строку' }))
     await user.clear(screen.getByLabelText('Курс'))
     await user.type(screen.getByLabelText('Курс'), '90')
-    await user.type(screen.getByLabelText('Товар i0'), 'ТОВ1')
-    await user.type(screen.getByLabelText('Стоимость за ед. i0'), '10')
-    await user.type(screen.getByLabelText('Количество i0'), '100')
-    await user.type(screen.getByLabelText('Пошлина i0'), '5')
-    await user.type(screen.getByLabelText('Risk i0'), '1')
+    await user.type(screen.getByLabelText('Товар inew1'), 'ТОВ1')
+    await user.type(screen.getByLabelText('Стоимость за ед. inew1'), '10')
+    await user.type(screen.getByLabelText('Количество inew1'), '100')
+    await user.type(screen.getByLabelText('Пошлина inew1'), '5')
+    await user.type(screen.getByLabelText('Risk inew1'), '1')
 
     // (10 + 0,5 + 2,31) × 90 + 1 × 90 = 1 242,90 ₽ за единицу, 124 290 ₽ за строку.
-    expect(screen.getByTestId('unit-cost-i0')).toHaveTextContent('1 242,90')
-    expect(screen.getByTestId('item-total-i0')).toHaveTextContent('124 290,00')
+    expect(screen.getByTestId('unit-cost-inew1')).toHaveTextContent('1 242,90')
+    expect(screen.getByTestId('item-total-inew1')).toHaveTextContent('124 290,00')
     await openSection(user, 'Себестоимость')
     expect(screen.getByTestId('receipt-duty')).toHaveTextContent('4 500,00')
     expect(screen.getByTestId('receipt-vat')).toHaveTextContent('20 790,00')
@@ -572,11 +634,13 @@ describe('ReceiptsPage — пошлина, НДС, Risk и общие расхо
 
   it('добавляет общий расход в usd и пересчитывает его по курсу ЦБ', async () => {
     const user = userEvent.setup()
-    mockApi(routes())
+    mockApi(routes({ '/api/v1/batches': { body: [draftBatch({ currency: 'RUB' })] } }))
     render(<ReceiptsPage />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByRole('button', { name: 'Добавить поступление' }))
+    await openBatch(user, 'd1')
+    await user.clear(screen.getByLabelText('Курс'))
+    await user.type(screen.getByLabelText('Курс'), '1')
     await user.click(screen.getByRole('button', { name: 'Общие расходы' }))
     await user.click(screen.getByRole('button', { name: 'Добавить расход' }))
 
@@ -589,9 +653,10 @@ describe('ReceiptsPage — пошлина, НДС, Risk и общие расхо
     expect(screen.getByTestId('receipt-expenses-rub')).toHaveTextContent('9 050,00')
 
     // Строка 10 шт × 100 ₽ (партия в рублях, курс 1) + НДС 22 % + расход 9 050 ₽.
-    await user.type(screen.getByLabelText('Товар i0'), 'ТОВ1')
-    await user.type(screen.getByLabelText('Стоимость за ед. i0'), '100')
-    await user.type(screen.getByLabelText('Количество i0'), '10')
+    await user.click(screen.getByRole('button', { name: 'Добавить строку' }))
+    await user.type(screen.getByLabelText('Товар inew2'), 'ТОВ1')
+    await user.type(screen.getByLabelText('Стоимость за ед. inew2'), '100')
+    await user.type(screen.getByLabelText('Количество inew2'), '10')
     await openSection(user, 'Себестоимость')
     expect(screen.getByTestId('receipt-vat')).toHaveTextContent('220,00')
     expect(screen.getByTestId('receipt-total')).toHaveTextContent('10 270,00')
@@ -689,6 +754,8 @@ describe('ReceiptsPage — позиции из файла «Партия»', () 
           risk_unit_currency: '0.0000',
           duty_fixed_rub: null,
           vat_fixed_rub: null,
+          purchase_plan_item_id: null,
+          purchase_plan_label: null,
           invoice_currency: '0.00',
           risk_currency: '0.00',
           duty_rub: '0.00',
@@ -942,18 +1009,15 @@ describe('ReceiptsPage — растаможка партии', () => {
     expect(screen.getByLabelText('НДС i0')).toHaveValue('22')
   })
 
-  it('несохранённое поступление растаможить нельзя', async () => {
+  it('черновик без позиций растаможить нельзя', async () => {
     const user = userEvent.setup()
-    mockApi(routes())
+    mockApi(routes({ '/api/v1/batches': { body: [draftBatch()] } }))
     render(<ReceiptsPage />)
 
     await screen.findByTestId('receipts-calendar')
-    await user.click(screen.getByRole('button', { name: 'Добавить поступление' }))
+    await openBatch(user, 'd1')
 
     expect(screen.getByTestId('customs-start')).toBeDisabled()
-    expect(screen.getByTestId('customs-need-save')).toHaveTextContent(
-      'после сохранения поступления',
-    )
   })
 
   it('курс на дату растаможки подтягивается сам при смене даты', async () => {

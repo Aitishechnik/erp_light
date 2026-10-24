@@ -230,7 +230,7 @@ class PurchasePlanItem(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    plan: Mapped[PurchasePlan] = relationship(back_populates="items")
+    plan: Mapped[PurchasePlan] = relationship(back_populates="items", lazy="joined")
     sales_product: Mapped[Product] = relationship(foreign_keys=[sales_product_id], lazy="joined")
     product: Mapped[Product] = relationship(foreign_keys=[product_id], lazy="joined")
     country: Mapped[Country] = relationship(lazy="joined")

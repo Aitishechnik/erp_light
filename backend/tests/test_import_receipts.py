@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.models.counterparties import Counterparty
 from app.models.domain import Batch
+from tests.helpers import put_batch
 
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -140,16 +141,15 @@ def test_repeat_upload_updates_draft(client: TestClient) -> None:
 def test_filled_receipt_is_not_touched(client: TestClient, login) -> None:
     """Номер занят заполненным поступлением — строку пропускаем и говорим об этом."""
     login("purchase")
-    created = client.post(
-        "/api/v1/batches",
-        json={
+    put_batch(
+        client,
+        {
             "batch_number": "ИТ-5",
             "batch_date": "2026-10-08",
             "currency": "RUB",
             "items": [{"product_code": "ТОВ1", "quantity": "5", "unit_price_currency": "100"}],
         },
     )
-    assert created.status_code == 201, created.text
 
     login("import")
     result = upload(client, row("ИТ-5", "08.10.2026 0:00:00", comment="из 1С"))
@@ -189,17 +189,9 @@ def test_draft_is_filled_and_then_skipped_by_reupload(client: TestClient) -> Non
     assert batches(client)[0]["comment"] == "заполнено"
 
 
-def test_draft_can_be_saved_without_items_but_manual_receipt_cannot(
+def test_draft_can_be_saved_without_items_and_filled_one_cannot_be_cleared(
     client: TestClient, login
 ) -> None:
-    # Новое поступление руками без позиций — отказ.
-    empty = client.post(
-        "/api/v1/batches",
-        json={"batch_number": "Р-1", "batch_date": "2026-10-08", "currency": "RUB", "items": []},
-    )
-    assert empty.status_code == 400
-    assert "хотя бы одну строку" in empty.json()["detail"]
-
     # Черновик из 1С (USD) можно поправить без позиций и без курса.
     upload(client, row("ИТ-11", comment="было"))
     draft = batches(client)[0]
@@ -222,16 +214,16 @@ def test_draft_can_be_saved_without_items_but_manual_receipt_cannot(
 
     # Заполненное поступление очистить нельзя.
     login("purchase")
-    created = client.post(
-        "/api/v1/batches",
-        json={
+    created = put_batch(
+        client,
+        {
             "batch_number": "Р-2",
             "batch_date": "2026-10-08",
             "currency": "RUB",
             "items": [{"product_code": "ТОВ2", "quantity": "1", "unit_price_currency": "10"}],
         },
     )
-    batch_id = created.json()["id"]
+    batch_id = created["id"]
     cleared = client.put(
         f"/api/v1/batches/{batch_id}",
         json={"batch_number": "Р-2", "batch_date": "2026-10-08", "currency": "RUB", "items": []},

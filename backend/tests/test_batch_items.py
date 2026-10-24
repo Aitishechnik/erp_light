@@ -15,6 +15,7 @@ from openpyxl import Workbook
 from sqlalchemy.orm import Session
 
 from app.models.domain import Product
+from tests.helpers import put_batch
 
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -330,24 +331,21 @@ def test_repeat_upload_replaces_items(client: TestClient, db_session: Session) -
 
 def test_payments_block_replacement(client: TestClient) -> None:
     """У партии с платежами позиции не меняем: платежи считались от другого инвойса."""
-    created = client.post(
-        "/api/v1/batches",
-        json={
-            "batch_number": "Р-1",
-            "batch_date": "2026-10-08",
-            "currency": "RUB",
-            "items": [{"product_code": "ТОВ1", "quantity": "5", "unit_price_currency": "100"}],
-            "payments": [
-                {
-                    "payment_date": "2026-10-08",
-                    "amount_currency": "100",
-                    "exchange_rate": "1",
-                }
-            ],
-        },
-    )
-    assert created.status_code == 201, created.text
-    batch_id = created.json()["id"]
+    payload = {
+        "batch_number": "Р-1",
+        "batch_date": "2026-10-08",
+        "currency": "RUB",
+        "items": [{"product_code": "ТОВ1", "quantity": "5", "unit_price_currency": "100"}],
+        "payments": [
+            {
+                "payment_date": "2026-10-08",
+                "amount_currency": "100",
+                "exchange_rate": "1",
+            }
+        ],
+    }
+    created = put_batch(client, payload)
+    batch_id = created["id"]
 
     response = upload_items(client, batch_id, part_row(1, "Арахис в глазури", "10"))
     assert response.status_code == 400
