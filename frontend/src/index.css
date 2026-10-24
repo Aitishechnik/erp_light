@@ -849,7 +849,9 @@ button.primary:disabled,
   width: 100%;
   max-width: 22rem;
   margin-top: 0.05rem;
-  padding: 0.15rem 0.3rem;
+  padding: 0.15rem 1.4rem 0.15rem 0.3rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
   border: 1px solid var(--border);
   border-radius: 0.4rem;
   background: #fff;
@@ -1886,6 +1888,11 @@ button.primary:disabled,
   font-weight: 600;
 }
 
+.purchase-table .fact-share {
+  display: block;
+  white-space: nowrap;
+}
+
 .annual-items-head {
   margin-top: 1rem;
 }
@@ -2063,7 +2070,32 @@ button.primary:disabled,
 
 /* График заказа в плане: на 1280 px пилюли переносятся, иначе правая колонка уезжает. */
 .purchase-table .schedule-chip {
+  flex: 1 1 calc(50% - 4px);
+  flex-wrap: wrap;
   white-space: normal;
+}
+
+/* План/факт месяца внутри пилюли: вторая строка, чтобы не расширять таблицу. */
+.purchase-table .month-fact {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.purchase-table .month-fact.done {
+  color: #1c6b3a;
+  font-weight: 600;
+}
+
+.purchase-table .month-fact.partial {
+  color: #8a4b08;
+}
+
+.purchase-table .month-fact.extra {
+  display: block;
+  flex-basis: 100%;
+  margin-top: 2px;
 }
 
 .schedule-chip.overdue {
@@ -2078,7 +2110,7 @@ button.primary:disabled,
 
 /* Поставщик — длинное имя из 1С: не даём колонке раздувать таблицу. */
 .purchase-table td.supplier-cell {
-  max-width: 220px;
+  max-width: 150px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2126,4 +2158,145 @@ button.primary:disabled,
   border-color: #9fd5b0;
   background: #e7f6ec;
   color: #1a7f37;
+}
+
+/* График заказа в плане: на 1280 px пилюли переносятся, иначе правая колонка уезжает. */
+.purchase-table .schedule-chip {
+  flex-wrap: wrap;
+  white-space: normal;
+}
+
+/* План/факт месяца внутри пилюли: вторая строка, чтобы не расширять таблицу. */
+.purchase-table .month-fact {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.purchase-table .month-fact.done {
+  color: #1c6b3a;
+  font-weight: 600;
+}
+
+.purchase-table .month-fact.partial {
+  color: #8a4b08;
+}
+
+.purchase-table .month-fact.extra {
+  display: block;
+  flex-basis: 100%;
+  margin-top: 2px;
+}
+
+.schedule-chip.overdue {
+  border-color: #e5a3a3;
+  background: #fdecea;
+  color: #a61b1b;
+}
+
+.schedule-chip.overdue .order {
+  color: #a61b1b;
+}
+
+/* Поставщик — длинное имя из 1С: не даём колонке раздувать таблицу. */
+.purchase-table td.supplier-cell {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.purchase-table td.supplier-cell.purchase-supplier select {
+  max-width: 100%;
+}
+
+/* Подпись у поля формы: «Срок доставки, дней» — видна всегда, не только плейсхолдер. */
+.inline-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+/* Подсказка в toolbar не должна подниматься из-за нижнего отступа .hint. */
+.toolbar .hint {
+  margin-bottom: 0;
+}
+
+/* Название позиции и месяцы — одним блоком: левый край сводки не гуляет. */
+.need-title-block {
+  display: flex;
+  flex: 1 1 320px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* «Разложено» — такой же бейдж, как «изменено» и статусы. */
+.need-state {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  margin-left: auto;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.need-state.ok {
+  border-color: #9fd5b0;
+  background: #e7f6ec;
+  color: #1a7f37;
+}
+
+/* Сетка плана: фиксированные доли, чтобы 12 месяцев графика влезали в 1280 px. */
+.plan-grid {
+  table-layout: fixed;
+  overflow-wrap: anywhere;
+}
+
+.purchase-table .plan-grid td {
+  white-space: normal;
+}
+
+.purchase-table .plan-grid td.supplier-cell {
+  white-space: nowrap;
+}
+
+.plan-grid th:nth-child(1) {
+  width: 23%;
+}
+
+.plan-grid th:nth-child(2) {
+  width: 11%;
+}
+
+.plan-grid th:nth-child(3) {
+  width: 10%;
+}
+
+.plan-grid th:nth-child(4) {
+  width: 7%;
+}
+
+.plan-grid th:nth-child(5) {
+  width: 10%;
+}
+
+.plan-grid th:nth-child(6) {
+  width: 9%;
+}
+
+.plan-grid th:nth-child(7) {
+  width: 27%;
+}
+
+.plan-grid th:nth-child(8) {
+  width: 3%;
+}
+
+.purchase-table .plan-grid td:first-child select {
+  max-width: 100%;
 }

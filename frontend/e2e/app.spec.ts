@@ -612,6 +612,9 @@ test('закупщик раскладывает потребность план�
         supplier_id: item.supplier_id,
         supplier_name: 'ООО Импорт',
         notes: null,
+        fact_quantity: '0',
+        fact_share: '0',
+        fact_months: [],
         schedule: [
           {
             month: 1,
@@ -651,7 +654,7 @@ test('закупщик раскладывает потребность план�
   await page.getByLabel('Цена FIN-1 1').fill('500')
   await page.getByLabel('Поставщик FIN-1 1').selectOption('sup-1')
   await expect(page.getByTestId('purchase-table')).toContainText('янв 10')
-  await expect(page.getByTestId('purchase-table')).toContainText('заказ окт')
+  await expect(page.getByTestId('purchase-table')).toContainText('→ окт')
 
   await page.getByRole('button', { name: 'Сохранить' }).click()
   await expect(page.getByTestId('purchase-saved')).toContainText('План сохранён')

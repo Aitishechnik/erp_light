@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
@@ -29,7 +29,7 @@ from app.models.auth import (
 )
 from app.models.counterparties import Counterparty
 from app.models.countries import Country
-from app.models.domain import BatchItem, Product
+from app.models.domain import Batch, BatchItem, Product
 from app.models.planning import (
     PURCHASE_PLAN_STATUS_TITLES,
     SALES_PLAN_APPROVAL_STATUS_TITLES,
@@ -345,16 +345,39 @@ def _linked_counts(db: Session, item_ids: list[uuid.UUID]) -> dict[uuid.UUID, in
     return {row[0]: int(row[1]) for row in rows if row[0] is not None}
 
 
-def _facts(db: Session, item_ids: list[uuid.UUID]) -> dict[uuid.UUID, Decimal]:
-    """Факт по строкам плана: сумма количеств явно связанных позиций поступлений."""
+def _fact_month(day: date, plan_year: int) -> int:
+    """Месяц плана для даты прихода.
+
+    Товар, пришедший в предыдущем году (например, в декабре под январскую
+    потребность), относится к январю; пришедший после планового года — к декабрю,
+    чтобы ничего не потерялось и не появилось «13-го месяца».
+    """
+    if day.year == plan_year:
+        return day.month
+    return 1 if day.year < plan_year else 12
+
+
+def _facts(
+    db: Session, item_ids: list[uuid.UUID], plan_year: int
+) -> dict[uuid.UUID, tuple[Decimal, dict[int, Decimal]]]:
+    """Факт по строкам плана: всего и по месяцам прихода партий."""
     if not item_ids:
         return {}
     rows = db.execute(
-        select(BatchItem.purchase_plan_item_id, func.sum(BatchItem.quantity))
+        select(BatchItem.purchase_plan_item_id, BatchItem.quantity, Batch.batch_date)
+        .join(Batch, Batch.id == BatchItem.batch_id)
         .where(BatchItem.purchase_plan_item_id.in_(item_ids))
-        .group_by(BatchItem.purchase_plan_item_id)
     ).all()
-    return {row[0]: Decimal(row[1]) for row in rows if row[0] is not None and row[1] is not None}
+    result: dict[uuid.UUID, tuple[Decimal, dict[int, Decimal]]] = {}
+    for item_id, quantity, day in rows:
+        if item_id is None:
+            continue
+        total, months = result.get(item_id, (ZERO, {}))
+        value = Decimal(quantity)
+        month = _fact_month(day, plan_year)
+        months[month] = months.get(month, ZERO) + value
+        result[item_id] = (total + value, months)
+    return result
 
 
 def _fact_share(fact: Decimal, quantity: Decimal) -> Decimal:
@@ -366,7 +389,7 @@ def _fact_share(fact: Decimal, quantity: Decimal) -> Decimal:
 def _items_out(
     plan: PurchasePlan,
     source: dict[uuid.UUID, NeedPosition],
-    facts: dict[uuid.UUID, Decimal] | None = None,
+    facts: dict[uuid.UUID, tuple[Decimal, dict[int, Decimal]]] | None = None,
 ) -> list[PurchasePlanItemOut]:
     fact_by_item = facts or {}
     result: list[PurchasePlanItemOut] = []
@@ -386,7 +409,7 @@ def _items_out(
             item.delivery_days,
             plan.year,
         )
-        fact = fact_by_item.get(item.id, ZERO)
+        fact, fact_months = fact_by_item.get(item.id, (ZERO, {}))
         result.append(
             PurchasePlanItemOut(
                 id=item.id,
@@ -407,6 +430,10 @@ def _items_out(
                 notes=item.notes,
                 fact_quantity=fact,
                 fact_share=_fact_share(fact, item.quantity),
+                fact_months=[
+                    PurchasePlanMonthOut(month=month, quantity=quantity)
+                    for month, quantity in sorted(fact_months.items())
+                ],
                 schedule=[
                     PurchasePlanScheduleEntryOut(
                         month=entry.month,
@@ -424,7 +451,7 @@ def _items_out(
 
 def _serialize(db: Session, plan: PurchasePlan) -> PurchasePlanOut:
     source = _source_positions(db, plan)
-    facts = _facts(db, [item.id for item in plan.items])
+    facts = _facts(db, [item.id for item in plan.items], plan.year)
     return PurchasePlanOut(
         id=plan.id,
         year=plan.year,

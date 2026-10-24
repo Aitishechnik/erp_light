@@ -190,6 +190,8 @@ export type PurchasePlanItem = {
   fact_quantity: string
   /** Исполнение, %: факт ÷ годовое количество × 100. */
   fact_share: string
+  /** Поступило по месяцам прихода партии: только месяцы с фактом. */
+  fact_months: { month: number; quantity: string }[]
   schedule: PurchasePlanScheduleEntry[]
 }
 

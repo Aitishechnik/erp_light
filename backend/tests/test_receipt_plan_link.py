@@ -38,10 +38,11 @@ def _receipt(
     product_code: str = "RAW-1",
     quantity: str = "12",
     plan_item_id: str | None = None,
+    when: str | None = None,
 ) -> dict[str, Any]:
     return {
         "batch_number": number,
-        "batch_date": f"{YEAR}-03-01",
+        "batch_date": when or f"{YEAR}-03-01",
         "currency": "RUB",
         "current_exchange_rate": "1",
         "supplier": "ООО Импорт",
@@ -81,6 +82,8 @@ def test_receipt_item_links_to_plan_line_and_counts_in_fact(
     assert fact["id"] == line["id"]
     assert Decimal(fact["fact_quantity"]) == Decimal("12.000")
     assert Decimal(fact["fact_share"]) == Decimal("40.0")  # 12 из 30
+    # Поступление от 1 марта попадает в март.
+    assert fact["fact_months"] == [{"month": 3, "quantity": "12.000"}]
 
 
 def test_unlinked_receipts_are_not_counted(
@@ -182,3 +185,51 @@ def test_new_plan_line_gets_a_new_id(client: TestClient, login, catalog: dict[st
     first = _save(client, plan["id"], [_item(catalog, quantity="30")]).json()["items"][0]
     second = _save(client, plan["id"], [_item(catalog, quantity="30")]).json()["items"][0]
     assert second["id"] != first["id"]
+
+
+def test_fact_is_split_by_month_and_overbuy_is_not_blocked(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    """Факт раскладывается по месяцам прихода; больше плана — не ошибка."""
+    data = _approved_plan(client, login, catalog)
+    line_id = str(data["line"]["id"])
+    put_batch(
+        client,
+        _receipt("ИТ-1", quantity="40", plan_item_id=line_id, when=f"{YEAR}-03-10"),
+    )
+    put_batch(
+        client,
+        _receipt("ИТ-2", quantity="50", plan_item_id=line_id, when=f"{YEAR}-04-05"),
+    )
+
+    item = _plan(client, data["plan"]["id"])["items"][0]
+    assert item["fact_months"] == [
+        {"month": 3, "quantity": "40.000"},
+        {"month": 4, "quantity": "50.000"},
+    ]
+    assert Decimal(item["fact_quantity"]) == Decimal("90.000")
+    # 90 при плане 30 — перезакуп, сервер его не блокирует.
+    assert Decimal(item["fact_share"]) == Decimal("300.0")
+
+
+def test_receipt_outside_plan_year_goes_to_boundary_month(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    """Декабрь прошлого года — в январь плана, январь следующего — в декабрь."""
+    data = _approved_plan(client, login, catalog)
+    line_id = str(data["line"]["id"])
+    put_batch(
+        client,
+        _receipt("ИТ-1", quantity="5", plan_item_id=line_id, when=f"{YEAR - 1}-12-20"),
+    )
+    put_batch(
+        client,
+        _receipt("ИТ-2", quantity="7", plan_item_id=line_id, when=f"{YEAR + 1}-01-15"),
+    )
+
+    item = _plan(client, data["plan"]["id"])["items"][0]
+    assert item["fact_months"] == [
+        {"month": 1, "quantity": "5.000"},
+        {"month": 12, "quantity": "7.000"},
+    ]
+    assert Decimal(item["fact_quantity"]) == Decimal("12.000")

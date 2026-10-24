@@ -71,6 +71,8 @@ type DraftRow = {
   /** Поступило по связанным поступлениям и процент исполнения. */
   factQuantity: string
   factShare: string
+  /** Факт по месяцам прихода: месяц → количество. */
+  factMonths: { month: number; quantity: string }[]
 }
 
 type PreviewEntry = {
@@ -141,6 +143,7 @@ function draftsFromPlan(plan: PurchasePlan): DraftRow[] {
     notes: item.notes ?? '',
     factQuantity: item.fact_quantity,
     factShare: item.fact_share,
+    factMonths: item.fact_months ?? [],
   }))
 }
 
@@ -329,6 +332,7 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
         notes: '',
         factQuantity: '0',
         factShare: '0',
+        factMonths: [],
       },
     ])
     setError(null)
@@ -676,7 +680,7 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
           </div>
 
           <div className="purchase-table">
-            <table data-testid="purchase-table">
+            <table className="plan-grid" data-testid="purchase-table">
               <thead>
                 <tr>
                   <th scope="col">Сырьё</th>
@@ -872,8 +876,10 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
                                   data-testid={`fact-${row.key}`}
                                   title="Поступило по явно связанным поступлениям"
                                 >
-                                  поступило {formatQuantity(row.factQuantity)} ·{' '}
-                                  {formatQuantity(row.factShare)} %
+                                  факт {formatQuantity(row.factQuantity)}{' '}
+                                  <span className="fact-share">
+                                    {formatQuantity(row.factShare)} %
+                                  </span>
                                 </span>
                               ) : null}
                             </td>
@@ -938,22 +944,61 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
                                 </span>
                               ) : (
                                 <div className="schedule-list">
-                                  {schedule.map((entry) => (
-                                    <span
-                                      key={entry.month}
-                                      className={
-                                        entry.overdue ? 'schedule-chip overdue' : 'schedule-chip'
-                                      }
-                                      title={entry.overdue ? 'срок заказа прошёл' : undefined}
-                                    >
-                                      {monthShort(entry.month)}{' '}
-                                      {formatQuantity((entry.quantityMilli / 1000).toFixed(3))}
-                                      <span className="order">
-                                        {' '}
-                                        → заказ {monthYear(entry.orderYear, entry.orderMonth)}
+                                  {schedule.map((entry) => {
+                                    const planned = entry.quantityMilli / 1000
+                                    const factMonth = row.factMonths.find(
+                                      (month) => month.month === entry.month,
+                                    )
+                                    const fact = factMonth ? Number(factMonth.quantity) : 0
+                                    const share =
+                                      planned > 0 ? Math.round((fact / planned) * 1000) / 10 : 0
+                                    const state =
+                                      fact <= 0 ? 'none' : share >= 100 ? 'done' : 'partial'
+                                    return (
+                                      <span
+                                        key={entry.month}
+                                        className={
+                                          entry.overdue ? 'schedule-chip overdue' : 'schedule-chip'
+                                        }
+                                        title={
+                                          entry.overdue
+                                            ? `Срок заказа прошёл: заказ ${monthYear(entry.orderYear, entry.orderMonth)}`
+                                            : `Заказ: ${monthYear(entry.orderYear, entry.orderMonth)}`
+                                        }
+                                      >
+                                        {monthShort(entry.month)}{' '}
+                                        {formatQuantity((entry.quantityMilli / 1000).toFixed(3))}
+                                        <span className="order">
+                                          {' '}
+                                          → {monthYear(entry.orderYear, entry.orderMonth)}
+                                        </span>
+                                        {fact > 0 ? (
+                                          <span className={`month-fact ${state}`}>
+                                            факт {formatQuantity(factMonth?.quantity)} ·{' '}
+                                            {formatQuantity(share.toFixed(1))} %
+                                          </span>
+                                        ) : null}
                                       </span>
+                                    )
+                                  })}
+                                  {row.factMonths.some(
+                                    (month) =>
+                                      !schedule.some((entry) => entry.month === month.month),
+                                  ) ? (
+                                    <span className="month-fact extra">
+                                      вне графика:{' '}
+                                      {row.factMonths
+                                        .filter(
+                                          (month) =>
+                                            !schedule.some((entry) => entry.month === month.month),
+                                        )
+                                        .map(
+                                          (month) =>
+                                            `${monthShort(month.month)} ${formatQuantity(month.quantity)}`,
+                                        )
+                                        .join(' · ')}
                                     </span>
-                                  ))}
+                                  ) : null}
                                 </div>
                               )}
                             </td>

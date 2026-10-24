@@ -108,6 +108,11 @@ class PurchasePlanScheduleEntryOut(BaseModel):
     overdue: bool = Field(description="Срок заказа уже прошёл")
 
 
+class PurchasePlanMonthOut(BaseModel):
+    month: int
+    quantity: Decimal
+
+
 class PurchasePlanItemOut(BaseModel):
     id: uuid.UUID
     sales_product_id: uuid.UUID
@@ -131,12 +136,11 @@ class PurchasePlanItemOut(BaseModel):
     fact_share: Decimal = Field(
         default=Decimal("0"), description="Исполнение, %: факт ÷ годовое количество × 100"
     )
+    fact_months: list[PurchasePlanMonthOut] = Field(
+        default_factory=list,
+        description="Поступило по месяцам (месяц прихода партии): только месяцы с фактом",
+    )
     schedule: list[PurchasePlanScheduleEntryOut]
-
-
-class PurchasePlanMonthOut(BaseModel):
-    month: int
-    quantity: Decimal
 
 
 class PurchasePlanPositionOut(BaseModel):

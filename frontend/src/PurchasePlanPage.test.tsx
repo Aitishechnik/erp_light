@@ -131,6 +131,7 @@ function plan(overrides: Partial<PurchasePlan> = {}): PurchasePlan {
         notes: null,
         fact_quantity: '10.000',
         fact_share: '33.3',
+        fact_months: [{ month: 1, quantity: '10.000' }],
         schedule: [
           {
             month: 1,
@@ -209,12 +210,15 @@ describe('PurchasePlanPage', () => {
     expect(await screen.findByLabelText('Количество FIN-1 1')).toHaveValue('30')
     expect(screen.getByTestId('purchase-plan-card')).toHaveTextContent(/15\s*000,00/)
     // План/факт: 10 кг из 30 — только по явной ссылке поступления на строку.
-    expect(screen.getByTestId('fact-item-1')).toHaveTextContent('поступило 10')
+    expect(screen.getByTestId('fact-item-1')).toHaveTextContent('факт 10')
     expect(screen.getByTestId('fact-item-1')).toHaveTextContent('33,3')
     // График: 10 кг на январь и 20 кг на февраль, заказ за 90 дней до потребности.
     const table = screen.getByTestId('purchase-table')
     expect(table).toHaveTextContent('янв 10')
     expect(table).toHaveTextContent('фев 20')
+    // Помесячный факт: январь закрыт; у февраля факта нет — строка не рисуется.
+    expect(table).toHaveTextContent('факт 10 · 100 %')
+    expect(table).not.toHaveTextContent('нет поступлений')
 
     await user.click(screen.getByRole('button', { name: 'Добавить сырьё FIN-1' }))
     await user.selectOptions(screen.getByLabelText('Сырьё FIN-1 2'), 'raw-2')

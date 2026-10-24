@@ -152,7 +152,11 @@ function PlanLink({
         className="plan-select"
         aria-label={`Строка плана ${item.key}`}
         data-testid={`plan-select-${item.key}`}
-        title="Строка плана закупок, по которой пришёл товар"
+        title={
+          current
+            ? `${current.label} · для «${current.detail}»`
+            : 'Строка плана закупок, по которой пришёл товар'
+        }
         disabled={disabled}
         value={item.planItemId}
         onChange={(event) => {
@@ -1191,7 +1195,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
               <p className="hint">
                 {dayBatches.length === 0
                   ? 'Поступления загружаются из 1С: «Загрузка данных» → «Импортные поступления». Или выберите другой день в календаре.'
-                  : 'Слева — все поступления этого дня. Нажмите на любое, чтобы открыть его.'}
+                  : 'В списке дня — все поступления этой даты. Нажмите на любое, чтобы открыть его.'}
               </p>
             </div>
           </div>
