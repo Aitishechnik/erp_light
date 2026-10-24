@@ -33,6 +33,7 @@ from typing import Any
 
 from openpyxl import load_workbook
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.auth import ROLE_IMPORT_MANAGER, ROLE_PURCHASE_DIRECTOR
@@ -404,7 +405,16 @@ def import_file(db: Session, kind_code: str, file_name: str, content: bytes) -> 
         message="; ".join(outcome.problems + outcome.notes) or None,
     )
     db.add(session)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        # Две одновременные загрузки одного номера: проигравшая получает отказ,
+        # а не 500. Повторная загрузка после этого обновит/пропустит строку.
+        db.rollback()
+        raise ImportDataError(
+            "Эту выгрузку уже сохраняет другой пользователь — повторите загрузку",
+            status_code=409,
+        ) from exc
     db.refresh(session)
     return ImportResult(session=session, problems=outcome.problems)
 

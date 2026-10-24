@@ -97,6 +97,21 @@ def load_batches(
     return list(db.execute(statement).scalars().all())
 
 
+def lock_batch(db: Session, batch_id: uuid.UUID) -> Batch | None:
+    """Заблокировать партию до конца транзакции и вернуть её со строками.
+
+    Правка заменяет строки целиком; без блокировки две одновременные правки
+    могут оставить смесь двух версий. Остальные операции с партией (импорт
+    позиций, растаможка, удаление) берут ту же блокировку.
+    """
+    locked = db.execute(
+        select(Batch.id).where(Batch.id == batch_id).with_for_update()
+    ).scalar_one_or_none()
+    if locked is None:
+        return None
+    return load_batch(db, batch_id)
+
+
 def load_batch(db: Session, batch_id: uuid.UUID) -> Batch | None:
     """Партия со строками, расходами и платежами.
 
@@ -452,7 +467,7 @@ def update_batch(db: Session, batch_id: uuid.UUID, payload: BatchCreate) -> Batc
     перестала бы соответствовать товару, поэтому правка — только через
     отмену растаможки.
     """
-    batch = load_batch(db, batch_id)
+    batch = lock_batch(db, batch_id)
     if batch is None:
         return None
     cleared = batch.customs_date is not None
@@ -490,7 +505,7 @@ def update_batch(db: Session, batch_id: uuid.UUID, payload: BatchCreate) -> Batc
 
 def delete_batch(db: Session, batch_id: uuid.UUID) -> bool:
     """Удалить поступление вместе со строками и расходами."""
-    batch = load_batch(db, batch_id)
+    batch = lock_batch(db, batch_id)
     if batch is None:
         return False
     db.delete(batch)

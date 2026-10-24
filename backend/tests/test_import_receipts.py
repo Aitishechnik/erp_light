@@ -7,9 +7,11 @@
 from io import BytesIO
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.counterparties import Counterparty
@@ -301,3 +303,17 @@ def test_drafts_are_kept_in_database_with_source_1c(
     assert stored.source == "1c"
     assert stored.batch_type == "purchase"
     assert stored.supplier == "Фирма"
+
+
+def test_concurrent_import_conflict_returns_409(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Гонка двух загрузок: проигравшая получает 409, а не 500."""
+
+    def conflict(self: Session) -> None:
+        raise IntegrityError("duplicate key", None, Exception("duplicate"))
+
+    monkeypatch.setattr(Session, "commit", conflict)
+    response = upload(client, row("ИТ-ГОНКА"))
+    assert response.status_code == 409
+    assert "повторите" in response.json()["detail"].lower()

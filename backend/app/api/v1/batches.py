@@ -27,6 +27,7 @@ from app.services.batch_service import (
     latest_snapshots,
     load_batch,
     load_batches,
+    lock_batch,
     serialize_batch,
     update_batch,
 )
@@ -159,7 +160,7 @@ def import_batch_items(
     Поступление берётся из карточки — в файле нет ни номера, ни даты. Суммы и
     себестоимость здесь не считаются: строки создаются без инвойсной суммы.
     """
-    batch = load_batch(db, batch_id)
+    batch = lock_batch(db, batch_id)
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Поступление не найдено")
     if batch.customs_date is not None:

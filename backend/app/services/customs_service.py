@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.models.domain import Batch
 from app.schemas.domain import BatchCustomsIn
-from app.services.batch_service import load_batch
+from app.services.batch_service import load_batch, lock_batch
 from app.services.cost import (
     ZERO,
     CustomsLine,
@@ -50,7 +50,7 @@ def apply_customs(db: Session, batch_id: uuid.UUID, payload: BatchCustomsIn) -> 
     Возвращает ``None``, если партии нет; при уже растаможенной партии или партии
     без позиций поднимает ``ValueError`` — API отдаёт по нему 400.
     """
-    batch = load_batch(db, batch_id)
+    batch = lock_batch(db, batch_id)
     if batch is None:
         return None
     if batch.customs_date is not None:
@@ -79,7 +79,7 @@ def apply_customs(db: Session, batch_id: uuid.UUID, payload: BatchCustomsIn) -> 
 
 def cancel_customs(db: Session, batch_id: uuid.UUID) -> Batch | None:
     """Снять фиксацию: в строках снова действуют проценты пошлины и НДС."""
-    batch = load_batch(db, batch_id)
+    batch = lock_batch(db, batch_id)
     if batch is None:
         return None
     if batch.customs_date is None:

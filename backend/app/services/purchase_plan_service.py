@@ -96,6 +96,21 @@ def _require(db: Session, plan_id: uuid.UUID) -> PurchasePlan:
     return plan
 
 
+def _lock(db: Session, plan_id: uuid.UUID) -> None:
+    """Заблокировать план до конца транзакции.
+
+    Без этого две одновременные правки строк читают один и тот же набор и обе
+    вставляют свои строки: в плане остаётся смесь двух версий. Блокировка
+    сериализует правки, отправку и утверждение — вторая ждёт первую и видит
+    актуальное состояние.
+    """
+    locked = db.execute(
+        select(PurchasePlan.id).where(PurchasePlan.id == plan_id).with_for_update()
+    ).scalar_one_or_none()
+    if locked is None:
+        raise PlanError("План закупок сырья не найден", status_code=404)
+
+
 def _check_view(user: User) -> None:
     if user.role not in VIEWERS:
         raise PlanError("План закупок сырья вам не виден", status_code=403)
@@ -562,6 +577,7 @@ def update_items(
     закупщик снимает привязку в карточках. У связанной строки нельзя менять
     сырьё, страну и позицию плана продаж — иначе факт приписался бы другому.
     """
+    _lock(db, plan_id)
     plan = _require(db, plan_id)
     _check_editor(user)
     if plan.status != "draft":
@@ -662,6 +678,7 @@ def _ensure_source_acknowledged(db: Session, plan: PurchasePlan) -> None:
 
 
 def submit(db: Session, user: User, plan_id: uuid.UUID) -> PurchasePlanOut:
+    _lock(db, plan_id)
     plan = _require(db, plan_id)
     _check_editor(user)
     if plan.status != "draft":
@@ -680,6 +697,7 @@ def submit(db: Session, user: User, plan_id: uuid.UUID) -> PurchasePlanOut:
 
 def approve(db: Session, user: User, plan_id: uuid.UUID) -> PurchasePlanOut:
     _check_executive(user)
+    _lock(db, plan_id)
     plan = _require(db, plan_id)
     if plan.status != "on_review":
         raise PlanError("Утвердить можно только план на проверке", status_code=409)
@@ -699,6 +717,7 @@ def _append_note(current: str | None, note: str) -> str:
 
 def reject(db: Session, user: User, plan_id: uuid.UUID, reason: str) -> PurchasePlanOut:
     _check_executive(user)
+    _lock(db, plan_id)
     plan = _require(db, plan_id)
     if plan.status != "on_review":
         raise PlanError("Вернуть на доработку можно только план на проверке", status_code=409)
@@ -716,6 +735,7 @@ def reject(db: Session, user: User, plan_id: uuid.UUID, reason: str) -> Purchase
 def reopen(db: Session, user: User, plan_id: uuid.UUID, reason: str) -> PurchasePlanOut:
     """Вернуть утверждённый план в работу: только исполнительный директор."""
     _check_executive(user)
+    _lock(db, plan_id)
     plan = _require(db, plan_id)
     if plan.status != "approved":
         raise PlanError("Вернуть в работу можно только утверждённый план", status_code=409)
@@ -732,6 +752,7 @@ def reopen(db: Session, user: User, plan_id: uuid.UUID, reason: str) -> Purchase
 
 def acknowledge_source(db: Session, user: User, plan_id: uuid.UUID) -> PurchasePlanOut:
     """Принять изменения плана продаж к сведению: обновить снимок и записать историю."""
+    _lock(db, plan_id)
     plan = _require(db, plan_id)
     _check_editor(user)
     state, approval = need.annual_state(db, plan.year)
@@ -765,6 +786,7 @@ def acknowledge_source(db: Session, user: User, plan_id: uuid.UUID) -> PurchaseP
 
 def request_revision(db: Session, user: User, plan_id: uuid.UUID, reason: str) -> PurchasePlanOut:
     """Попросить исполнительного директора вернуть утверждённый план в работу."""
+    _lock(db, plan_id)
     plan = _require(db, plan_id)
     _check_editor(user)
     if plan.status != "approved":
@@ -780,6 +802,7 @@ def request_revision(db: Session, user: User, plan_id: uuid.UUID, reason: str) -
 def delete_plan(db: Session, user: User, plan_id: uuid.UUID) -> None:
     if user.role != ROLE_PURCHASE_DIRECTOR:
         raise PlanError("Удалить план закупок может только директор по закупкам", status_code=403)
+    _lock(db, plan_id)
     plan = _require(db, plan_id)
     if plan.status != "draft":
         raise PlanError("Удалить можно только черновик", status_code=409)
