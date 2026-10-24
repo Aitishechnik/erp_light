@@ -410,7 +410,6 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
   }, 0)
 
   const changedPositions = new Set((plan?.source.changes ?? []).map((row) => row.product_id))
-  const decomposed = (plan?.positions ?? []).filter((row) => row.decomposed).length
   const source = plan?.source
 
   return (
@@ -493,7 +492,6 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
               {plan.status_title}
             </span>
             <span>позиций: {plan.positions.length}</span>
-            <span>разложено: {decomposed}</span>
             <span>строк: {drafts.length}</span>
             <span className="total">сумма: {formatMoney(totalAmount.toFixed(2))} ₽</span>
             {plan.approved_by_name ? <span>утвердил: {plan.approved_by_name}</span> : null}
@@ -718,18 +716,6 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
                             <span className="need-title">
                               {position.code} · {position.name}
                             </span>
-                            {position.months.length > 0 ? (
-                              <span className="need-months">
-                                {position.months
-                                  .map(
-                                    (row) =>
-                                      `${monthShort(row.month)} ${formatQuantity(row.quantity)}`,
-                                  )
-                                  .join(' · ')}
-                              </span>
-                            ) : (
-                              <span className="hint">в плане продаж количества нет</span>
-                            )}
                           </span>
                           {position.changed ? (
                             <span className="badge need-changed">изменено</span>
