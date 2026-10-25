@@ -6,7 +6,12 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
-from app.models.auth import ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR, User
+from app.models.auth import (
+    ROLE_COMMERCIAL_DIRECTOR,
+    ROLE_EXECUTIVE_DIRECTOR,
+    ROLE_SALES_MANAGER,
+    User,
+)
 from app.schemas.auth import UserOut, user_out
 
 router = APIRouter(tags=["users"])
@@ -26,4 +31,18 @@ def list_users(
     statement = select(User).where(User.is_active.is_(True)).order_by(User.full_name)
     if role:
         statement = statement.where(User.role == role)
+    return [user_out(row) for row in db.execute(statement).scalars().all()]
+
+
+@router.get("/users/managers", response_model=list[UserOut])
+def list_managers(user: CurrentUser, db: DbSession) -> list[UserOut]:
+    """Активные менеджеры по продажам — для карточки клиента и планов.
+
+    Доступно любому вошедшему: в списке нет ничего, кроме имени и роли.
+    """
+    statement = (
+        select(User)
+        .where(User.is_active.is_(True), User.role == ROLE_SALES_MANAGER)
+        .order_by(User.full_name)
+    )
     return [user_out(row) for row in db.execute(statement).scalars().all()]

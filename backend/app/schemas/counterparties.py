@@ -14,6 +14,9 @@ class CounterpartyIn(BaseModel):
     is_customer: bool = False
     is_local_supplier: bool = False
     is_import_supplier: bool = False
+    manager_id: uuid.UUID | None = Field(
+        default=None, description="Менеджер по продажам, за которым закреплён клиент"
+    )
 
 
 class CounterpartyUpdate(BaseModel):
@@ -24,6 +27,9 @@ class CounterpartyUpdate(BaseModel):
     is_local_supplier: bool | None = None
     is_import_supplier: bool | None = None
     is_active: bool | None = None
+    manager_id: uuid.UUID | None = Field(
+        default=None, description="Менеджер по продажам; null — снять закрепление"
+    )
 
 
 class CounterpartyOut(BaseModel):
@@ -38,3 +44,5 @@ class CounterpartyOut(BaseModel):
     is_import_supplier: bool
     source: str
     is_active: bool
+    manager_id: uuid.UUID | None = None
+    manager_name: str | None = None

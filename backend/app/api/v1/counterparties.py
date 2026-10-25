@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.deps import CurrentUser, DbSession, require_roles
 from app.models.auth import User
+from app.models.counterparties import Counterparty
 from app.schemas.counterparties import CounterpartyIn, CounterpartyOut, CounterpartyUpdate
 from app.services import directory_service as service
 from app.services.directory_service import DIRECTORY_WRITE_ROLES, DirectoryError
@@ -29,6 +30,14 @@ def _fail(exc: DirectoryError) -> HTTPException:
     return HTTPException(status_code=exc.status_code, detail=exc.message)
 
 
+def _out(row: Counterparty) -> CounterpartyOut:
+    """Ответ с именем закреплённого менеджера: фронту не нужен второй запрос."""
+    result = CounterpartyOut.model_validate(row)
+    if row.manager is not None:
+        result.manager_name = row.manager.full_name
+    return result
+
+
 @router.get("/counterparties", response_model=list[CounterpartyOut])
 def list_counterparties(
     user: CurrentUser,
@@ -47,13 +56,13 @@ def list_counterparties(
     rows = service.list_counterparties(
         db, role_field=ROLE_FIELDS.get(role) if role else None, include_inactive=include_inactive
     )
-    return [CounterpartyOut.model_validate(row) for row in rows]
+    return [_out(row) for row in rows]
 
 
 @router.post("/counterparties", response_model=CounterpartyOut, status_code=status.HTTP_201_CREATED)
 def create_counterparty(payload: CounterpartyIn, user: Writer, db: DbSession) -> CounterpartyOut:
     try:
-        return CounterpartyOut.model_validate(service.create_counterparty(db, payload))
+        return _out(service.create_counterparty(db, payload))
     except DirectoryError as exc:
         raise _fail(exc) from exc
 
@@ -63,8 +72,6 @@ def update_counterparty(
     counterparty_id: uuid.UUID, payload: CounterpartyUpdate, user: Writer, db: DbSession
 ) -> CounterpartyOut:
     try:
-        return CounterpartyOut.model_validate(
-            service.update_counterparty(db, counterparty_id, payload)
-        )
+        return _out(service.update_counterparty(db, counterparty_id, payload))
     except DirectoryError as exc:
         raise _fail(exc) from exc

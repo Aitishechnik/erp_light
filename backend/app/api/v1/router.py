@@ -10,6 +10,7 @@ from app.api.v1 import (
     countries,
     health,
     imports,
+    month_results,
     products,
     purchase_plans,
     rates,
@@ -34,3 +35,4 @@ api_router.include_router(sales_plans.router)
 api_router.include_router(annual_sales_plans.router)
 api_router.include_router(sales_plan_corrections.router)
 api_router.include_router(purchase_plans.router)
+api_router.include_router(month_results.router)

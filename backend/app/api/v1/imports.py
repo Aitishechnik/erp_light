@@ -69,6 +69,8 @@ def upload(
     user: CurrentUser,
     db: DbSession,
     file: Annotated[UploadFile, File(description="Выгрузка из 1С в формате .xlsx")],
+    year: int | None = Query(default=None, ge=2020, le=2100),
+    month: int | None = Query(default=None, ge=1, le=12),
 ) -> ImportSessionOut:
     """Загрузить файл выгрузки. Повторная загрузка не создаёт дублей.
 
@@ -82,7 +84,9 @@ def upload(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Недостаточно прав для этого действия")
     content = file.file.read()
     try:
-        result = service.import_file(db, kind, file.filename or "без имени.xlsx", content)
+        result = service.import_file(
+            db, kind, file.filename or "без имени.xlsx", content, year=year, month=month
+        )
     except ImportDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     return session_out(result.session)

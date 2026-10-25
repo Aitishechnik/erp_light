@@ -36,7 +36,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.auth import ROLE_IMPORT_MANAGER, ROLE_PURCHASE_DIRECTOR
+from app.models.auth import (
+    ROLE_COMMERCIAL_DIRECTOR,
+    ROLE_EXECUTIVE_DIRECTOR,
+    ROLE_IMPORT_MANAGER,
+    ROLE_PURCHASE_DIRECTOR,
+)
 from app.models.counterparties import Counterparty, name_key
 from app.models.domain import ImportSession, Product
 from app.services.directory_service import DIRECTORY_WRITE_ROLES
@@ -49,6 +54,7 @@ KIND_RAW = "raw"
 KIND_FINISHED = "finished"
 KIND_IMPORT_RECEIPTS = "import_receipts"
 KIND_BATCH_ITEMS = "batch_items"
+KIND_SALES = "sales"
 
 MAX_FILE_SIZE = 10 * 1024 * 1024
 MAX_ROWS = 50_000
@@ -156,6 +162,19 @@ KINDS: dict[str, ImportKind] = {
             "Загружается из карточки поступления, а не с этой страницы."
         ),
         listed=False,
+    ),
+    KIND_SALES: ImportKind(
+        kind=KIND_SALES,
+        title="Продажи за месяц",
+        entity="sales",
+        # Колонки отчёта «Продажи» из 1С: файл не табличный, поэтому это подсказка.
+        columns=("Контрагент", "Номенклатура", "Количество", "Сумма продажи"),
+        roles=(ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR),
+        note=(
+            "Отчёт 1С «Продажи» за месяц — это факт продаж. Период берётся из шапки "
+            "файла, возвраты идут минусом. Повторная загрузка заменяет месяц целиком, "
+            "неопознанные позиции попадают в очередь сопоставления."
+        ),
     ),
 }
 
@@ -363,11 +382,25 @@ def _import_counterparties(db: Session, kind: ImportKind, rows: list[dict[str, s
     return outcome
 
 
-def import_file(db: Session, kind_code: str, file_name: str, content: bytes) -> ImportResult:
+def import_file(
+    db: Session,
+    kind_code: str,
+    file_name: str,
+    content: bytes,
+    *,
+    year: int | None = None,
+    month: int | None = None,
+) -> ImportResult:
     """Загружает файл выгрузки и пишет журнал. Идемпотентно."""
     kind = KINDS.get(kind_code)
     if kind is None:
         raise ImportDataError(f"Неизвестный тип загрузки: {kind_code}", status_code=404)
+
+    if kind.entity == "sales":
+        # Продажи — не табличная выгрузка: разбор и сопоставление свои.
+        from app.services.sales_import_service import import_sales
+
+        return import_sales(db, file_name, content, year=year, month=month)
 
     rows = _read_rows(content, kind)
     if kind.entity == "products":

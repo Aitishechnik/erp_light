@@ -16,6 +16,7 @@ from app.models.auth import (
     ROLE_COMMERCIAL_DIRECTOR,
     ROLE_PURCHASE_DIRECTOR,
     ROLE_SALES_MANAGER,
+    User,
 )
 from app.models.counterparties import Counterparty, name_key
 from app.models.domain import PRODUCT_KINDS, Product
@@ -56,10 +57,20 @@ def get_counterparty(db: Session, counterparty_id: uuid.UUID) -> Counterparty:
     return row
 
 
+def _check_manager(db: Session, manager_id: uuid.UUID | None) -> None:
+    """Менеджер клиента — активный пользователь с ролью «менеджер по продажам»."""
+    if manager_id is None:
+        return
+    manager = db.get(User, manager_id)
+    if manager is None or manager.role != ROLE_SALES_MANAGER or not manager.is_active:
+        raise DirectoryError("Менеджер не найден или у него другая роль")
+
+
 def create_counterparty(db: Session, payload: CounterpartyIn) -> Counterparty:
     name = " ".join(payload.name.split()).strip()
     if not name:
         raise DirectoryError("Укажите наименование контрагента")
+    _check_manager(db, payload.manager_id)
     key = name_key(name)
     exists = (
         db.execute(select(Counterparty).where(Counterparty.name_key == key)).scalars().one_or_none()
@@ -74,6 +85,7 @@ def create_counterparty(db: Session, payload: CounterpartyIn) -> Counterparty:
         is_customer=payload.is_customer,
         is_local_supplier=payload.is_local_supplier,
         is_import_supplier=payload.is_import_supplier,
+        manager_id=payload.manager_id,
         source="manual",
     )
     db.add(counterparty)
@@ -93,6 +105,8 @@ def update_counterparty(
 ) -> Counterparty:
     counterparty = get_counterparty(db, counterparty_id)
     data = payload.model_dump(exclude_unset=True)
+    if "manager_id" in data:
+        _check_manager(db, data["manager_id"])
     if data.get("name") is not None:
         name = " ".join(str(data["name"]).split()).strip()
         if not name:

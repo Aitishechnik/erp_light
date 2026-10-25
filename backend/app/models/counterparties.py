@@ -10,10 +10,11 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, Text, Uuid, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import DateTime, ForeignKey, String, Text, Uuid, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
+from app.models.auth import User
 
 
 def name_key(name: str) -> str:
@@ -36,6 +37,16 @@ class Counterparty(Base):
     is_import_supplier: Mapped[bool] = mapped_column(nullable=False, default=False, index=True)
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
     is_active: Mapped[bool] = mapped_column(nullable=False, default=True, index=True)
+    # Закрепление клиента за менеджером: по нему считается KPI в итогах месяца.
+    manager_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Менеджер по продажам, за которым закреплён клиент",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+    manager: Mapped[User | None] = relationship()
