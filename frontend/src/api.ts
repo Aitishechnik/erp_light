@@ -991,7 +991,20 @@ export type MonthRow = {
   deviation: string
   group: 'plan' | 'extra' | 'short'
   manager_mismatch: boolean
+  /** Причина отклонения; в моках может отсутствовать. */
+  reason?: ReasonInfo | null
 }
+
+/** Причина отклонения по строке итогов. */
+export type ReasonInfo = {
+  code: string
+  title: string
+  comment: string | null
+  author_name: string | null
+  updated_at: string
+}
+
+export type ReasonOption = { code: string; title: string }
 
 /** Строка файла продаж, которую не удалось сопоставить с номенклатурой. */
 export type MonthUnmatched = {
@@ -1012,6 +1025,8 @@ export type MonthResult = {
   deviation_lines: number
   extra_lines: number
   short_lines: number
+  without_reason: number
+  reason_options: ReasonOption[]
   fact_amount: string
 }
 
@@ -1033,6 +1048,39 @@ export function matchMonthRow(
       body: JSON.stringify({ unmatched_id: unmatchedId, product_id: productId }),
     },
   )
+}
+
+/** Поставить причину отклонения по строке месяца. */
+export function saveMonthReason(
+  year: number,
+  month: number,
+  clientId: string,
+  productId: string,
+  reason: string,
+  comment: string | null,
+): Promise<ReasonInfo> {
+  return request<ReasonInfo>(`/api/v1/month-results/${year}/${month}/reasons`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      client_id: clientId,
+      product_id: productId,
+      reason,
+      comment,
+    }),
+  })
+}
+
+/** Снять причину со строки месяца. */
+export function clearMonthReason(
+  year: number,
+  month: number,
+  clientId: string,
+  productId: string,
+): Promise<void> {
+  const query = new URLSearchParams({ client_id: clientId, product_id: productId })
+  return request<void>(`/api/v1/month-results/${year}/${month}/reasons?${query}`, {
+    method: 'DELETE',
+  })
 }
 
 /** Текст ошибки для показа пользователю. */

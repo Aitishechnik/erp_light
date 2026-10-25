@@ -1207,6 +1207,12 @@ const MONTH_RESULT = {
   deviation_lines: 2,
   extra_lines: 1,
   short_lines: 0,
+  without_reason: 2,
+  reason_options: [
+    { code: 'return', title: 'Возврат клиента' },
+    { code: 'quality', title: 'Качество продукции' },
+    { code: 'other', title: 'Другое' },
+  ],
   fact_amount: '8100.00',
 }
 
@@ -1232,4 +1238,37 @@ test('итоги месяца: план против факта и очеред�
 
   await page.getByLabel('Месяц итогов').selectOption('9')
   await expect(page.getByTestId('month-summary')).toContainText('Строк: 2')
+})
+
+test('причина отклонения сохраняется из строки итогов', async ({ page }) => {
+  await mockSession(page, COMMERCIAL)
+  await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/month-results**', (route) => route.fulfill({ json: MONTH_RESULT }))
+  await page.route('**/api/v1/month-results/**/reasons', (route) =>
+    route.fulfill({
+      json: {
+        code: 'quality',
+        title: 'Качество продукции',
+        comment: 'горчит',
+        author_name: 'Коммерческий директор',
+        updated_at: '2026-10-26T10:00:00Z',
+      },
+    }),
+  )
+  await page.goto('/')
+
+  await openSection(page, 'Отчёты', 'Итоги месяца')
+  await page.getByRole('button', { name: '+ причина' }).first().click()
+  await page.getByLabel('Причина отклонения').selectOption('quality')
+  await page.getByLabel('Комментарий к причине').fill('горчит')
+
+  const saved = page.waitForRequest(
+    (request) => request.url().includes('/reasons') && request.method() === 'PUT',
+  )
+  await page.getByRole('button', { name: 'Сохранить' }).click()
+  const body = JSON.parse((await saved).postData() ?? '{}') as Record<string, string>
+  expect(body.reason).toBe('quality')
+  expect(body.comment).toBe('горчит')
+  expect(body.client_id).toBe('client-1')
 })

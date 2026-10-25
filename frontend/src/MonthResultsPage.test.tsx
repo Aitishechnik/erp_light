@@ -91,6 +91,12 @@ const RESULT: MonthResult = {
   deviation_lines: 3,
   extra_lines: 1,
   short_lines: 1,
+  without_reason: 3,
+  reason_options: [
+    { code: 'return', title: 'Возврат клиента' },
+    { code: 'quality', title: 'Качество продукции' },
+    { code: 'other', title: 'Другое' },
+  ],
   fact_amount: '10000.00',
 }
 
@@ -189,10 +195,99 @@ describe('Итоги месяца', () => {
       deviation_lines: 0,
       extra_lines: 0,
       short_lines: 0,
+      without_reason: 0,
       fact_amount: '0.00',
     })
     expect(await screen.findByTestId('month-empty')).toHaveTextContent(
       'Загрузите выгрузку «Продажи за месяц»',
     )
+  })
+})
+
+describe('Причины отклонений', () => {
+  const WITH_REASON = {
+    ...RESULT,
+    rows: RESULT.rows.map((row, index) =>
+      index === 0
+        ? {
+            ...row,
+            reason: {
+              code: 'quality',
+              title: 'Качество продукции',
+              comment: 'горчит',
+              author_name: 'Коммерческий директор',
+              updated_at: '2026-10-26T10:00:00Z',
+            },
+          }
+        : row,
+    ),
+    without_reason: 2,
+  }
+
+  it('ставит причину из редактора строки', async () => {
+    const user = userEvent.setup()
+    setup()
+    await screen.findByTestId('month-table')
+
+    const [addReason] = screen.getAllByRole('button', { name: '+ причина' })
+    if (!addReason) throw new Error('нет кнопки «+ причина»')
+    await user.click(addReason)
+    const editor = screen.getByLabelText('Причина отклонения')
+    await user.selectOptions(editor, 'quality')
+    await user.type(screen.getByLabelText('Комментарий к причине'), 'горчит')
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }))
+
+    await waitFor(() => {
+      const call = vi
+        .mocked(fetch)
+        .mock.calls.find(([, init]) => (init?.method ?? 'GET').toUpperCase() === 'PUT')
+      expect(call).toBeTruthy()
+      const body = JSON.parse(String(call?.[1]?.body)) as Record<string, string>
+      expect(body.reason).toBe('quality')
+      expect(body.comment).toBe('горчит')
+      expect(body.client_id).toBe('c1')
+    })
+  })
+
+  it('показывает причину и снимает её', async () => {
+    const user = userEvent.setup()
+    setup(WITH_REASON)
+    const table = await screen.findByTestId('month-table')
+    expect(within(table).getByText('Качество продукции')).toBeInTheDocument()
+
+    await user.click(within(table).getByRole('button', { name: 'Качество продукции' }))
+    await user.click(screen.getByRole('button', { name: 'Убрать' }))
+
+    await waitFor(() => {
+      const call = vi
+        .mocked(fetch)
+        .mock.calls.find(
+          ([url, init]) =>
+            (init?.method ?? 'GET').toUpperCase() === 'DELETE' &&
+            String(url).includes('/month-results/') &&
+            String(url).includes('client_id=c1'),
+        )
+      expect(call).toBeTruthy()
+    })
+  })
+
+  it('закупки не ставят причину, но видят её', async () => {
+    setup(WITH_REASON, PURCHASE)
+    const table = await screen.findByTestId('month-table')
+    expect(within(table).getByText('Качество продукции')).toBeInTheDocument()
+    expect(within(table).queryByRole('button', { name: '+ причина' })).toBeNull()
+    expect(within(table).getByRole('button', { name: 'Качество продукции' })).toBeDisabled()
+  })
+
+  it('фильтр «без причины» оставляет только строки с отклонением без объяснения', async () => {
+    const user = userEvent.setup()
+    setup(WITH_REASON)
+    await screen.findByTestId('month-table')
+    const checkbox = screen.getByLabelText('без причины')
+    await user.click(checkbox)
+    expect(checkbox).toBeChecked()
+    const table = screen.getByTestId('month-table')
+    expect(within(table).queryByText('Качество продукции')).toBeNull()
+    expect(within(table).getAllByRole('button', { name: '+ причина' })).toHaveLength(2)
   })
 })

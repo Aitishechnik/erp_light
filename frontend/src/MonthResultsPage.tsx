@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  clearMonthReason,
   errorMessage,
   fetchMonthResult,
   fetchProducts,
@@ -11,6 +12,7 @@ import {
   matchMonthRow,
   type Product,
   type SessionUser,
+  saveMonthReason,
 } from './api'
 
 const MONTH_NAMES = [
@@ -35,6 +37,8 @@ const GROUP_TITLES: Record<MonthRow['group'], string> = {
 }
 
 const MATCH_ROLES = ['commercial_director', 'executive_director']
+/** Кто ставит причины: менеджер по своим строкам и коммерческий директор по всем. */
+const REASON_ROLES = ['sales_manager', 'commercial_director']
 
 /** Сколько строк рисуем разом: дальше — фильтр или поиск. */
 const VISIBLE_LIMIT = 150
@@ -141,8 +145,13 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
   const [products, setProducts] = useState<Product[]>([])
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [onlyNoReason, setOnlyNoReason] = useState(false)
+  const [editing, setEditing] = useState<string | null>(null)
+  const [reasonCode, setReasonCode] = useState('')
+  const [reasonComment, setReasonComment] = useState('')
 
   const mayMatch = MATCH_ROLES.includes(user.role)
+  const mayReason = REASON_ROLES.includes(user.role)
 
   const load = useCallback(async () => {
     setState({ status: 'loading' })
@@ -179,6 +188,7 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
     const needle = search.trim().toLowerCase()
     return (result?.rows ?? [])
       .filter((row) => (onlyDeviation ? Number(row.deviation) !== 0 : true))
+      .filter((row) => (onlyNoReason ? Number(row.deviation) !== 0 && !row.reason : true))
       .filter((row) => (manager === '' ? true : (row.manager_id ?? '') === manager))
       .filter((row) =>
         needle
@@ -187,7 +197,7 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
               .includes(needle)
           : true,
       )
-  }, [result, onlyDeviation, manager, search])
+  }, [result, onlyDeviation, onlyNoReason, manager, search])
 
   const shown = visible.slice(0, VISIBLE_LIMIT)
 
@@ -208,6 +218,53 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
     }
     return [...map.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name, 'ru'))
   }, [result])
+
+  const openReason = (row: MonthRow) => {
+    const key = `${row.client_id}:${row.product_id}`
+    if (editing === key) {
+      setEditing(null)
+      return
+    }
+    setEditing(key)
+    setReasonCode(row.reason?.code ?? result?.reason_options[0]?.code ?? '')
+    setReasonComment(row.reason?.comment ?? '')
+  }
+
+  const saveReason = async (row: MonthRow) => {
+    if (!reasonCode) return
+    setBusy(true)
+    setNotice(null)
+    try {
+      await saveMonthReason(
+        year,
+        month,
+        row.client_id,
+        row.product_id,
+        reasonCode,
+        reasonComment.trim() === '' ? null : reasonComment.trim(),
+      )
+      setEditing(null)
+      await load()
+    } catch (error) {
+      setNotice(errorMessage(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const clearReason = async (row: MonthRow) => {
+    setBusy(true)
+    setNotice(null)
+    try {
+      await clearMonthReason(year, month, row.client_id, row.product_id)
+      setEditing(null)
+      await load()
+    } catch (error) {
+      setNotice(errorMessage(error))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const match = async (row: MonthUnmatched, productId: string) => {
     setBusy(true)
@@ -281,6 +338,14 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
           />
           только отклонения
         </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={onlyNoReason}
+            onChange={(event) => setOnlyNoReason(event.target.checked)}
+          />
+          без причины
+        </label>
         <input
           aria-label="Поиск по клиенту и позиции"
           placeholder="Клиент или позиция"
@@ -310,7 +375,8 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
             Строк: <strong>{result.lines}</strong> · с отклонением:{' '}
             <strong>{result.deviation_lines}</strong> · вне плана:{' '}
             <strong>{result.extra_lines}</strong> · не продано:{' '}
-            <strong>{result.short_lines}</strong> · факт:{' '}
+            <strong>{result.short_lines}</strong> · без причины:{' '}
+            <strong>{result.without_reason}</strong> · факт:{' '}
             <strong>{formatMoney(result.fact_amount)} ₽</strong>
           </p>
 
@@ -418,34 +484,111 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
                       </td>
                     </tr>
                   ) : (
-                    shown.map((row) => (
-                      <tr key={`${row.client_id}-${row.product_id}`}>
-                        <td>
-                          {row.manager_name ?? '—'}
-                          {row.manager_mismatch ? (
-                            <span
-                              className="badge"
-                              title="Клиент закреплён за другим менеджером, чем его план"
-                            >
-                              ≠
-                            </span>
+                    shown.map((row) => {
+                      const key = `${row.client_id}:${row.product_id}`
+                      return (
+                        <Fragment key={key}>
+                          <tr>
+                            <td>
+                              {row.manager_name ?? '—'}
+                              {row.manager_mismatch ? (
+                                <span
+                                  className="badge"
+                                  title="Клиент закреплён за другим менеджером, чем его план"
+                                >
+                                  ≠
+                                </span>
+                              ) : null}
+                            </td>
+                            <td>{row.client_name}</td>
+                            <td>{row.product_name}</td>
+                            <td>{row.unit}</td>
+                            <td className="num">{formatQuantity(row.plan_quantity)}</td>
+                            <td className="num">{formatQuantity(row.fact_quantity)}</td>
+                            <td className="num">{signed(row.deviation)}</td>
+                            <td className="num">{share(row.fact_quantity, row.plan_quantity)}</td>
+                            <td className="num">{formatMoney(row.fact_amount)}</td>
+                            <td>
+                              <span className={`badge badge-${row.group}`}>
+                                {GROUP_TITLES[row.group]}
+                              </span>
+                              {row.reason ? (
+                                <button
+                                  type="button"
+                                  className="reason-chip"
+                                  title={`${
+                                    row.reason.comment ?? row.reason.title
+                                  }${row.reason.author_name ? ` — ${row.reason.author_name}` : ''}`}
+                                  disabled={!mayReason || busy}
+                                  onClick={() => openReason(row)}
+                                >
+                                  {row.reason.title}
+                                </button>
+                              ) : Number(row.deviation) !== 0 && mayReason ? (
+                                <button
+                                  type="button"
+                                  className="reason-add"
+                                  onClick={() => openReason(row)}
+                                >
+                                  + причина
+                                </button>
+                              ) : null}
+                            </td>
+                          </tr>
+                          {editing === key ? (
+                            <tr className="reason-editor">
+                              <td colSpan={10}>
+                                <span className="reason-title">
+                                  Причина отклонения: {row.client_name} · {row.product_name}
+                                </span>
+                                <select
+                                  aria-label="Причина отклонения"
+                                  value={reasonCode}
+                                  onChange={(event) => setReasonCode(event.target.value)}
+                                >
+                                  {(result.reason_options ?? []).map((option) => (
+                                    <option key={option.code} value={option.code}>
+                                      {option.title}
+                                    </option>
+                                  ))}
+                                </select>
+                                <input
+                                  aria-label="Комментарий к причине"
+                                  placeholder="Комментарий (обязателен для «Другое»)"
+                                  value={reasonComment}
+                                  onChange={(event) => setReasonComment(event.target.value)}
+                                />
+                                <button
+                                  type="button"
+                                  className="primary"
+                                  disabled={busy}
+                                  onClick={() => void saveReason(row)}
+                                >
+                                  Сохранить
+                                </button>
+                                {row.reason ? (
+                                  <button
+                                    type="button"
+                                    className="mini"
+                                    disabled={busy}
+                                    onClick={() => void clearReason(row)}
+                                  >
+                                    Убрать
+                                  </button>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  className="mini"
+                                  onClick={() => setEditing(null)}
+                                >
+                                  Отмена
+                                </button>
+                              </td>
+                            </tr>
                           ) : null}
-                        </td>
-                        <td>{row.client_name}</td>
-                        <td>{row.product_name}</td>
-                        <td>{row.unit}</td>
-                        <td className="num">{formatQuantity(row.plan_quantity)}</td>
-                        <td className="num">{formatQuantity(row.fact_quantity)}</td>
-                        <td className="num">{signed(row.deviation)}</td>
-                        <td className="num">{share(row.fact_quantity, row.plan_quantity)}</td>
-                        <td className="num">{formatMoney(row.fact_amount)}</td>
-                        <td>
-                          <span className={`badge badge-${row.group}`}>
-                            {GROUP_TITLES[row.group]}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
+                        </Fragment>
+                      )
+                    })
                   )}
                 </tbody>
               </table>

@@ -369,6 +369,38 @@ button.primary {
   max-width: 16rem;
 }
 
+.reason-chip,
+.reason-add {
+  display: block;
+  margin-top: 0.25rem;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f8f9fb;
+  color: var(--text);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.reason-add {
+  background: #fff;
+  color: var(--muted);
+}
+
+.reason-editor td {
+  background: #fbfcfe;
+}
+
+.reason-title {
+  margin-right: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.reason-editor input {
+  min-width: 16rem;
+}
+
 .badge-plan {
   background: #e7f6ec;
   color: #067647;
