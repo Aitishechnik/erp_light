@@ -12,6 +12,7 @@ import { CounterpartiesPage } from './CounterpartiesPage'
 import { CountriesPage } from './CountriesPage'
 import { ImportsPage } from './ImportsPage'
 import { LoginPage } from './LoginPage'
+import { MonthResultsPage } from './MonthResultsPage'
 import { NomenclaturePage } from './NomenclaturePage'
 import { PurchasePlanPage } from './PurchasePlanPage'
 import { ReceiptsPage } from './ReceiptsPage'
@@ -30,6 +31,7 @@ type SectionId =
   | 'currencies'
   | 'countries'
   | 'stock'
+  | 'month'
   | 'finance'
   | 'tasks'
   | 'imports'
@@ -50,6 +52,14 @@ type Group = {
 }
 
 const PURCHASE_ROLES: Role[] = ['purchase_director', 'import_manager', 'executive_director']
+
+/** Итоги месяца: продажи против плана. Импорт и закупки смотрят, продажи и директора — все. */
+const MONTH_ROLES: Role[] = [
+  'sales_manager',
+  'commercial_director',
+  'executive_director',
+  'purchase_director',
+]
 
 /** Основные категории меню; внутри — разделы, которые раскрываются по стрелке. */
 const GROUPS: Group[] = [
@@ -86,6 +96,7 @@ const GROUPS: Group[] = [
     title: 'Отчёты',
     sections: [
       { id: 'stock', title: 'Остатки по партиям', ready: true },
+      { id: 'month', title: 'Итоги месяца', ready: true, roles: MONTH_ROLES },
       { id: 'finance', title: 'PnL / Cashflow', ready: false },
     ],
   },
@@ -209,8 +220,11 @@ export function App() {
         {current.id === 'annual' && current.ready ? <AnnualSalesPlanPage user={user} /> : null}
         {current.id === 'purchase' && current.ready ? <PurchasePlanPage user={user} /> : null}
         {current.id === 'nomenclature' && current.ready ? <NomenclaturePage /> : null}
-        {current.id === 'counterparties' && current.ready ? <CounterpartiesPage /> : null}
+        {current.id === 'counterparties' && current.ready ? (
+          <CounterpartiesPage user={user} />
+        ) : null}
         {current.id === 'countries' && current.ready ? <CountriesPage user={user} /> : null}
+        {current.id === 'month' && current.ready ? <MonthResultsPage user={user} /> : null}
         {current.id === 'receipts' && current.ready ? <ReceiptsPage user={user} /> : null}
         {current.id === 'imports' && current.ready ? <ImportsPage user={user} /> : null}
         {!current.ready ? (

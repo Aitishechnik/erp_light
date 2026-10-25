@@ -300,6 +300,9 @@ export type Counterparty = {
   is_import_supplier: boolean
   source: string
   is_active: boolean
+  /** Закреплённый менеджер; в старых моках поля нет — считаем «не закреплён». */
+  manager_id?: string | null
+  manager_name?: string | null
 }
 
 export type CounterpartyIn = {
@@ -309,6 +312,8 @@ export type CounterpartyIn = {
   is_customer?: boolean
   is_local_supplier?: boolean
   is_import_supplier?: boolean
+  /** Менеджер по продажам, за которым закреплён клиент. */
+  manager_id?: string | null
 }
 
 /** Категории валютных платежей: инвойс и рисковая надбавка закрываются отдельно. */
@@ -687,6 +692,11 @@ export function fetchUsers(role?: Role): Promise<SessionUser[]> {
   return request<SessionUser[]>(`/api/v1/users${query}`)
 }
 
+/** Активные менеджеры по продажам — для карточки клиента и планов. */
+export function fetchManagers(): Promise<SessionUser[]> {
+  return request<SessionUser[]>('/api/v1/users/managers')
+}
+
 export function fetchProducts(): Promise<Product[]> {
   return request<Product[]>('/api/v1/products')
 }
@@ -964,6 +974,65 @@ export function requestPurchasePlanRevision(planId: string, reason: string): Pro
 
 export function deletePurchasePlan(planId: string): Promise<void> {
   return request<void>(`/api/v1/purchase-plans/${planId}`, { method: 'DELETE' })
+}
+
+/** Строка итогов месяца: клиент × товар, план и факт. */
+export type MonthRow = {
+  client_id: string
+  client_name: string
+  manager_id: string | null
+  manager_name: string | null
+  product_id: string
+  product_name: string
+  unit: string
+  plan_quantity: string
+  fact_quantity: string
+  fact_amount: string
+  deviation: string
+  group: 'plan' | 'extra' | 'short'
+  manager_mismatch: boolean
+}
+
+/** Строка файла продаж, которую не удалось сопоставить с номенклатурой. */
+export type MonthUnmatched = {
+  id: string
+  source_name: string
+  client_name: string | null
+  quantity: string
+  amount_rub: string
+}
+
+export type MonthResult = {
+  year: number
+  month: number
+  plan_approved: boolean
+  rows: MonthRow[]
+  unmatched: MonthUnmatched[]
+  lines: number
+  deviation_lines: number
+  extra_lines: number
+  short_lines: number
+  fact_amount: string
+}
+
+export function fetchMonthResult(year: number, month: number): Promise<MonthResult> {
+  return request<MonthResult>(`/api/v1/month-results?year=${year}&month=${month}`)
+}
+
+/** Сопоставить неопознанную строку файла позиции справочника. */
+export function matchMonthRow(
+  year: number,
+  month: number,
+  unmatchedId: string,
+  productId: string,
+): Promise<{ matched: number; remaining: number }> {
+  return request<{ matched: number; remaining: number }>(
+    `/api/v1/month-results/${year}/${month}/match`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ unmatched_id: unmatchedId, product_id: productId }),
+    },
+  )
 }
 
 /** Текст ошибки для показа пользователю. */

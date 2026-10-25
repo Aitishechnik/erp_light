@@ -1157,3 +1157,79 @@ test('закупщик грузит позиции партии из файла 
   await expect(page.getByLabel('Количество i0')).toHaveValue('20000')
   await expect(page.getByTestId('draft-hint')).toHaveCount(0)
 })
+
+const MONTH_RESULT = {
+  year: 2026,
+  month: 10,
+  plan_approved: true,
+  rows: [
+    {
+      client_id: 'client-1',
+      client_name: 'ООО Ромашка',
+      manager_id: 'sm-1',
+      manager_name: 'Иван Петров',
+      product_id: 'p-1',
+      product_name: 'Товар 1',
+      unit: 'шт',
+      plan_quantity: '100.000',
+      fact_quantity: '80.000',
+      fact_amount: '8000.00',
+      deviation: '-20.000',
+      group: 'plan',
+      manager_mismatch: false,
+    },
+    {
+      client_id: 'client-1',
+      client_name: 'ООО Ромашка',
+      manager_id: 'sm-1',
+      manager_name: 'Иван Петров',
+      product_id: 'p-2',
+      product_name: 'Арахис жареный',
+      unit: 'кг',
+      plan_quantity: '0.000',
+      fact_quantity: '10.000',
+      fact_amount: '1000.00',
+      deviation: '10.000',
+      group: 'extra',
+      manager_mismatch: false,
+    },
+  ],
+  unmatched: [
+    {
+      id: 'un-1',
+      source_name: 'Загадочный товар',
+      client_name: 'ООО Ромашка',
+      quantity: '1.000',
+      amount_rub: '10.00',
+    },
+  ],
+  lines: 2,
+  deviation_lines: 2,
+  extra_lines: 1,
+  short_lines: 0,
+  fact_amount: '8100.00',
+}
+
+test('итоги месяца: план против факта и очередь сопоставления', async ({ page }) => {
+  await mockSession(page, COMMERCIAL)
+  await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/month-results**', (route) => route.fulfill({ json: MONTH_RESULT }))
+  await page.goto('/')
+
+  await openSection(page, 'Отчёты', 'Итоги месяца')
+  await expect(page.getByRole('heading', { level: 1, name: 'Итоги месяца' })).toBeVisible()
+
+  const table = page.getByTestId('month-table')
+  await expect(table.getByText('Товар 1')).toBeVisible()
+  await expect(table.getByText('-20')).toBeVisible()
+  await expect(table.getByText('80,0 %')).toBeVisible()
+  await expect(table.getByText('вне плана')).toBeVisible()
+
+  const unmatched = page.getByTestId('unmatched-box')
+  await expect(unmatched).toContainText('Загадочный товар')
+  await expect(page.getByRole('button', { name: 'Сопоставить' })).toBeVisible()
+
+  await page.getByLabel('Месяц итогов').selectOption('9')
+  await expect(page.getByTestId('month-summary')).toContainText('Строк: 2')
+})

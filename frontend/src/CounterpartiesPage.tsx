@@ -6,6 +6,8 @@ import {
   createCounterparty,
   errorMessage,
   fetchCounterparties,
+  fetchManagers,
+  type SessionUser,
   updateCounterparty,
 } from './api'
 
@@ -27,8 +29,13 @@ const ROLE_FILTERS: { value: '' | CounterpartyRole; title: string }[] = [
   { value: 'import_supplier', title: 'Импортные поставщики' },
 ]
 
-export function CounterpartiesPage() {
+/** Кто может менять справочник: те же роли, что и на бэкенде. */
+const WRITE_ROLES: string[] = ['sales_manager', 'commercial_director', 'purchase_director']
+
+export function CounterpartiesPage({ user }: { user?: SessionUser }) {
+  const mayEdit = !user || WRITE_ROLES.includes(user.role)
   const [rows, setRows] = useState<Counterparty[]>([])
+  const [managers, setManagers] = useState<SessionUser[]>([])
   const [role, setRole] = useState<'' | CounterpartyRole>('')
   const [search, setSearch] = useState('')
   const [showInactive, setShowInactive] = useState(false)
@@ -53,6 +60,12 @@ export function CounterpartiesPage() {
     void reload()
   }, [reload])
 
+  useEffect(() => {
+    fetchManagers()
+      .then(setManagers)
+      .catch(() => setManagers([]))
+  }, [])
+
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setBusy(true)
@@ -67,6 +80,19 @@ export function CounterpartiesPage() {
         is_import_supplier: form.is_import_supplier,
       })
       setForm({ ...EMPTY_FORM, is_customer: form.is_customer })
+      await reload()
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const assignManager = async (row: Counterparty, managerId: string) => {
+    setBusy(true)
+    setError(null)
+    try {
+      await updateCounterparty(row.id, { manager_id: managerId === '' ? null : managerId })
       await reload()
     } catch (err) {
       setError(errorMessage(err))
@@ -111,54 +137,56 @@ export function CounterpartiesPage() {
         </p>
       ) : null}
 
-      <form className="inline-form" onSubmit={submit}>
-        <input
-          aria-label="Наименование контрагента"
-          placeholder="Наименование"
-          value={form.name}
-          onChange={(event) => setForm({ ...form, name: event.target.value })}
-          required
-        />
-        <input
-          aria-label="ИНН"
-          placeholder="ИНН (необязательно)"
-          value={form.inn}
-          onChange={(event) => setForm({ ...form, inn: event.target.value })}
-        />
-        <input
-          aria-label="Примечание"
-          placeholder="Примечание"
-          value={form.note}
-          onChange={(event) => setForm({ ...form, note: event.target.value })}
-        />
-        <label className="check">
+      {mayEdit ? (
+        <form className="inline-form" onSubmit={submit}>
           <input
-            type="checkbox"
-            checked={form.is_customer}
-            onChange={(event) => setForm({ ...form, is_customer: event.target.checked })}
+            aria-label="Наименование контрагента"
+            placeholder="Наименование"
+            value={form.name}
+            onChange={(event) => setForm({ ...form, name: event.target.value })}
+            required
           />
-          покупатель
-        </label>
-        <label className="check">
           <input
-            type="checkbox"
-            checked={form.is_local_supplier}
-            onChange={(event) => setForm({ ...form, is_local_supplier: event.target.checked })}
+            aria-label="ИНН"
+            placeholder="ИНН (необязательно)"
+            value={form.inn}
+            onChange={(event) => setForm({ ...form, inn: event.target.value })}
           />
-          локальный поставщик
-        </label>
-        <label className="check">
           <input
-            type="checkbox"
-            checked={form.is_import_supplier}
-            onChange={(event) => setForm({ ...form, is_import_supplier: event.target.checked })}
+            aria-label="Примечание"
+            placeholder="Примечание"
+            value={form.note}
+            onChange={(event) => setForm({ ...form, note: event.target.value })}
           />
-          импортный поставщик
-        </label>
-        <button type="submit" className="primary" disabled={busy}>
-          Добавить
-        </button>
-      </form>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={form.is_customer}
+              onChange={(event) => setForm({ ...form, is_customer: event.target.checked })}
+            />
+            покупатель
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={form.is_local_supplier}
+              onChange={(event) => setForm({ ...form, is_local_supplier: event.target.checked })}
+            />
+            локальный поставщик
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={form.is_import_supplier}
+              onChange={(event) => setForm({ ...form, is_import_supplier: event.target.checked })}
+            />
+            импортный поставщик
+          </label>
+          <button type="submit" className="primary" disabled={busy}>
+            Добавить
+          </button>
+        </form>
+      ) : null}
 
       <div className="toolbar">
         <select
@@ -197,6 +225,7 @@ export function CounterpartiesPage() {
         <thead>
           <tr>
             <th scope="col">Наименование</th>
+            <th scope="col">Менеджер</th>
             <th scope="col">Роли</th>
             <th scope="col">Состояние</th>
             <th scope="col" aria-label="Действия" />
@@ -205,7 +234,7 @@ export function CounterpartiesPage() {
         <tbody>
           {visible.length === 0 ? (
             <tr>
-              <td colSpan={6} className="hint">
+              <td colSpan={5} className="hint">
                 Контрагентов не найдено.
               </td>
             </tr>
@@ -213,6 +242,25 @@ export function CounterpartiesPage() {
             visible.map((row) => (
               <tr key={row.id}>
                 <td>{row.name}</td>
+                <td>
+                  {row.is_customer && mayEdit ? (
+                    <select
+                      aria-label={`Менеджер клиента ${row.name}`}
+                      value={row.manager_id ?? ''}
+                      disabled={busy}
+                      onChange={(event) => void assignManager(row, event.target.value)}
+                    >
+                      <option value="">— не закреплён —</option>
+                      {managers.map((manager) => (
+                        <option key={manager.id} value={manager.id}>
+                          {manager.full_name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    (row.manager_name ?? '—')
+                  )}
+                </td>
                 <td>{counterpartyRoles(row).join(', ') || '—'}</td>
                 <td>
                   <span className={row.is_active ? 'badge status-approved' : 'badge'}>
@@ -220,14 +268,16 @@ export function CounterpartiesPage() {
                   </span>
                 </td>
                 <td>
-                  <button
-                    type="button"
-                    className="mini"
-                    disabled={busy}
-                    onClick={() => toggle(row)}
-                  >
-                    {row.is_active ? 'Отключить' : 'Включить'}
-                  </button>
+                  {mayEdit ? (
+                    <button
+                      type="button"
+                      className="mini"
+                      disabled={busy}
+                      onClick={() => toggle(row)}
+                    >
+                      {row.is_active ? 'Отключить' : 'Включить'}
+                    </button>
+                  ) : null}
                 </td>
               </tr>
             ))
