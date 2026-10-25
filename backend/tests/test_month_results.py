@@ -364,3 +364,174 @@ def test_managers_list_for_any_role(client: TestClient, login) -> None:
     assert response.status_code == 200, response.text
     logins = [row["login"] for row in response.json()]
     assert logins == ["sales", "sales2", "sales3"]
+
+
+def _deviation_month(client: TestClient, db_session: Session, catalog: dict[str, Any]) -> None:
+    """Месяц с отклонением: план 100, факт 80 по одной строке."""
+    manager = _user(db_session, "sales")
+    catalog["customer"].manager_id = manager.id
+    db_session.commit()
+    _plan(db_session, manager, [(catalog["customer"], catalog["fin"], "100")])
+    first = upload_sales(client, sales_xlsx([("ООО Ромашка", [("Смесь ореховая", "80", "8000")])]))
+    assert first.status_code == 200, first.text
+
+
+def test_reason_is_set_changed_and_cleared(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    login("commercial")
+    _deviation_month(client, db_session, catalog)
+    summary = month(client)
+    assert summary["without_reason"] == 1
+    assert summary["rows"][0]["reason"] is None
+    assert len(summary["reason_options"]) == 8
+    row = summary["rows"][0]
+
+    created = client.put(
+        "/api/v1/month-results/2026/10/reasons",
+        json={
+            "client_id": row["client_id"],
+            "product_id": row["product_id"],
+            "reason": "quality",
+            "comment": "партия пришла с горчинкой",
+        },
+    )
+    assert created.status_code == 200, created.text
+    body = created.json()
+    assert body["code"] == "quality"
+    assert body["title"] == "Качество продукции"
+    assert body["comment"] == "партия пришла с горчинкой"
+    assert body["author_name"] == "Коммерческий директор (демо)"
+
+    summary = month(client)
+    assert summary["without_reason"] == 0
+    assert summary["rows"][0]["reason"]["code"] == "quality"
+
+    # Вторая правка перезаписывает причину, а не плодит дубль.
+    changed = client.put(
+        "/api/v1/month-results/2026/10/reasons",
+        json={
+            "client_id": row["client_id"],
+            "product_id": row["product_id"],
+            "reason": "return",
+            "comment": None,
+        },
+    )
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["code"] == "return"
+    assert month(client)["rows"][0]["reason"]["code"] == "return"
+
+    cleared = client.delete(
+        f"/api/v1/month-results/2026/10/reasons?client_id={row['client_id']}"
+        f"&product_id={row['product_id']}"
+    )
+    assert cleared.status_code == 204, cleared.text
+    summary = month(client)
+    assert summary["rows"][0]["reason"] is None
+    assert summary["without_reason"] == 1
+
+
+def test_reason_rules(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    login("commercial")
+    _deviation_month(client, db_session, catalog)
+    row = month(client)["rows"][0]
+    key = {"client_id": row["client_id"], "product_id": row["product_id"]}
+
+    other_without_comment = client.put(
+        "/api/v1/month-results/2026/10/reasons", json={**key, "reason": "other", "comment": "  "}
+    )
+    assert other_without_comment.status_code == 400
+    assert "комментарий" in other_without_comment.json()["detail"].lower()
+
+    unknown = client.put(
+        "/api/v1/month-results/2026/10/reasons", json={**key, "reason": "moon_phase"}
+    )
+    assert unknown.status_code == 400
+
+    outside = client.put("/api/v1/month-results/2025/01/reasons", json={**key, "reason": "quality"})
+    assert outside.status_code == 404
+
+
+def test_reason_needs_a_deviation(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    manager = _user(db_session, "sales")
+    catalog["customer"].manager_id = manager.id
+    db_session.commit()
+    _plan(db_session, manager, [(catalog["customer"], catalog["fin"], "80")])
+    login("commercial")
+    upload_sales(client, sales_xlsx([("ООО Ромашка", [("Смесь ореховая", "80", "8000")])]))
+    row = month(client)["rows"][0]
+    assert row["deviation"] == "0.000"
+
+    response = client.put(
+        "/api/v1/month-results/2026/10/reasons",
+        json={
+            "client_id": row["client_id"],
+            "product_id": row["product_id"],
+            "reason": "quality",
+        },
+    )
+    assert response.status_code == 400
+    assert "нет отклонения" in response.json()["detail"]
+
+
+def test_reason_permissions(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    first = _user(db_session, "sales")
+    second = _user(db_session, "sales2")
+    other_client = Counterparty(name="ООО Вектор", name_key="ооо вектор", is_customer=True)
+    db_session.add(other_client)
+    db_session.commit()
+    catalog["customer"].manager_id = first.id
+    other_client.manager_id = second.id
+    db_session.commit()
+    _plan(db_session, first, [(catalog["customer"], catalog["fin"], "100")])
+    _plan(db_session, second, [(other_client, catalog["fin"], "100")])
+    login("commercial")
+    upload_sales(
+        client,
+        sales_xlsx(
+            [
+                ("ООО Ромашка", [("Смесь ореховая", "80", "8000")]),
+                ("ООО Вектор", [("Смесь ореховая", "70", "7000")]),
+            ]
+        ),
+    )
+    rows = {row["client_name"]: row for row in month(client)["rows"]}
+
+    login("sales")
+    own = client.put(
+        "/api/v1/month-results/2026/10/reasons",
+        json={
+            "client_id": rows["ООО Ромашка"]["client_id"],
+            "product_id": rows["ООО Ромашка"]["product_id"],
+            "reason": "price",
+        },
+    )
+    assert own.status_code == 200, own.text
+    assert own.json()["author_name"] == "Менеджер по продажам (демо)"
+
+    foreign = client.put(
+        "/api/v1/month-results/2026/10/reasons",
+        json={
+            "client_id": rows["ООО Вектор"]["client_id"],
+            "product_id": rows["ООО Вектор"]["product_id"],
+            "reason": "price",
+        },
+    )
+    assert foreign.status_code == 404
+
+    login("executive")
+    denied = client.put(
+        "/api/v1/month-results/2026/10/reasons",
+        json={
+            "client_id": rows["ООО Ромашка"]["client_id"],
+            "product_id": rows["ООО Ромашка"]["product_id"],
+            "reason": "price",
+        },
+    )
+    assert denied.status_code == 403

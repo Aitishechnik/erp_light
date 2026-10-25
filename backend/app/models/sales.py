@@ -32,6 +32,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base
 
 if TYPE_CHECKING:
+    from app.models.auth import User
     from app.models.counterparties import Counterparty
     from app.models.domain import ImportSession, Product
 
@@ -146,3 +147,78 @@ class ProductAlias(Base):
     )
 
     product: Mapped[Product] = relationship(lazy="joined")
+
+
+# Причины отклонений: фиксированный список, меняется только решением продукта.
+REASON_CODES = (
+    "return",
+    "quality",
+    "supply_late",
+    "no_stock",
+    "price",
+    "client_refused",
+    "plan_error",
+    "other",
+)
+
+REASON_TITLES = {
+    "return": "Возврат клиента",
+    "quality": "Качество продукции",
+    "supply_late": "Товар не пришёл вовремя",
+    "no_stock": "Нет товара на складе",
+    "price": "Цена и условия",
+    "client_refused": "Клиент отказался или сократил",
+    "plan_error": "Ошибка планирования",
+    "other": "Другое",
+}
+
+
+class DeviationReason(Base):
+    """Причина отклонения по строке итогов: клиент × товар × месяц.
+
+    Причина объясняет отклонение, но не меняет план и факт. Одна причина на ключ;
+    автор и дата видны в карточке и попадут в снимок закрытого месяца.
+    """
+
+    __tablename__ = "deviation_reasons"
+    __table_args__ = (
+        UniqueConstraint(
+            "year",
+            "month",
+            "client_id",
+            "product_id",
+            name="deviation_reason_month_client_product",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    year: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    month: Mapped[int] = mapped_column(Integer, nullable=False)
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("counterparties.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    reason: Mapped[str] = mapped_column(String(32), nullable=False)
+    comment: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    author_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    author: Mapped[User | None] = relationship()

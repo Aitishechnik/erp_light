@@ -45,7 +45,14 @@ from app.models.planning import (
     SalesPlanItem,
 )
 from app.models.rates import CurrencyRate
-from app.models.sales import ProductAlias, SalesFact, SalesFactUnmatched
+from app.models.sales import (
+    REASON_CODES,
+    REASON_TITLES,
+    DeviationReason,
+    ProductAlias,
+    SalesFact,
+    SalesFactUnmatched,
+)
 
 __all__ = [
     "BATCH_TYPES",
@@ -75,12 +82,15 @@ __all__ = [
     "Country",
     "Counterparty",
     "CurrencyRate",
+    "DeviationReason",
     "ImportSession",
     "Product",
     "ProductAlias",
     "PurchasePlan",
     "PurchasePlanItem",
     "PurchasePlanSourceEvent",
+    "REASON_CODES",
+    "REASON_TITLES",
     "SalesFact",
     "SalesFactUnmatched",
     "SalesPlan",

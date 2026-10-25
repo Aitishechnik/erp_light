@@ -3,9 +3,36 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, Field
+
+
+class ReasonOut(BaseModel):
+    """Причина отклонения по строке итогов."""
+
+    code: str
+    title: str
+    comment: str | None
+    author_name: str | None
+    updated_at: datetime
+
+
+class ReasonOptionOut(BaseModel):
+    """Вариант причины для выпадающего списка."""
+
+    code: str
+    title: str
+
+
+class ReasonIn(BaseModel):
+    """Поставить или изменить причину."""
+
+    client_id: uuid.UUID
+    product_id: uuid.UUID
+    reason: str = Field(max_length=32)
+    comment: str | None = Field(default=None, max_length=500)
 
 
 class MonthRowOut(BaseModel):
@@ -26,6 +53,7 @@ class MonthRowOut(BaseModel):
     manager_mismatch: bool = Field(
         default=False, description="Клиент закреплён за другим менеджером, чем его план"
     )
+    reason: ReasonOut | None = Field(default=None, description="Причина отклонения")
 
 
 class MonthUnmatchedOut(BaseModel):
@@ -50,6 +78,8 @@ class MonthResultOut(BaseModel):
     deviation_lines: int
     extra_lines: int
     short_lines: int
+    without_reason: int = Field(description="Строки с отклонением без причины")
+    reason_options: list[ReasonOptionOut]
     fact_amount: Decimal
 
 

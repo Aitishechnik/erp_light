@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, DbSession, require_roles
@@ -16,12 +17,16 @@ from app.models.auth import (
     ROLE_SALES_MANAGER,
     User,
 )
+from app.models.sales import REASON_TITLES
 from app.schemas.sales_results import (
     MatchIn,
     MatchOut,
     MonthResultOut,
     MonthRowOut,
     MonthUnmatchedOut,
+    ReasonIn,
+    ReasonOptionOut,
+    ReasonOut,
 )
 from app.services import month_result_service as service
 from app.services.import_service import ImportDataError
@@ -53,6 +58,18 @@ def _money(value: Decimal) -> Decimal:
 Matcher = Annotated[User, Depends(require_roles(ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR))]
 
 
+def _reason_out(row: service.MonthRow) -> ReasonOut | None:
+    if row.reason is None:
+        return None
+    return ReasonOut(
+        code=row.reason.reason,
+        title=REASON_TITLES.get(row.reason.reason, row.reason.reason),
+        comment=row.reason.comment,
+        author_name=row.reason_author,
+        updated_at=row.reason.updated_at,
+    )
+
+
 def _summary(db: Session, user: User, year: int, month: int) -> MonthResultOut:
     summary = service.month_summary(db, user, year, month)
     rows = [
@@ -70,6 +87,7 @@ def _summary(db: Session, user: User, year: int, month: int) -> MonthResultOut:
             deviation=_quantity(row.fact_quantity - row.plan_quantity),
             group=row.group,
             manager_mismatch=row.manager_mismatch,
+            reason=_reason_out(row),
         )
         for row in summary.rows
     ]
@@ -92,6 +110,10 @@ def _summary(db: Session, user: User, year: int, month: int) -> MonthResultOut:
         deviation_lines=summary.deviation_lines,
         extra_lines=summary.extra_lines,
         short_lines=summary.short_lines,
+        without_reason=summary.without_reason,
+        reason_options=[
+            ReasonOptionOut(code=code, title=title) for code, title in REASON_TITLES.items()
+        ],
         fact_amount=_money(summary.fact_amount),
     )
 
@@ -125,3 +147,55 @@ def match_row(
     except ImportDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     return MatchOut(matched=result.matched, remaining=result.remaining)
+
+
+@router.put("/month-results/{year}/{month}/reasons", response_model=ReasonOut)
+def put_reason(
+    year: int,
+    month: int,
+    payload: ReasonIn,
+    user: CurrentUser,
+    db: DbSession,
+) -> ReasonOut:
+    """Поставить причину отклонения: менеджер по своим строкам, коммерческий — по всем."""
+    try:
+        row = service.set_reason(
+            db,
+            user,
+            year,
+            month,
+            payload.client_id,
+            payload.product_id,
+            payload.reason,
+            payload.comment,
+        )
+    except service.ReasonError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return ReasonOut(
+        code=row.reason,
+        title=REASON_TITLES.get(row.reason, row.reason),
+        comment=row.comment,
+        author_name=row.author.full_name if row.author is not None else None,
+        updated_at=row.updated_at,
+    )
+
+
+@router.delete(
+    "/month-results/{year}/{month}/reasons",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+def delete_reason(
+    year: int,
+    month: int,
+    client_id: uuid.UUID,
+    product_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> Response:
+    """Снять причину со строки."""
+    try:
+        service.clear_reason(db, user, year, month, client_id, product_id)
+    except service.ReasonError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
