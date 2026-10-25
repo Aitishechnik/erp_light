@@ -554,7 +554,8 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
                                 </select>
                                 <input
                                   aria-label="Комментарий к причине"
-                                  placeholder="Комментарий (обязателен для «Другое»)"
+                                  placeholder="Комментарий (для «Другое»)"
+                                  title="Комментарий необязателен, кроме причины «Другое»"
                                   value={reasonComment}
                                   onChange={(event) => setReasonComment(event.target.value)}
                                 />

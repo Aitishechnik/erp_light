@@ -397,8 +397,12 @@ button.primary {
   color: var(--muted);
 }
 
+.reason-editor select {
+  margin-right: 0.5rem;
+}
+
 .reason-editor input {
-  min-width: 16rem;
+  min-width: 14rem;
 }
 
 .badge-plan {
