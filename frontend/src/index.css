@@ -20,14 +20,17 @@ body {
 
 .layout {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  /* Шире прежних 260px: подпункты стоят с отступом под заголовком раздела,
+     и длинные названия («Настройки приложения») должны влезать в строку. */
+  grid-template-columns: 280px 1fr;
   min-height: 100vh;
 }
 
 .sidebar {
   background: #fff;
   border-right: 1px solid var(--border);
-  padding: 1rem;
+  /* Горизонтальный отступ меньше — та же причина: место под подпункты. */
+  padding: 1rem 0.75rem;
 }
 
 .brand {
@@ -96,14 +99,15 @@ body {
   color: var(--muted);
 }
 
-.nav-sublist {
+/* Селектор намеренно специфичнее `.sidebar ul`, иначе его `margin/padding: 0`
+   перебивает отступ и подпункты уезжают левее заголовка раздела. */
+.sidebar ul.nav-sublist {
   list-style: none;
-  margin: 0.15rem 0 0.35rem;
-  padding: 0 0 0 0.9rem;
+  margin: 0.15rem 0 0.35rem 1.2rem;
+  padding: 0 0 0 0.25rem;
   display: grid;
   gap: 0.15rem;
   border-left: 1px solid var(--border);
-  margin-left: 0.75rem;
 }
 
 .nav-item.active {

@@ -322,6 +322,52 @@ test('разделы переключаются', async ({ page }) => {
   await expect(page.getByText('Модуль ещё не реализован.')).toBeVisible()
 })
 
+test('подпункты меню стоят не левее заголовка раздела и не переносятся', async ({ page }) => {
+  await mockSession(page)
+  await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
+  await page.goto('/')
+
+  const menuBoxes = (group: string) =>
+    page
+      .locator('.sidebar .nav-group')
+      .filter({ has: page.getByRole('button', { name: group, exact: true }) })
+      .evaluate((node) => {
+        const textBox = (el: Element) => {
+          const text = [...el.childNodes].find((child) => child.nodeType === Node.TEXT_NODE)
+          const range = document.createRange()
+          range.selectNodeContents(text ?? el)
+          const rects = range.getClientRects()
+          return { left: rects[0]?.left ?? 0, lines: rects.length }
+        }
+        const head = node.querySelector('.nav-group-head') as Element
+        const items = [...node.querySelectorAll('.nav-sublist .nav-item')]
+        return {
+          head: textBox(head),
+          items: items.map((item) => ({ title: item.textContent?.trim() ?? '', ...textBox(item) })),
+        }
+      })
+
+  for (const group of ['Планирование', 'Администрирование']) {
+    await page.getByRole('button', { name: group, exact: true }).click()
+    const boxes = await menuBoxes(group)
+
+    expect(boxes.items.length).toBeGreaterThan(0)
+    for (const item of boxes.items) {
+      expect(item.title).toBeTruthy()
+      expect(item.left, `${group} / ${item.title}: левее заголовка`).toBeGreaterThanOrEqual(
+        boxes.head.left,
+      )
+      expect(item.lines, `${group} / ${item.title}: перенос строки`).toBe(1)
+    }
+  }
+
+  // Выделенный пункт становится жирным и шире — он тоже обязан помещаться в одну строку.
+  await page.getByRole('button', { name: 'Настройки приложения', exact: true }).click()
+  const active = await menuBoxes('Администрирование')
+  const settings = active.items.find((item) => item.title === 'Настройки приложения')
+  expect(settings?.lines, 'Настройки приложения: перенос строки в выделенном пункте').toBe(1)
+})
+
 test('пустой список показывает подсказку', async ({ page }) => {
   await mockSession(page)
   await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
