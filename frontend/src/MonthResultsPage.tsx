@@ -174,6 +174,15 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
       .catch(() => setProducts([]))
   }, [mayMatch])
 
+  // Открытый редактор причины подкручиваем в окно: строка может быть внизу списка.
+  useEffect(() => {
+    if (editing === null) return
+    const node = document.querySelector('.reason-editor')
+    if (node && typeof node.scrollIntoView === 'function') {
+      node.scrollIntoView({ block: 'center' })
+    }
+  }, [editing])
+
   const result = state.status === 'ready' ? state.result : null
 
   const managers = useMemo(() => {
