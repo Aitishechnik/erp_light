@@ -17,8 +17,10 @@ from app.models.auth import (
     ROLE_SALES_MANAGER,
     User,
 )
-from app.models.sales import REASON_TITLES
+from app.models.sales import DECISION_TITLES, REASON_TITLES, MonthResult
 from app.schemas.sales_results import (
+    DecisionIn,
+    DecisionOut,
     MatchIn,
     MatchOut,
     MonthResultOut,
@@ -27,7 +29,9 @@ from app.schemas.sales_results import (
     ReasonIn,
     ReasonOptionOut,
     ReasonOut,
+    ReopenIn,
 )
+from app.services import month_close_service
 from app.services import month_result_service as service
 from app.services.import_service import ImportDataError
 from app.services.sales_import_service import match_unmatched
@@ -70,8 +74,23 @@ def _reason_out(row: service.MonthRow) -> ReasonOut | None:
     )
 
 
+def _decision_out(result: MonthResult | None) -> DecisionOut | None:
+    if result is None or result.decision is None or result.decision_at is None:
+        return None
+    return DecisionOut(
+        code=result.decision,
+        title=DECISION_TITLES.get(result.decision, result.decision),
+        comment=result.decision_comment,
+        target_year=result.target_year,
+        target_month=result.target_month,
+        author_name=result.decision_by.full_name if result.decision_by is not None else None,
+        at=result.decision_at,
+    )
+
+
 def _summary(db: Session, user: User, year: int, month: int) -> MonthResultOut:
     summary = service.month_summary(db, user, year, month)
+    state = month_close_service.get_result(db, year, month)
     rows = [
         MonthRowOut(
             client_id=row.client_id,
@@ -111,6 +130,13 @@ def _summary(db: Session, user: User, year: int, month: int) -> MonthResultOut:
         extra_lines=summary.extra_lines,
         short_lines=summary.short_lines,
         without_reason=summary.without_reason,
+        status=state.status if state is not None else "open",
+        closed_by_name=(
+            state.closed_by.full_name if state is not None and state.closed_by is not None else None
+        ),
+        closed_at=state.closed_at if state is not None else None,
+        reopen_reason=state.reopen_reason if state is not None else None,
+        decision=_decision_out(state),
         reason_options=[
             ReasonOptionOut(code=code, title=title) for code, title in REASON_TITLES.items()
         ],
@@ -199,3 +225,46 @@ def delete_reason(
     except service.ReasonError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/month-results/{year}/{month}/close", response_model=MonthResultOut)
+def close_month(year: int, month: int, user: CurrentUser, db: DbSession) -> MonthResultOut:
+    """Закрыть месяц: снимок плана, факта, причин и решения."""
+    try:
+        month_close_service.close_month(db, user, year, month)
+    except month_close_service.MonthCloseError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return _summary(db, user, year, month)
+
+
+@router.post("/month-results/{year}/{month}/reopen", response_model=MonthResultOut)
+def reopen_month(
+    year: int, month: int, payload: ReopenIn, user: CurrentUser, db: DbSession
+) -> MonthResultOut:
+    """Открыть закрытый месяц заново: причина обязательна, снимок остаётся в истории."""
+    try:
+        month_close_service.reopen_month(db, user, year, month, payload.reason)
+    except month_close_service.MonthCloseError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return _summary(db, user, year, month)
+
+
+@router.put("/month-results/{year}/{month}/decision", response_model=MonthResultOut)
+def put_decision(
+    year: int, month: int, payload: DecisionIn, user: CurrentUser, db: DbSession
+) -> MonthResultOut:
+    """Решение месяца: перенос в план продаж, перенос в план закупок или «принять»."""
+    try:
+        month_close_service.set_decision(
+            db,
+            user,
+            year,
+            month,
+            payload.decision,
+            target_year=payload.target_year,
+            target_month=payload.target_month,
+            comment=payload.comment,
+        )
+    except month_close_service.MonthCloseError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return _summary(db, user, year, month)

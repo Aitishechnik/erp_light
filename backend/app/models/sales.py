@@ -15,9 +15,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
+    JSON,
     DateTime,
     ForeignKey,
     Integer,
@@ -222,3 +223,94 @@ class DeviationReason(Base):
     )
 
     author: Mapped[User | None] = relationship()
+
+
+# Решения месяца: что руководство сделало с нереализованным объёмом.
+DECISION_CODES = ("transfer_sales", "transfer_purchase", "accept")
+
+DECISION_TITLES = {
+    "transfer_sales": "Перенести в план продаж",
+    "transfer_purchase": "Перенести в план закупок",
+    "accept": "Принять как есть",
+}
+
+MONTH_STATUSES = ("open", "closed")
+
+
+class MonthResult(Base):
+    """Состояние месяца итогов: закрытие, решение и последний снимок.
+
+    Строка заводится при первом закрытии или решении; пока её нет, месяц открыт.
+    Снимок — JSON плана, факта, причин и решения на момент закрытия: он не
+    пересчитывается задним числом, а каждая версия ещё и лежит в истории.
+    """
+
+    __tablename__ = "month_results"
+    __table_args__ = (UniqueConstraint("year", "month", name="month_result_year_month"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    year: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    month: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open", index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    closed_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reopened_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    reopened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reopen_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    decision: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    decision_comment: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    target_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    decision_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    decision_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    closed_by: Mapped[User | None] = relationship(foreign_keys=[closed_by_id])
+    reopened_by: Mapped[User | None] = relationship(foreign_keys=[reopened_by_id])
+    decision_by: Mapped[User | None] = relationship(foreign_keys=[decision_by_id])
+    snapshots: Mapped[list[MonthResultSnapshot]] = relationship(
+        back_populates="month_result", cascade="all, delete-orphan"
+    )
+
+
+class MonthResultSnapshot(Base):
+    """История закрытий месяца: снимок каждого закрытия остаётся навсегда."""
+
+    __tablename__ = "month_result_snapshots"
+    __table_args__ = (
+        UniqueConstraint("month_result_id", "version", name="month_snapshot_version"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    month_result_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("month_results.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    closed_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    closed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    month_result: Mapped[MonthResult] = relationship(back_populates="snapshots")

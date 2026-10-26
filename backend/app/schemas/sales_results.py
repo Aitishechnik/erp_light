@@ -19,6 +19,33 @@ class ReasonOut(BaseModel):
     updated_at: datetime
 
 
+class DecisionOut(BaseModel):
+    """Решение месяца: что делаем с нереализованным объёмом."""
+
+    code: str
+    title: str
+    comment: str | None
+    target_year: int | None
+    target_month: int | None
+    author_name: str | None
+    at: datetime
+
+
+class DecisionIn(BaseModel):
+    """Поставить решение месяца."""
+
+    decision: str = Field(max_length=32)
+    target_year: int | None = Field(default=None, ge=2020, le=2100)
+    target_month: int | None = Field(default=None, ge=1, le=12)
+    comment: str | None = Field(default=None, max_length=500)
+
+
+class ReopenIn(BaseModel):
+    """Открыть закрытый месяц заново: причина обязательна."""
+
+    reason: str = Field(min_length=1, max_length=500)
+
+
 class ReasonOptionOut(BaseModel):
     """Вариант причины для выпадающего списка."""
 
@@ -81,6 +108,11 @@ class MonthResultOut(BaseModel):
     without_reason: int = Field(description="Строки с отклонением без причины")
     reason_options: list[ReasonOptionOut]
     fact_amount: Decimal
+    status: str = Field(description="open | closed")
+    closed_by_name: str | None = None
+    closed_at: datetime | None = None
+    reopen_reason: str | None = None
+    decision: DecisionOut | None = None
 
 
 class MatchIn(BaseModel):

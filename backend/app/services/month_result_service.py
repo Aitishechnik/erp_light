@@ -27,6 +27,7 @@ from app.models.planning import SalesPlan
 from app.models.sales import (
     REASON_CODES,
     DeviationReason,
+    MonthResult,
     SalesFact,
     SalesFactUnmatched,
 )
@@ -271,6 +272,20 @@ REASON_ROLES = (ROLE_SALES_MANAGER, ROLE_COMMERCIAL_DIRECTOR)
 MAX_COMMENT = 500
 
 
+def _month_closed(db: Session, year: int, month: int) -> bool:
+    """Закрытый месяц не принимает правку причин."""
+    return (
+        db.execute(
+            select(MonthResult.id).where(
+                MonthResult.year == year,
+                MonthResult.month == month,
+                MonthResult.status == "closed",
+            )
+        ).first()
+        is not None
+    )
+
+
 def _find_row(
     db: Session, user: User, year: int, month: int, client_id: uuid.UUID, product_id: uuid.UUID
 ) -> MonthRow:
@@ -295,6 +310,8 @@ def set_reason(
     """Поставить или изменить причину отклонения по строке месяца."""
     if user.role not in REASON_ROLES:
         raise ReasonError("Причину ставит менеджер или коммерческий директор", status_code=403)
+    if _month_closed(db, year, month):
+        raise ReasonError("Месяц закрыт — причину менять нельзя", status_code=409)
     if reason not in REASON_CODES:
         raise ReasonError("Неизвестная причина", status_code=400)
     text = (comment or "").strip() or None
@@ -344,6 +361,8 @@ def clear_reason(
     """Снять причину: строка снова попадёт в «без причины»."""
     if user.role not in REASON_ROLES:
         raise ReasonError("Причину снимает менеджер или коммерческий директор", status_code=403)
+    if _month_closed(db, year, month):
+        raise ReasonError("Месяц закрыт — причину менять нельзя", status_code=409)
     _find_row(db, user, year, month, client_id, product_id)
     row = (
         db.execute(

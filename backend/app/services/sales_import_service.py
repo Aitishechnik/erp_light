@@ -340,6 +340,14 @@ def import_sales(
     if not 1 <= period_month <= 12:
         raise ImportDataError("Месяц продаж должен быть от 1 до 12")
 
+    from app.services.month_close_service import is_closed
+
+    if is_closed(db, period_year, period_month):
+        raise ImportDataError(
+            "Месяц закрыт — откройте его заново, чтобы загрузить другие продажи",
+            status_code=409,
+        )
+
     clients = _clients(db)
     missing: list[str] = []
     for line in parsed.lines:

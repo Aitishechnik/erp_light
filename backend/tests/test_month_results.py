@@ -535,3 +535,204 @@ def test_reason_permissions(
         },
     )
     assert denied.status_code == 403
+
+
+def _closed_month(client: TestClient, db_session: Session, catalog: dict[str, Any]) -> None:
+    """Месяц с фактом, отклонением и причиной — готов к закрытию."""
+    login_commercial = client.post  # noqa: F841 — читаемость: дальше действия от КД
+    _deviation_month(client, db_session, catalog)
+    row = month(client)["rows"][0]
+    client.put(
+        "/api/v1/month-results/2026/10/reasons",
+        json={
+            "client_id": row["client_id"],
+            "product_id": row["product_id"],
+            "reason": "quality",
+            "comment": "горчит",
+        },
+    )
+    response = client.post("/api/v1/month-results/2026/10/close")
+    assert response.status_code == 200, response.text
+
+
+def test_close_fixes_snapshot_and_blocks_edits(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    login("commercial")
+    _closed_month(client, db_session, catalog)
+
+    body = month(client)
+    assert body["status"] == "closed"
+    assert body["closed_by_name"] == "Коммерческий директор (демо)"
+    assert body["closed_at"] is not None
+
+    again = client.post("/api/v1/month-results/2026/10/close")
+    assert again.status_code == 409
+
+    row = body["rows"][0]
+    blocked_reason = client.put(
+        "/api/v1/month-results/2026/10/reasons",
+        json={
+            "client_id": row["client_id"],
+            "product_id": row["product_id"],
+            "reason": "price",
+        },
+    )
+    assert blocked_reason.status_code == 409
+    blocked_clear = client.delete(
+        f"/api/v1/month-results/2026/10/reasons?client_id={row['client_id']}"
+        f"&product_id={row['product_id']}"
+    )
+    assert blocked_clear.status_code == 409
+
+    blocked_import = upload_sales(
+        client, sales_xlsx([("ООО Ромашка", [("Смесь ореховая", "90", "9000")])])
+    )
+    assert blocked_import.status_code == 409
+
+    from app.models.sales import MonthResult, MonthResultSnapshot
+
+    result = db_session.execute(select(MonthResult)).scalars().one()
+    assert result.version == 1
+    assert result.snapshot is not None
+    assert result.snapshot["totals"]["without_reason"] == 0
+    assert result.snapshot["rows"][0]["reason"]["code"] == "quality"
+    assert result.snapshot["decision"] is None
+    snapshots = db_session.execute(select(MonthResultSnapshot)).scalars().all()
+    assert len(snapshots) == 1
+    assert snapshots[0].version == 1
+
+
+def test_close_needs_fact_and_empty_queue(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    login("commercial")
+    empty = client.post("/api/v1/month-results/2026/10/close")
+    assert empty.status_code == 409
+    assert "факта" in empty.json()["detail"]
+
+    _deviation_month(client, db_session, catalog)
+    queued = upload_sales(
+        client,
+        sales_xlsx(
+            [
+                ("ООО Ромашка", [("Смесь ореховая", "80", "8000"), ("Неведомый товар", "1", "10")]),
+            ]
+        ),
+    )
+    assert queued.status_code == 200, queued.text
+    blocked = client.post("/api/v1/month-results/2026/10/close")
+    assert blocked.status_code == 409
+    assert "сопоставления" in blocked.json()["detail"]
+
+
+def test_reopen_with_reason_keeps_history(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    login("commercial")
+    _closed_month(client, db_session, catalog)
+
+    no_reason = client.post("/api/v1/month-results/2026/10/reopen", json={"reason": "  "})
+    assert no_reason.status_code == 400
+    assert "причину" in no_reason.json()["detail"]
+
+    opened = client.post(
+        "/api/v1/month-results/2026/10/reopen",
+        json={"reason": "нашли ошибку в выгрузке"},
+    )
+    assert opened.status_code == 200, opened.text
+    assert opened.json()["status"] == "open"
+    assert opened.json()["reopen_reason"] == "нашли ошибку в выгрузке"
+
+    closed_again = client.post("/api/v1/month-results/2026/10/close")
+    assert closed_again.status_code == 200, closed_again.text
+
+    from app.models.sales import MonthResult, MonthResultSnapshot
+
+    result = db_session.execute(select(MonthResult)).scalars().one()
+    assert result.version == 2
+    versions = db_session.execute(select(MonthResultSnapshot.version)).scalars().all()
+    assert sorted(versions) == [1, 2]
+
+    open_again = client.post("/api/v1/month-results/2026/10/reopen", json={"reason": "ещё раз"})
+    assert open_again.status_code == 200
+
+
+def test_reopen_when_open_is_rejected(client: TestClient, login, catalog: dict[str, Any]) -> None:
+    login("commercial")
+    response = client.post("/api/v1/month-results/2026/10/reopen", json={"reason": "просто так"})
+    assert response.status_code == 409
+
+
+def test_decision_flow(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    login("commercial")
+    _deviation_month(client, db_session, catalog)
+
+    no_target = client.put(
+        "/api/v1/month-results/2026/10/decision",
+        json={"decision": "transfer_sales", "comment": "перенести на ноябрь"},
+    )
+    assert no_target.status_code == 400
+
+    unknown = client.put("/api/v1/month-results/2026/10/decision", json={"decision": "moon_phase"})
+    assert unknown.status_code == 400
+
+    transfer = client.put(
+        "/api/v1/month-results/2026/10/decision",
+        json={
+            "decision": "transfer_sales",
+            "target_year": 2026,
+            "target_month": 11,
+            "comment": "перенести на ноябрь",
+        },
+    )
+    assert transfer.status_code == 200, transfer.text
+    decision = transfer.json()["decision"]
+    assert decision["code"] == "transfer_sales"
+    assert decision["title"] == "Перенести в план продаж"
+    assert decision["target_month"] == 11
+    assert decision["author_name"] == "Коммерческий директор (демо)"
+
+    accepted = client.put(
+        "/api/v1/month-results/2026/10/decision",
+        json={"decision": "accept", "comment": "решили принять"},
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["decision"]["target_month"] is None
+
+    closed = client.post("/api/v1/month-results/2026/10/close")
+    assert closed.status_code == 200, closed.text
+    assert closed.json()["decision"]["code"] == "accept"
+
+    from app.models.sales import MonthResult
+
+    result = db_session.execute(select(MonthResult)).scalars().one()
+    assert result.snapshot is not None
+    assert result.snapshot["decision"]["code"] == "accept"
+
+    frozen = client.put("/api/v1/month-results/2026/10/decision", json={"decision": "accept"})
+    assert frozen.status_code == 409
+
+
+def test_close_and_decision_permissions(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    login("commercial")
+    _deviation_month(client, db_session, catalog)
+
+    login("sales")
+    assert client.post("/api/v1/month-results/2026/10/close").status_code == 403
+    assert (
+        client.put(
+            "/api/v1/month-results/2026/10/decision", json={"decision": "accept"}
+        ).status_code
+        == 403
+    )
+
+    login("purchase")
+    assert client.post("/api/v1/month-results/2026/10/close").status_code == 403
+
+    login("executive")
+    assert client.post("/api/v1/month-results/2026/10/close").status_code == 200
