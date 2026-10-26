@@ -369,17 +369,24 @@ button.primary {
   max-width: 16rem;
 }
 
-/* Итоги месяца: «Позиция» важнее плашки группы. Без минимума браузер отдаёт
-   ширину «Группе» (бейдж + причина), а название позиции переносится в 5–6 строк
-   и таблица вырастает втрое по высоте. */
+/* Итоги месяца: ширину делят «Позиция» и «Группа». Без минимума браузер отдаёт
+   всё «Группе» (плашка причины в одну строку), а название позиции переносится
+   в 5–6 строк и таблица вырастает втрое. Поэтому: менеджер и позиция — с
+   минимумом, плашка причины — переносится вместо растягивания колонки. */
+[data-testid="month-table"] td:nth-child(1),
+[data-testid="month-table"] th:nth-child(1) {
+  min-width: 8.5rem;
+  max-width: 8.5rem;
+}
+
 [data-testid="month-table"] td:nth-child(3),
 [data-testid="month-table"] th:nth-child(3) {
-  min-width: 11rem;
+  min-width: 9.5rem;
 }
 
 [data-testid="month-table"] td:nth-child(10),
 [data-testid="month-table"] th:nth-child(10) {
-  max-width: 7rem;
+  max-width: 8rem;
 }
 
 .reason-chip,
@@ -398,6 +405,14 @@ button.primary {
 .reason-add {
   background: #fff;
   color: var(--muted);
+}
+
+/* В колонке «Группа» плашка причины переносится внутри себя, а не растягивает
+   колонку: иначе таблица отдаёт ей 195 px, а «Позиция» сжимается до 99 px. */
+[data-testid="month-table"] .reason-chip,
+[data-testid="month-table"] .reason-add {
+  max-width: 100%;
+  white-space: normal;
 }
 
 .reason-editor td {
