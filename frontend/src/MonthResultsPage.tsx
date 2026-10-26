@@ -235,7 +235,7 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
       return
     }
     setEditing(key)
-    setReasonCode(row.reason?.code ?? result?.reason_options[0]?.code ?? '')
+    setReasonCode(row.reason?.code ?? '')
     setReasonComment(row.reason?.comment ?? '')
   }
 
@@ -555,6 +555,7 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
                                   value={reasonCode}
                                   onChange={(event) => setReasonCode(event.target.value)}
                                 >
+                                  <option value="">— выберите причину —</option>
                                   {(result.reason_options ?? []).map((option) => (
                                     <option key={option.code} value={option.code}>
                                       {option.title}
@@ -571,7 +572,7 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
                                 <button
                                   type="button"
                                   className="primary"
-                                  disabled={busy}
+                                  disabled={busy || reasonCode === ''}
                                   onClick={() => void saveReason(row)}
                                 >
                                   Сохранить

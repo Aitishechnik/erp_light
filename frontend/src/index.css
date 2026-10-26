@@ -406,6 +406,10 @@ button.primary {
   min-width: 18rem;
 }
 
+.reason-editor button {
+  margin-left: 0.4rem;
+}
+
 .badge-plan {
   background: #e7f6ec;
   color: #067647;
