@@ -390,6 +390,63 @@ describe('Закрытие месяца и решение', () => {
     })
   })
 
+  it('создаёт черновики корректировок из решения о переносе', async () => {
+    const user = userEvent.setup()
+    const closedTransfer: MonthResult = {
+      ...RESULT,
+      status: 'closed',
+      closed_by_name: 'Коммерческий директор (демо)',
+      closed_at: '2026-10-26T10:00:00Z',
+      decision: {
+        code: 'transfer_sales',
+        title: 'Перенести в план продаж',
+        comment: null,
+        target_year: 2026,
+        target_month: 11,
+        author_name: 'Коммерческий директор (демо)',
+        at: '2026-10-26T10:00:00Z',
+      },
+    }
+    mockApi({
+      'POST /api/v1/month-results/': {
+        body: {
+          created: [
+            {
+              manager_name: 'Менеджер по продажам (демо)',
+              plan_id: 'plan-1',
+              correction_id: 'corr-1',
+              lines: 2,
+              quantity: '120.000',
+            },
+          ],
+          skipped: [
+            {
+              manager_name: 'Менеджер по продажам 2 (демо)',
+              reason: 'уже есть открытая корректировка',
+            },
+          ],
+        },
+      },
+      'month-results': { body: closedTransfer },
+      '/api/v1/products': { body: PRODUCTS },
+    })
+    render(<MonthResultsPage user={COMMERCIAL} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Создать корректировки' }))
+    const result = await screen.findByTestId('transfer-result')
+    expect(result).toHaveTextContent('Менеджер по продажам (демо) — 2 стр., 120 ед.')
+    expect(result).toHaveTextContent('уже есть открытая корректировка')
+
+    const call = vi
+      .mocked(fetch)
+      .mock.calls.find(
+        ([url, init]) =>
+          (init?.method ?? 'GET').toUpperCase() === 'POST' &&
+          String(url).includes('/transfer-draft'),
+      )
+    expect(call).toBeTruthy()
+  })
+
   it('закупки не закрывают месяц и не решают за продажи', async () => {
     setupState(RESULT, PURCHASE)
     await screen.findByTestId('month-state')

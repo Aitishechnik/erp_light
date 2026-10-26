@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   clearMonthReason,
   closeMonth,
+  createTransferDrafts,
   errorMessage,
   fetchMonthResult,
   fetchProducts,
@@ -18,6 +19,7 @@ import {
   type SessionUser,
   saveMonthReason,
   setMonthDecision,
+  type TransferDrafts,
 } from './api'
 
 const MONTH_NAMES = [
@@ -175,6 +177,7 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
     return targetValue(next.year, next.month)
   })
   const [decisionComment, setDecisionComment] = useState('')
+  const [transferResult, setTransferResult] = useState<TransferDrafts | null>(null)
 
   const mayMatch = MATCH_ROLES.includes(user.role)
   const mayReason = REASON_ROLES.includes(user.role)
@@ -338,6 +341,19 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
       setReopenOpen(false)
       setReopenReason('')
       await load()
+    } catch (error) {
+      setNotice(errorMessage(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const createDrafts = async () => {
+    setBusy(true)
+    setNotice(null)
+    setTransferResult(null)
+    try {
+      setTransferResult(await createTransferDrafts(year, month))
     } catch (error) {
       setNotice(errorMessage(error))
     } finally {
@@ -621,10 +637,48 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
                 </button>
               </div>
             ) : null}
+            {result.status === 'closed' &&
+            result.decision?.code === 'transfer_sales' &&
+            mayClose ? (
+              <div className="month-decision-form">
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={busy}
+                  onClick={() => void createDrafts()}
+                >
+                  Создать корректировки
+                </button>
+                <span className="hint">
+                  Черновики планов менеджеров на месяц переноса; утверждать — в «Планировании
+                  продаж».
+                </span>
+              </div>
+            ) : null}
+
+            {transferResult ? (
+              <p className="hint" data-testid="transfer-result">
+                {transferResult.created.length > 0
+                  ? `Созданы черновики: ${transferResult.created
+                      .map(
+                        (row) =>
+                          `${row.manager_name} — ${row.lines} стр., ${formatQuantity(row.quantity)} ед`,
+                      )
+                      .join('; ')}. `
+                  : 'Черновики не созданы. '}
+                {transferResult.skipped.length > 0
+                  ? `Пропущено: ${transferResult.skipped
+                      .map((row) => `${row.manager_name} — ${row.reason}`)
+                      .join('; ')}. `
+                  : ''}
+                Утвердить корректировки можно в «Планировании продаж».
+              </p>
+            ) : null}
+
             {result.status === 'closed' ? (
               <p className="hint">
-                Месяц закрыт: решение и причины не меняются. Перенос оформляется корректировкой
-                плана продаж или пересмотром плана закупок — планы сами не правятся.
+                Месяц закрыт: решение и причины не меняются. Перенос объёма оформляется
+                корректировкой плана продаж, перенос закупки — пересмотром плана закупок.
               </p>
             ) : null}
           </div>

@@ -1017,6 +1017,18 @@ export type MonthDecision = {
   at: string
 }
 
+export type TransferDraft = {
+  manager_name: string
+  plan_id: string
+  correction_id: string
+  lines: number
+  quantity: string
+}
+
+export type TransferSkipped = { manager_name: string; reason: string }
+
+export type TransferDrafts = { created: TransferDraft[]; skipped: TransferSkipped[] }
+
 export type MonthDecisionIn = {
   decision: 'transfer_sales' | 'transfer_purchase' | 'accept'
   target_year?: number | null
@@ -1130,6 +1142,13 @@ export function setMonthDecision(
   return request<MonthResult>(`/api/v1/month-results/${year}/${month}/decision`, {
     method: 'PUT',
     body: JSON.stringify(payload),
+  })
+}
+
+/** Создать черновики корректировок планов продаж по недобору закрытого месяца. */
+export function createTransferDrafts(year: number, month: number): Promise<TransferDrafts> {
+  return request<TransferDrafts>(`/api/v1/month-results/${year}/${month}/transfer-draft`, {
+    method: 'POST',
   })
 }
 
