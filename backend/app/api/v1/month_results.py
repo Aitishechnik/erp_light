@@ -30,8 +30,11 @@ from app.schemas.sales_results import (
     ReasonOptionOut,
     ReasonOut,
     ReopenIn,
+    TransferDraftOut,
+    TransferDraftsOut,
+    TransferSkippedOut,
 )
-from app.services import month_close_service
+from app.services import month_close_service, month_transfer_service
 from app.services import month_result_service as service
 from app.services.import_service import ImportDataError
 from app.services.sales_import_service import match_unmatched
@@ -268,3 +271,30 @@ def put_decision(
     except month_close_service.MonthCloseError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     return _summary(db, user, year, month)
+
+
+@router.post("/month-results/{year}/{month}/transfer-draft", response_model=TransferDraftsOut)
+def create_transfer_draft(
+    year: int, month: int, user: CurrentUser, db: DbSession
+) -> TransferDraftsOut:
+    """Создать черновики корректировок планов продаж по недобору закрытого месяца."""
+    try:
+        result = month_transfer_service.transfer_drafts(db, user, year, month)
+    except month_transfer_service.TransferError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return TransferDraftsOut(
+        created=[
+            TransferDraftOut(
+                manager_name=row.manager_name,
+                plan_id=row.plan_id,
+                correction_id=row.correction_id,
+                lines=row.lines,
+                quantity=_quantity(row.quantity),
+            )
+            for row in result.created
+        ],
+        skipped=[
+            TransferSkippedOut(manager_name=row.manager_name, reason=row.reason)
+            for row in result.skipped
+        ],
+    )

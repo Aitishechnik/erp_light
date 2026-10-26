@@ -117,9 +117,11 @@ def _check_can_propose(user: User, plan: SalesPlan) -> None:
 
 
 def _check_commercial(user: User) -> None:
-    if user.role != ROLE_COMMERCIAL_DIRECTOR:
+    """Утверждает и отклоняет корректировку коммерческий или исполнительный директор."""
+    if user.role not in (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR):
         raise CorrectionError(
-            "Утверждает корректировку только коммерческий директор", status_code=403
+            "Утверждает корректировку коммерческий или исполнительный директор",
+            status_code=403,
         )
 
 

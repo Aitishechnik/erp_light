@@ -736,3 +736,154 @@ def test_close_and_decision_permissions(
 
     login("executive")
     assert client.post("/api/v1/month-results/2026/10/close").status_code == 200
+
+
+def _manager_plan(db: Session, login_name: str = "sales", year: int = 2026) -> SalesPlan:
+    manager = _user(db, login_name)
+    return (
+        db.execute(
+            select(SalesPlan).where(SalesPlan.year == year, SalesPlan.manager_id == manager.id)
+        )
+        .scalars()
+        .one()
+    )
+
+
+def _ready_to_transfer(
+    client: TestClient,
+    db_session: Session,
+    catalog: dict[str, Any],
+    *,
+    target_month: int = 11,
+    decision: str = "transfer_sales",
+) -> dict[str, Any]:
+    """Месяц с недобором, решением и закрытием — можно просить черновики."""
+    _deviation_month(client, db_session, catalog)
+    client.put(
+        "/api/v1/month-results/2026/10/decision",
+        json={
+            "decision": decision,
+            "target_year": 2026,
+            "target_month": target_month,
+            "comment": "перенос недобора",
+        },
+    )
+    closed = client.post("/api/v1/month-results/2026/10/close")
+    assert closed.status_code == 200, closed.text
+    draft = client.post("/api/v1/month-results/2026/10/transfer-draft")
+    assert draft.status_code == 200, draft.text
+    body: dict[str, Any] = draft.json()
+    return body
+
+
+def test_transfer_draft_creates_correction(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    login("commercial")
+    body = _ready_to_transfer(client, db_session, catalog)
+    assert body["skipped"] == []
+    assert len(body["created"]) == 1
+    created = body["created"][0]
+    assert created["manager_name"] == "Менеджер по продажам (демо)"
+    assert created["lines"] == 1
+    assert created["quantity"] == "20.000"
+
+    from app.models.planning import SalesPlanCorrection, SalesPlanCorrectionItem
+
+    correction = (
+        db_session.execute(
+            select(SalesPlanCorrection).where(SalesPlanCorrection.id == created["correction_id"])
+        )
+        .scalars()
+        .one()
+    )
+    assert correction.status == "draft"
+    assert "Перенос недобора" in (correction.reason or "")
+    items = (
+        db_session.execute(
+            select(SalesPlanCorrectionItem).where(
+                SalesPlanCorrectionItem.correction_id == correction.id
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [(item.month, str(item.quantity)) for item in items] == [(11, "20.000")]
+
+    # Утверждает человек: отправляем и утверждаем как КД.
+    sent = client.post(f"/api/v1/sales-plan-corrections/{correction.id}/submit")
+    assert sent.status_code == 200, sent.text
+    approved = client.post(f"/api/v1/sales-plan-corrections/{correction.id}/approve")
+    assert approved.status_code == 200, approved.text
+
+    plan = _manager_plan(db_session)
+    november = [item for item in plan.items if item.month == 11]
+    assert [(str(item.quantity), item.notes) for item in november] == [
+        ("20.000", "перенос недобора из итогов месяца")
+    ]
+
+
+def test_transfer_draft_needs_decision_and_closed_month(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    login("commercial")
+    _deviation_month(client, db_session, catalog)
+    client.put(
+        "/api/v1/month-results/2026/10/decision",
+        json={"decision": "accept", "comment": "оставляем"},
+    )
+    closed = client.post("/api/v1/month-results/2026/10/close")
+    assert closed.status_code == 200, closed.text
+    wrong = client.post("/api/v1/month-results/2026/10/transfer-draft")
+    assert wrong.status_code == 400
+    assert "не «Перенести в план продаж»" in wrong.json()["detail"]
+
+    open_month = client.post("/api/v1/month-results/2026/11/transfer-draft")
+    assert open_month.status_code == 400
+    assert "закройте месяц" in open_month.json()["detail"]
+
+
+def test_transfer_draft_skips_manager_with_open_correction(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    login("commercial")
+    _deviation_month(client, db_session, catalog)
+    plan = _manager_plan(db_session)
+    existing = client.post(
+        "/api/v1/sales-plan-corrections", json={"plan_id": str(plan.id), "reason": "ручная"}
+    )
+    assert existing.status_code == 201, existing.text
+
+    client.put(
+        "/api/v1/month-results/2026/10/decision",
+        json={"decision": "transfer_sales", "target_year": 2026, "target_month": 11},
+    )
+    client.post("/api/v1/month-results/2026/10/close")
+    draft = client.post("/api/v1/month-results/2026/10/transfer-draft")
+    assert draft.status_code == 200, draft.text
+    body = draft.json()
+    assert body["created"] == []
+    assert body["skipped"][0]["reason"] == "уже есть открытая корректировка"
+
+
+def test_transfer_draft_skips_frozen_target(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    login("commercial")
+    body = _ready_to_transfer(client, db_session, catalog, target_month=9)
+    assert body["created"] == []
+    assert "заморожен" in body["skipped"][0]["reason"]
+
+
+def test_executive_approves_correction(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    login("commercial")
+    body = _ready_to_transfer(client, db_session, catalog)
+    correction_id = body["created"][0]["correction_id"]
+    assert client.post(f"/api/v1/sales-plan-corrections/{correction_id}/submit").status_code == 200
+
+    login("executive")
+    approved = client.post(f"/api/v1/sales-plan-corrections/{correction_id}/approve")
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == "approved"

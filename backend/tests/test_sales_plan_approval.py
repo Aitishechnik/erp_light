@@ -460,7 +460,7 @@ def test_commercial_can_create_and_apply_correction(
     assert plan["items"][0]["quantity"] == "30.000"
 
 
-def test_executive_can_propose_correction_but_not_approve(
+def test_executive_can_propose_and_approve_correction(
     client: TestClient,
     login,
     db_session: Session,
@@ -495,10 +495,10 @@ def test_executive_can_propose_correction_but_not_approve(
     )
     assert saved.status_code == 200, saved.text
     assert client.post(f"/api/v1/sales-plan-corrections/{correction_id}/submit").status_code == 200
-    assert client.post(f"/api/v1/sales-plan-corrections/{correction_id}/approve").status_code == 403
-
-    login("commercial")
-    assert client.post(f"/api/v1/sales-plan-corrections/{correction_id}/approve").status_code == 200
+    # С 2026-10-26 корректировку утверждает и исполнительный директор.
+    approved = client.post(f"/api/v1/sales-plan-corrections/{correction_id}/approve")
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == "approved"
 
 
 def test_correction_keeps_frozen_months_untouched(

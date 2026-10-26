@@ -115,6 +115,30 @@ class MonthResultOut(BaseModel):
     decision: DecisionOut | None = None
 
 
+class TransferDraftOut(BaseModel):
+    """Черновик корректировки, созданный из решения месяца."""
+
+    manager_name: str
+    plan_id: uuid.UUID
+    correction_id: uuid.UUID
+    lines: int
+    quantity: Decimal
+
+
+class TransferSkippedOut(BaseModel):
+    """Менеджер, чьи строки не перенеслись, и причина."""
+
+    manager_name: str
+    reason: str
+
+
+class TransferDraftsOut(BaseModel):
+    """Итог кнопки «создать корректировки»: что создано и что пропущено."""
+
+    created: list[TransferDraftOut]
+    skipped: list[TransferSkippedOut]
+
+
 class MatchIn(BaseModel):
     """Сопоставить строку файла карточке номенклатуры."""
 
