@@ -369,6 +369,19 @@ button.primary {
   max-width: 16rem;
 }
 
+/* Итоги месяца: «Позиция» важнее плашки группы. Без минимума браузер отдаёт
+   ширину «Группе» (бейдж + причина), а название позиции переносится в 5–6 строк
+   и таблица вырастает втрое по высоте. */
+[data-testid="month-table"] td:nth-child(3),
+[data-testid="month-table"] th:nth-child(3) {
+  min-width: 11rem;
+}
+
+[data-testid="month-table"] td:nth-child(10),
+[data-testid="month-table"] th:nth-child(10) {
+  max-width: 7rem;
+}
+
 .reason-chip,
 .reason-add {
   display: block;
