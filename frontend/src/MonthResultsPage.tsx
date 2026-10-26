@@ -480,7 +480,9 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
           <span className="hint">
             {result.status === 'closed'
               ? `Снимок зафиксирован ${formatDate(result.closed_at)}, ${result.closed_by_name ?? '—'}. ${
-                  result.reopen_reason ? `Открывался: ${result.reopen_reason}.` : ''
+                  result.reopen_reason
+                    ? `Месяц открывали заново — причина: «${result.reopen_reason}».`
+                    : ''
                 }`
               : 'Загрузка продаж и правка причин доступны до закрытия.'}
           </span>
