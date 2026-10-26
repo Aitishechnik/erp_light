@@ -98,6 +98,11 @@ const RESULT: MonthResult = {
     { code: 'other', title: 'Другое' },
   ],
   fact_amount: '10000.00',
+  status: 'open',
+  closed_by_name: null,
+  closed_at: null,
+  reopen_reason: null,
+  decision: null,
 }
 
 afterEach(() => {
@@ -289,5 +294,106 @@ describe('Причины отклонений', () => {
     const table = screen.getByTestId('month-table')
     expect(within(table).queryByText('Качество продукции')).toBeNull()
     expect(within(table).getAllByRole('button', { name: '+ причина' })).toHaveLength(2)
+  })
+})
+
+describe('Закрытие месяца и решение', () => {
+  function setupState(result: MonthResult, user: SessionUser = COMMERCIAL) {
+    mockApi({
+      'POST /api/v1/month-results/': { body: result },
+      'PUT /api/v1/month-results/': { body: result },
+      'month-results': { body: result },
+      '/api/v1/products': { body: PRODUCTS },
+    })
+    return render(<MonthResultsPage user={user} />)
+  }
+
+  const CLOSED: MonthResult = {
+    ...RESULT,
+    status: 'closed',
+    closed_by_name: 'Коммерческий директор (демо)',
+    closed_at: '2026-10-26T10:00:00Z',
+  }
+
+  it('закрывает месяц через подтверждение', async () => {
+    const user = userEvent.setup()
+    setupState(RESULT)
+    const state = await screen.findByTestId('month-state')
+    expect(state).toHaveTextContent('месяц открыт')
+
+    await user.click(screen.getByRole('button', { name: 'Закрыть месяц' }))
+    const confirm = screen.getByTestId('close-confirm')
+    expect(confirm).toHaveTextContent('без причины: 3')
+
+    await user.click(within(confirm).getByRole('button', { name: 'Закрыть месяц' }))
+    await waitFor(() => {
+      const call = vi
+        .mocked(fetch)
+        .mock.calls.find(
+          ([url, init]) =>
+            (init?.method ?? 'GET').toUpperCase() === 'POST' && String(url).includes('/close'),
+        )
+      expect(call).toBeTruthy()
+    })
+  })
+
+  it('закрытый месяц только читается, открывается с причиной', async () => {
+    const user = userEvent.setup()
+    setupState(CLOSED)
+    const state = await screen.findByTestId('month-state')
+    expect(state).toHaveTextContent('месяц закрыт')
+    expect(screen.queryByRole('button', { name: 'Закрыть месяц' })).toBeNull()
+    expect(screen.getByText(/Снимок зафиксирован/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Открыть заново' }))
+    const form = screen.getByTestId('reopen-form')
+    const submit = within(form).getByRole('button', { name: 'Открыть заново' })
+    expect(submit).toBeDisabled()
+
+    await user.type(within(form).getByLabelText('Причина повторного открытия'), 'ошибка выгрузки')
+    await user.click(submit)
+    await waitFor(() => {
+      const call = vi
+        .mocked(fetch)
+        .mock.calls.find(
+          ([url, init]) =>
+            (init?.method ?? 'GET').toUpperCase() === 'POST' && String(url).includes('/reopen'),
+        )
+      expect(call).toBeTruthy()
+      expect(String(call?.[1]?.body)).toContain('ошибка выгрузки')
+    })
+  })
+
+  it('сохраняет решение с месяцем переноса', async () => {
+    const user = userEvent.setup()
+    setupState(RESULT)
+    await screen.findByTestId('month-decision')
+
+    await user.selectOptions(screen.getByLabelText('Решение месяца'), 'transfer_sales')
+    await user.selectOptions(screen.getByLabelText('Месяц переноса'), '2026-12')
+    await user.type(screen.getByLabelText('Комментарий к решению'), 'перенести на декабрь')
+    await user.click(screen.getByRole('button', { name: 'Сохранить решение' }))
+
+    await waitFor(() => {
+      const call = vi
+        .mocked(fetch)
+        .mock.calls.find(
+          ([url, init]) =>
+            (init?.method ?? 'GET').toUpperCase() === 'PUT' && String(url).includes('/decision'),
+        )
+      expect(call).toBeTruthy()
+      const body = JSON.parse(String(call?.[1]?.body)) as Record<string, unknown>
+      expect(body.decision).toBe('transfer_sales')
+      expect(body.target_year).toBe(2026)
+      expect(body.target_month).toBe(12)
+      expect(body.comment).toBe('перенести на декабрь')
+    })
+  })
+
+  it('закупки не закрывают месяц и не решают за продажи', async () => {
+    setupState(RESULT, PURCHASE)
+    await screen.findByTestId('month-state')
+    expect(screen.queryByRole('button', { name: 'Закрыть месяц' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Сохранить решение' })).toBeNull()
   })
 })

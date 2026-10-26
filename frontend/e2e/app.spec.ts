@@ -565,7 +565,7 @@ test('менеджер заполняет план продаж по клиен�
   await page.getByRole('button', { name: 'Добавить строку' }).click()
   await page.getByLabel('SKU-1 Декабрь').fill('10')
 
-  await page.getByRole('button', { name: 'Сохранить' }).click()
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.getByTestId('row-total-SKU-1')).toHaveText('10 шт')
 
   await page.getByRole('button', { name: 'Отправить на проверку' }).click()
@@ -702,7 +702,7 @@ test('закупщик раскладывает потребность план�
   await expect(page.getByTestId('purchase-table')).toContainText('янв 10')
   await expect(page.getByTestId('purchase-table')).toContainText('→ окт')
 
-  await page.getByRole('button', { name: 'Сохранить' }).click()
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.getByTestId('purchase-saved')).toContainText('План сохранён')
   await expect(page.getByTestId('purchase-table')).toContainText('Таиланд')
   await expect(page.getByTestId('position-FIN-1')).toContainText('разложено')
@@ -894,7 +894,7 @@ test('поступление из 1С открывается в календар
     .fill(new Date().toISOString().slice(0, 10))
   await expect(page.getByTestId('receipt-total')).toHaveText('88 000,00 ₽')
 
-  await page.getByRole('button', { name: 'Сохранить' }).click()
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
   // Карточка остаётся открытой и показывает сохранённое поступление.
   await expect(page.getByTestId('receipt-saved')).toBeVisible()
   await expect(page.getByTestId('receipt-form')).toBeVisible()
@@ -958,7 +958,7 @@ test('пошлина, Risk и общие расходы считаются в к
   await expect(page.getByTestId('receipt-average-rate')).toHaveText('90.099')
   await expect(page.getByTestId('receipt-risk-rate')).toHaveText('100')
 
-  await page.getByRole('button', { name: 'Сохранить' }).click()
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
   // Карточка остаётся открытой и показывает сохранённое поступление.
   await expect(page.getByTestId('receipt-saved')).toBeVisible()
   await expect(page.getByTestId('receipt-form')).toBeVisible()
@@ -1214,6 +1214,11 @@ const MONTH_RESULT = {
     { code: 'other', title: 'Другое' },
   ],
   fact_amount: '8100.00',
+  status: 'open',
+  closed_by_name: null,
+  closed_at: null,
+  reopen_reason: null,
+  decision: null,
 }
 
 test('итоги месяца: план против факта и очередь сопоставления', async ({ page }) => {
@@ -1266,9 +1271,42 @@ test('причина отклонения сохраняется из строк
   const saved = page.waitForRequest(
     (request) => request.url().includes('/reasons') && request.method() === 'PUT',
   )
-  await page.getByRole('button', { name: 'Сохранить' }).click()
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
   const body = JSON.parse((await saved).postData() ?? '{}') as Record<string, string>
   expect(body.reason).toBe('quality')
   expect(body.comment).toBe('горчит')
   expect(body.client_id).toBe('client-1')
+})
+
+test('месяц закрывается и показывает снимок', async ({ page }) => {
+  let closed = false
+  const state = () => ({
+    ...MONTH_RESULT,
+    status: closed ? 'closed' : 'open',
+    closed_by_name: closed ? 'Коммерческий директор' : null,
+    closed_at: closed ? '2026-10-26T10:00:00Z' : null,
+  })
+
+  await mockSession(page, COMMERCIAL)
+  await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  // Маршруты проверяются с конца: общий регистрируем первым, закрытие — последним.
+  await page.route('**/api/v1/month-results**', (route) => route.fulfill({ json: state() }))
+  await page.route('**/api/v1/month-results/**/close', (route) => {
+    closed = true
+    return route.fulfill({ json: state() })
+  })
+  await page.goto('/')
+
+  await openSection(page, 'Отчёты', 'Итоги месяца')
+  await expect(page.getByTestId('month-state')).toContainText('месяц открыт')
+
+  await page.getByRole('button', { name: 'Закрыть месяц' }).click()
+  await expect(page.getByTestId('close-confirm')).toContainText('Снимок зафиксирует')
+  await page.getByTestId('close-confirm').getByRole('button', { name: 'Закрыть месяц' }).click()
+
+  await expect(page.getByTestId('month-state')).toContainText('месяц закрыт')
+  await expect(page.getByText(/Снимок зафиксирован/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Закрыть месяц' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Открыть заново' })).toBeVisible()
 })

@@ -1,18 +1,23 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   clearMonthReason,
+  closeMonth,
   errorMessage,
   fetchMonthResult,
   fetchProducts,
+  formatDate,
   formatMoney,
   formatQuantity,
+  type MonthDecisionIn,
   type MonthResult,
   type MonthRow,
   type MonthUnmatched,
   matchMonthRow,
   type Product,
+  reopenMonth,
   type SessionUser,
   saveMonthReason,
+  setMonthDecision,
 } from './api'
 
 const MONTH_NAMES = [
@@ -39,6 +44,18 @@ const GROUP_TITLES: Record<MonthRow['group'], string> = {
 const MATCH_ROLES = ['commercial_director', 'executive_director']
 /** Кто ставит причины: менеджер по своим строкам и коммерческий директор по всем. */
 const REASON_ROLES = ['sales_manager', 'commercial_director']
+/** Кто закрывает месяц и принимает решение. */
+const CLOSE_ROLES = ['commercial_director', 'executive_director']
+
+/** Следующий месяц от показанного — вариант переноса по умолчанию. */
+function shiftMonth(year: number, month: number, delta: number): { year: number; month: number } {
+  const index = year * 12 + (month - 1) + delta
+  return { year: Math.floor(index / 12), month: (index % 12) + 1 }
+}
+
+function targetValue(year: number, month: number): string {
+  return `${year}-${String(month).padStart(2, '0')}`
+}
 
 /** Сколько строк рисуем разом: дальше — фильтр или поиск. */
 const VISIBLE_LIMIT = 150
@@ -149,9 +166,19 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
   const [editing, setEditing] = useState<string | null>(null)
   const [reasonCode, setReasonCode] = useState('')
   const [reasonComment, setReasonComment] = useState('')
+  const [confirmClose, setConfirmClose] = useState(false)
+  const [reopenOpen, setReopenOpen] = useState(false)
+  const [reopenReason, setReopenReason] = useState('')
+  const [decisionCode, setDecisionCode] = useState('')
+  const [decisionTarget, setDecisionTarget] = useState(() => {
+    const next = shiftMonth(today.getFullYear(), today.getMonth() + 1, 1)
+    return targetValue(next.year, next.month)
+  })
+  const [decisionComment, setDecisionComment] = useState('')
 
   const mayMatch = MATCH_ROLES.includes(user.role)
   const mayReason = REASON_ROLES.includes(user.role)
+  const mayClose = CLOSE_ROLES.includes(user.role)
 
   const load = useCallback(async () => {
     setState({ status: 'loading' })
@@ -184,6 +211,19 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
   }, [editing])
 
   const result = state.status === 'ready' ? state.result : null
+
+  // Решение в форме повторяет сохранённое, пока пользователь его не поменял.
+  useEffect(() => {
+    if (!result) return
+    const next = shiftMonth(result.year, result.month, 1)
+    setDecisionCode(result.decision?.code ?? '')
+    setDecisionComment(result.decision?.comment ?? '')
+    setDecisionTarget(
+      result.decision?.target_year && result.decision.target_month
+        ? targetValue(result.decision.target_year, result.decision.target_month)
+        : targetValue(next.year, next.month),
+    )
+  }, [result])
 
   const managers = useMemo(() => {
     const map = new Map<string, string>()
@@ -267,6 +307,59 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
     try {
       await clearMonthReason(year, month, row.client_id, row.product_id)
       setEditing(null)
+      await load()
+    } catch (error) {
+      setNotice(errorMessage(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const doClose = async () => {
+    setBusy(true)
+    setNotice(null)
+    try {
+      await closeMonth(year, month)
+      setConfirmClose(false)
+      await load()
+    } catch (error) {
+      setNotice(errorMessage(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const doReopen = async () => {
+    if (reopenReason.trim() === '') return
+    setBusy(true)
+    setNotice(null)
+    try {
+      await reopenMonth(year, month, reopenReason.trim())
+      setReopenOpen(false)
+      setReopenReason('')
+      await load()
+    } catch (error) {
+      setNotice(errorMessage(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const saveDecision = async () => {
+    if (decisionCode === '') return
+    const [targetYear, targetMonth] = decisionTarget.split('-').map(Number)
+    const payload: MonthDecisionIn = {
+      decision: decisionCode as MonthDecisionIn['decision'],
+      comment: decisionComment.trim() === '' ? null : decisionComment.trim(),
+    }
+    if (decisionCode !== 'accept') {
+      payload.target_year = targetYear ?? null
+      payload.target_month = targetMonth ?? null
+    }
+    setBusy(true)
+    setNotice(null)
+    try {
+      await setMonthDecision(year, month, payload)
       await load()
     } catch (error) {
       setNotice(errorMessage(error))
@@ -363,6 +456,81 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
         />
       </div>
 
+      {result ? (
+        <div className="month-state" data-testid="month-state">
+          <span className={`badge ${result.status === 'closed' ? 'badge-closed' : 'badge-open'}`}>
+            {result.status === 'closed' ? 'месяц закрыт' : 'месяц открыт'}
+          </span>
+          <span className="hint">
+            {result.status === 'closed'
+              ? `Снимок зафиксирован ${formatDate(result.closed_at)}, ${result.closed_by_name ?? '—'}. ${
+                  result.reopen_reason ? `Открывался: ${result.reopen_reason}.` : ''
+                }`
+              : 'Загрузка продаж и правка причин доступны до закрытия.'}
+          </span>
+          {mayClose ? (
+            result.status === 'closed' ? (
+              <button type="button" className="mini" onClick={() => setReopenOpen(true)}>
+                Открыть заново
+              </button>
+            ) : (
+              <button type="button" className="primary" onClick={() => setConfirmClose(true)}>
+                Закрыть месяц
+              </button>
+            )
+          ) : null}
+        </div>
+      ) : null}
+
+      {result && confirmClose && result.status === 'open' ? (
+        <div className="month-confirm" data-testid="close-confirm">
+          <p>
+            Снимок зафиксирует план, факт, причины и решение. Строк: {result.lines}, без причины:{' '}
+            {result.without_reason}
+            {result.unmatched.length > 0
+              ? `, в очереди сопоставления: ${result.unmatched.length}`
+              : ''}
+            .
+          </p>
+          <button type="button" className="primary" disabled={busy} onClick={() => void doClose()}>
+            Закрыть месяц
+          </button>
+          <button type="button" className="mini" onClick={() => setConfirmClose(false)}>
+            Отмена
+          </button>
+        </div>
+      ) : null}
+
+      {result && reopenOpen && result.status === 'closed' ? (
+        <div className="month-confirm" data-testid="reopen-form">
+          <p>Открыть месяц заново можно только с причиной — она попадёт в историю.</p>
+          <input
+            aria-label="Причина повторного открытия"
+            placeholder="Что изменилось"
+            value={reopenReason}
+            onChange={(event) => setReopenReason(event.target.value)}
+          />
+          <button
+            type="button"
+            className="primary"
+            disabled={busy || reopenReason.trim() === ''}
+            onClick={() => void doReopen()}
+          >
+            Открыть заново
+          </button>
+          <button
+            type="button"
+            className="mini"
+            onClick={() => {
+              setReopenOpen(false)
+              setReopenReason('')
+            }}
+          >
+            Отмена
+          </button>
+        </div>
+      ) : null}
+
       {state.status === 'error' ? (
         <p className="error" role="alert">
           {state.message}
@@ -388,6 +556,78 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
             <strong>{result.without_reason}</strong> · факт:{' '}
             <strong>{formatMoney(result.fact_amount)} ₽</strong>
           </p>
+
+          <div className="month-decision" data-testid="month-decision">
+            <h2>Решение месяца</h2>
+            {result.decision ? (
+              <p data-testid="month-decision-current">
+                <strong>{result.decision.title}</strong>
+                {result.decision.target_year && result.decision.target_month
+                  ? ` → ${MONTH_NAMES[result.decision.target_month - 1]} ${result.decision.target_year}`
+                  : ''}
+                {result.decision.comment ? ` · ${result.decision.comment}` : ''}
+                <span className="hint">
+                  {' '}
+                  — {result.decision.author_name ?? '—'}, {formatDate(result.decision.at)}
+                </span>
+              </p>
+            ) : (
+              <p className="hint">Решение не принято.</p>
+            )}
+            {mayClose && result.status === 'open' ? (
+              <div className="month-decision-form">
+                <select
+                  aria-label="Решение месяца"
+                  value={decisionCode}
+                  onChange={(event) => setDecisionCode(event.target.value)}
+                >
+                  <option value="">— не принято —</option>
+                  <option value="transfer_sales">Перенести в план продаж</option>
+                  <option value="transfer_purchase">Перенести в план закупок</option>
+                  <option value="accept">Принять как есть</option>
+                </select>
+                {decisionCode === 'transfer_sales' || decisionCode === 'transfer_purchase' ? (
+                  <select
+                    aria-label="Месяц переноса"
+                    value={decisionTarget}
+                    onChange={(event) => setDecisionTarget(event.target.value)}
+                  >
+                    {[1, 2, 3, 4, 5, 6].map((shift) => {
+                      const target = shiftMonth(result.year, result.month, shift)
+                      return (
+                        <option
+                          key={targetValue(target.year, target.month)}
+                          value={targetValue(target.year, target.month)}
+                        >
+                          {MONTH_NAMES[target.month - 1]} {target.year}
+                        </option>
+                      )
+                    })}
+                  </select>
+                ) : null}
+                <input
+                  aria-label="Комментарий к решению"
+                  placeholder="Комментарий к решению"
+                  value={decisionComment}
+                  onChange={(event) => setDecisionComment(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={busy || decisionCode === ''}
+                  onClick={() => void saveDecision()}
+                >
+                  Сохранить решение
+                </button>
+              </div>
+            ) : null}
+            {result.status === 'closed' ? (
+              <p className="hint">
+                Месяц закрыт: решение и причины не меняются. Перенос оформляется корректировкой
+                плана продаж или пересмотром плана закупок — планы сами не правятся.
+              </p>
+            ) : null}
+          </div>
 
           {result.unmatched.length > 0 ? (
             <div className="unmatched-box" data-testid="unmatched-box">
@@ -533,7 +773,9 @@ export function MonthResultsPage({ user }: { user: SessionUser }) {
                                 >
                                   {row.reason.title}
                                 </button>
-                              ) : Number(row.deviation) !== 0 && mayReason ? (
+                              ) : Number(row.deviation) !== 0 &&
+                                mayReason &&
+                                result.status === 'open' ? (
                                 <button
                                   type="button"
                                   className="reason-add"

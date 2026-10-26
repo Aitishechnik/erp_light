@@ -1006,6 +1006,24 @@ export type ReasonInfo = {
 
 export type ReasonOption = { code: string; title: string }
 
+/** Решение месяца: что делаем с нереализованным объёмом. */
+export type MonthDecision = {
+  code: 'transfer_sales' | 'transfer_purchase' | 'accept'
+  title: string
+  comment: string | null
+  target_year: number | null
+  target_month: number | null
+  author_name: string | null
+  at: string
+}
+
+export type MonthDecisionIn = {
+  decision: 'transfer_sales' | 'transfer_purchase' | 'accept'
+  target_year?: number | null
+  target_month?: number | null
+  comment?: string | null
+}
+
 /** Строка файла продаж, которую не удалось сопоставить с номенклатурой. */
 export type MonthUnmatched = {
   id: string
@@ -1028,6 +1046,11 @@ export type MonthResult = {
   without_reason: number
   reason_options: ReasonOption[]
   fact_amount: string
+  status: 'open' | 'closed'
+  closed_by_name: string | null
+  closed_at: string | null
+  reopen_reason: string | null
+  decision: MonthDecision | null
 }
 
 export function fetchMonthResult(year: number, month: number): Promise<MonthResult> {
@@ -1080,6 +1103,33 @@ export function clearMonthReason(
   const query = new URLSearchParams({ client_id: clientId, product_id: productId })
   return request<void>(`/api/v1/month-results/${year}/${month}/reasons?${query}`, {
     method: 'DELETE',
+  })
+}
+
+/** Закрыть месяц: снимок плана, факта, причин и решения. */
+export function closeMonth(year: number, month: number): Promise<MonthResult> {
+  return request<MonthResult>(`/api/v1/month-results/${year}/${month}/close`, {
+    method: 'POST',
+  })
+}
+
+/** Открыть закрытый месяц заново: причина обязательна. */
+export function reopenMonth(year: number, month: number, reason: string): Promise<MonthResult> {
+  return request<MonthResult>(`/api/v1/month-results/${year}/${month}/reopen`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  })
+}
+
+/** Решение месяца: перенос в план продаж / закупок или «принять как есть». */
+export function setMonthDecision(
+  year: number,
+  month: number,
+  payload: MonthDecisionIn,
+): Promise<MonthResult> {
+  return request<MonthResult>(`/api/v1/month-results/${year}/${month}/decision`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
   })
 }
 

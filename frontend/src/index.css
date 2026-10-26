@@ -410,6 +410,54 @@ button.primary {
   margin-left: 0.4rem;
 }
 
+.month-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.badge-open {
+  background: #eaf1fe;
+  color: var(--accent);
+}
+
+.badge-closed {
+  background: #e7f6ec;
+  color: #067647;
+}
+
+.month-confirm,
+.month-decision {
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.25rem;
+  background: #fff;
+}
+
+.month-confirm {
+  background: #fffdf7;
+}
+
+.month-confirm p,
+.month-decision p {
+  margin: 0 0 0.5rem;
+}
+
+.month-decision h2 {
+  font-size: 1rem;
+  margin: 0 0 0.35rem;
+}
+
+.month-decision-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .badge-plan {
   background: #e7f6ec;
   color: #067647;
