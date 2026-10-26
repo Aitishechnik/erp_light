@@ -402,6 +402,7 @@ button.primary {
 }
 
 .reason-editor input {
+  margin-right: 0.5rem;
   min-width: 18rem;
 }
 
