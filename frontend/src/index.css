@@ -2249,12 +2249,13 @@ button.primary:disabled,
   border-color: #f3b4ae;
 }
 
+/* Подсветка «открыто из сообщения» — синяя, чтобы не путаться с предупреждениями. */
 .focus-row td {
-  background: #fff8ef;
+  background: #eef4ff;
 }
 
 .focus-row td:first-child {
-  box-shadow: inset 3px 0 0 #f0b26b;
+  box-shadow: inset 3px 0 0 #3b82f6;
 }
 
 .need-row.flash td {
@@ -2786,10 +2787,11 @@ button.primary:disabled,
 
 /* ── Переходы из журнала и подсветка объекта ───────────────────────────── */
 
+/* Ссылка события: цвет и подчёркивание заметно отличают её от простого текста. */
 .audit-link {
-  color: inherit;
+  color: #1d4ed8;
   text-decoration: underline;
-  text-decoration-color: #c9ced6;
+  text-decoration-color: #9cb4f0;
   text-underline-offset: 2px;
 }
 
@@ -2798,8 +2800,13 @@ button.primary:disabled,
 }
 
 .focus-card {
-  border-color: #f0b26b;
-  box-shadow: 0 0 0 2px #fdf0dd;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px #dbe7ff;
+}
+
+.mini.danger {
+  border-color: #e5484d;
+  color: #b42318;
 }
 
 .cleanup-box {

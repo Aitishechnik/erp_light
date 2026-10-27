@@ -164,13 +164,20 @@ export function App() {
   const [loading, setLoading] = useState(true)
   const [active, setActive] = useState<SectionId>(parseHash().section)
   const [route, setRoute] = useState<Route>(parseHash)
-  const [openGroup, setOpenGroup] = useState<string | null>('reports')
+  const [openGroup, setOpenGroup] = useState<string | null>(
+    GROUPS.find((group) => group.sections.some((section) => section.id === parseHash().section))
+      ?.id ?? 'reports',
+  )
 
   useEffect(() => {
     const onHash = () => {
       const next = parseHash()
       setRoute(next)
       setActive(next.section)
+      const group = GROUPS.find((row) =>
+        row.sections.some((section) => section.id === next.section),
+      )
+      if (group) setOpenGroup(group.id)
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)

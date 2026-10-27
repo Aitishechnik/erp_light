@@ -11,6 +11,22 @@ import {
 
 type Props = { user: SessionUser }
 
+function plural(count: number, forms: [string, string, string]): string {
+  const mod10 = count % 10
+  const mod100 = count % 100
+  if (mod10 === 1 && mod100 !== 11) return forms[0]
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return forms[1]
+  return forms[2]
+}
+
+/** Роль под именем не дублируем: «Коммерческий директор (демо)» + «Коммерческий директор». */
+function showRole(row: AuditEvent): boolean {
+  const role = row.actor_role_title
+  const name = row.actor_name
+  if (!role || !name) return false
+  return !name.toLowerCase().startsWith(role.toLowerCase())
+}
+
 function formatTime(value: string): string {
   return new Date(value).toLocaleString('ru-RU', {
     day: '2-digit',
@@ -146,10 +162,16 @@ export function MessagesPage({ user }: Props) {
       {cleanup ? (
         <div className="cleanup-box" data-testid="cleanup-box">
           <span>
-            За {cleanup.year} год в журнале {cleanup.events} записей. Очистка удаляет их
+            За {cleanup.year} год в журнале {cleanup.events}{' '}
+            {plural(cleanup.events, ['запись', 'записи', 'записей'])}. Очистка удаляет их
             безвозвратно — оставить только текущий год?
           </span>
-          <button type="button" className="mini" disabled={busy} onClick={() => void cleanUp()}>
+          <button
+            type="button"
+            className="mini danger"
+            disabled={busy}
+            onClick={() => void cleanUp()}
+          >
             Удалить журнал за {cleanup.year} год
           </button>
         </div>
@@ -179,10 +201,18 @@ export function MessagesPage({ user }: Props) {
                   <td className="nowrap">{formatTime(row.created_at)}</td>
                   <td>
                     {row.actor_name ?? 'Система'}
-                    <div className="hint">{row.actor_role_title ?? ''}</div>
+                    {showRole(row) ? <div className="hint">{row.actor_role_title}</div> : null}
                   </td>
                   <td>{row.action_title}</td>
-                  <td>{row.entity_label ?? '—'}</td>
+                  <td>
+                    {row.link && row.entity_label ? (
+                      <a className="audit-link" href={row.link}>
+                        {row.entity_label}
+                      </a>
+                    ) : (
+                      (row.entity_label ?? '—')
+                    )}
+                  </td>
                   <td className="wrap">
                     {row.link ? (
                       <a className="audit-link" href={row.link}>

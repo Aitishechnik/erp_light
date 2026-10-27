@@ -169,7 +169,11 @@ export function NotificationsBell({ onOpenJournal }: Props) {
                       </span>
                       <span className="bell-meta">
                         {row.actor_name ?? 'Система'}
-                        {row.actor_role_title ? ` · ${row.actor_role_title}` : ''}
+                        {row.actor_role_title &&
+                        row.actor_name &&
+                        !row.actor_name.toLowerCase().startsWith(row.actor_role_title.toLowerCase())
+                          ? ` · ${row.actor_role_title}`
+                          : ''}
                       </span>
                     </span>
                   </li>
