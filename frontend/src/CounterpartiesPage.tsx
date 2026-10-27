@@ -22,6 +22,22 @@ const EMPTY_FORM = {
 
 const VISIBLE_LIMIT = 100
 
+/**
+ * Объект из сообщения ставим первым: список длинный, а строка может оказаться
+ * за пределами первых ста записей.
+ */
+function withFocusFirst<T extends { id: string }>(
+  filtered: T[],
+  all: T[],
+  focusId: string | undefined,
+  limit: number,
+): T[] {
+  if (!focusId) return filtered.slice(0, limit)
+  const target = filtered.find((row) => row.id === focusId) ?? all.find((row) => row.id === focusId)
+  if (!target) return filtered.slice(0, limit)
+  return [target, ...filtered.filter((row) => row.id !== focusId).slice(0, limit - 1)]
+}
+
 const ROLE_FILTERS: { value: '' | CounterpartyRole; title: string }[] = [
   { value: '', title: 'Все контрагенты' },
   { value: 'customer', title: 'Покупатели' },
@@ -118,7 +134,15 @@ export function CounterpartiesPage({ user, focusId }: { user?: SessionUser; focu
   const filtered = rows
     .filter((row) => (showInactive ? true : row.is_active))
     .filter((row) => (needle ? row.name.toLowerCase().includes(needle) : true))
-  const visible = filtered.slice(0, VISIBLE_LIMIT)
+  const visible = withFocusFirst(filtered, rows, focusId, VISIBLE_LIMIT)
+
+  useEffect(() => {
+    if (!focusId) return
+    const frame = requestAnimationFrame(() => {
+      document.querySelector('tr.focus-row')?.scrollIntoView({ block: 'center' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [focusId])
 
   return (
     <section>

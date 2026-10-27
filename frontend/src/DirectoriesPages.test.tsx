@@ -124,6 +124,35 @@ describe('CounterpartiesPage', () => {
     expect(screen.getByText('Покупатель, Локальный поставщик')).toBeInTheDocument()
   })
 
+  it('контрагент из сообщения показывается первым и подсвечивается', async () => {
+    const base: Counterparty = {
+      id: 'base',
+      name: 'Клиент',
+      inn: null,
+      note: null,
+      is_customer: true,
+      is_local_supplier: false,
+      is_import_supplier: false,
+      source: '1c',
+      is_active: true,
+      manager_id: null,
+      manager_name: null,
+    }
+    const many: Counterparty[] = Array.from({ length: 120 }, (_, index) => ({
+      ...base,
+      id: `c-${index}`,
+      name: `Клиент ${index}`,
+    }))
+    many.push({ ...base, id: 'target-id', name: 'ООО Поздний' })
+    mockApi({ '/api/v1/counterparties': { body: many } })
+    render(<CounterpartiesPage focusId="target-id" />)
+
+    const table = await screen.findByTestId('counterparties-table')
+    const firstRow = within(table).getAllByRole('row')[1]
+    expect(firstRow).toHaveClass('focus-row')
+    expect(firstRow).toHaveTextContent('ООО Поздний')
+  })
+
   it('фильтрует по поиску', async () => {
     const user = userEvent.setup()
     mockApi({ '/api/v1/counterparties': { body: COUNTERPARTIES } })

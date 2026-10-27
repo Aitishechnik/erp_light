@@ -13,6 +13,19 @@ import {
 const EMPTY_FORM = { code: '', name: '', kind: 'material', unit: 'шт' }
 const VISIBLE_LIMIT = 100
 
+/** Объект из сообщения показываем первым, даже если он за пределами первых ста. */
+function withFocusFirst<T extends { id: string }>(
+  filtered: T[],
+  all: T[],
+  focusId: string | undefined,
+  limit: number,
+): T[] {
+  if (!focusId) return filtered.slice(0, limit)
+  const target = filtered.find((row) => row.id === focusId) ?? all.find((row) => row.id === focusId)
+  if (!target) return filtered.slice(0, limit)
+  return [target, ...filtered.filter((row) => row.id !== focusId).slice(0, limit - 1)]
+}
+
 export function NomenclaturePage({ focusId }: { focusId?: string }) {
   const [rows, setRows] = useState<Product[]>([])
   const [form, setForm] = useState(EMPTY_FORM)
@@ -71,7 +84,15 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
         ? row.name.toLowerCase().includes(needle) || row.code.toLowerCase().includes(needle)
         : true,
     )
-  const visible = filtered.slice(0, VISIBLE_LIMIT)
+  const visible = withFocusFirst(filtered, rows, focusId, VISIBLE_LIMIT)
+
+  useEffect(() => {
+    if (!focusId) return
+    const frame = requestAnimationFrame(() => {
+      document.querySelector('tr.focus-row')?.scrollIntoView({ block: 'center' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [focusId])
 
   return (
     <section>
