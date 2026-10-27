@@ -125,7 +125,9 @@ export function MessagesPage({ user }: Props) {
                 <th scope="col">Событие</th>
                 <th scope="col">Объект</th>
                 <th scope="col">Что произошло</th>
-                <th scope="col">Уровень</th>
+                <th scope="col" className="col-level">
+                  Уровень
+                </th>
               </tr>
             </thead>
             <tbody>

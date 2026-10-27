@@ -80,7 +80,10 @@ export function NotificationsBell({ onOpenJournal }: Props) {
         aria-expanded={open}
         onClick={() => void showPanel()}
       >
-        <span aria-hidden="true">✉</span>
+        <span className="bell-icon" aria-hidden="true">
+          ✉
+        </span>
+        <span className="bell-title">Служебные сообщения</span>
         {unread > 0 ? (
           <span className="bell-badge" data-testid="bell-badge">
             {unread > 99 ? '99+' : unread}
