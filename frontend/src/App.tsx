@@ -12,8 +12,10 @@ import { CounterpartiesPage } from './CounterpartiesPage'
 import { CountriesPage } from './CountriesPage'
 import { ImportsPage } from './ImportsPage'
 import { LoginPage } from './LoginPage'
+import { MessagesPage } from './MessagesPage'
 import { MonthResultsPage } from './MonthResultsPage'
 import { NomenclaturePage } from './NomenclaturePage'
+import { NotificationsBell } from './NotificationsBell'
 import { PurchasePlanPage } from './PurchasePlanPage'
 import { ReceiptsPage } from './ReceiptsPage'
 import { SalesPlansPage } from './SalesPlansPage'
@@ -35,6 +37,7 @@ type SectionId =
   | 'finance'
   | 'tasks'
   | 'imports'
+  | 'messages'
   | 'users'
   | 'settings'
 
@@ -110,6 +113,7 @@ const GROUPS: Group[] = [
     title: 'Администрирование',
     sections: [
       { id: 'imports', title: 'Загрузка данных', ready: true },
+      { id: 'messages', title: 'Служебные сообщения', ready: true },
       { id: 'users', title: 'Пользователи и роли', ready: false },
       { id: 'settings', title: 'Настройки приложения', ready: false },
     ],
@@ -206,6 +210,12 @@ export function App() {
           })}
         </nav>
         <div className="sidebar-footer">
+          <NotificationsBell
+            onOpenJournal={() => {
+              setActive('messages')
+              setOpenGroup('admin')
+            }}
+          />
           <div className="user-name">{user.full_name}</div>
           <div className="hint">{user.role_title}</div>
           <button type="button" className="nav-item" onClick={handleLogout}>
@@ -227,6 +237,7 @@ export function App() {
         {current.id === 'month' && current.ready ? <MonthResultsPage user={user} /> : null}
         {current.id === 'receipts' && current.ready ? <ReceiptsPage user={user} /> : null}
         {current.id === 'imports' && current.ready ? <ImportsPage user={user} /> : null}
+        {current.id === 'messages' && current.ready ? <MessagesPage user={user} /> : null}
         {!current.ready ? (
           <section>
             <h1>{current.title}</h1>

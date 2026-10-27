@@ -11,6 +11,7 @@ from app.api.deps import CurrentUser, DbSession, require_roles
 from app.models.auth import User
 from app.models.counterparties import Counterparty
 from app.schemas.counterparties import CounterpartyIn, CounterpartyOut, CounterpartyUpdate
+from app.services import audit_service
 from app.services import directory_service as service
 from app.services.directory_service import DIRECTORY_WRITE_ROLES, DirectoryError
 
@@ -19,6 +20,18 @@ router = APIRouter(tags=["counterparties"])
 Writer = Annotated[User, Depends(require_roles(*DIRECTORY_WRITE_ROLES))]
 
 # Фильтр «роль контрагента» → колонка-признак.
+# Что именно поменяли — по-русски, а не именами полей.
+FIELD_TITLES = {
+    "name": "название",
+    "inn": "ИНН",
+    "note": "заметка",
+    "manager_id": "менеджер клиента",
+    "is_customer": "признак покупателя",
+    "is_local_supplier": "признак местного поставщика",
+    "is_import_supplier": "признак импортного поставщика",
+    "is_active": "активность",
+}
+
 ROLE_FIELDS = {
     "customer": "is_customer",
     "local_supplier": "is_local_supplier",
@@ -62,9 +75,19 @@ def list_counterparties(
 @router.post("/counterparties", response_model=CounterpartyOut, status_code=status.HTTP_201_CREATED)
 def create_counterparty(payload: CounterpartyIn, user: Writer, db: DbSession) -> CounterpartyOut:
     try:
-        return _out(service.create_counterparty(db, payload))
+        row = service.create_counterparty(db, payload)
     except DirectoryError as exc:
         raise _fail(exc) from exc
+    audit_service.record(
+        db,
+        actor=user,
+        action="counterparty.created",
+        summary=f"Заведён контрагент {row.name}",
+        entity_id=row.id,
+        entity_label=row.name,
+    )
+    db.commit()
+    return _out(row)
 
 
 @router.patch("/counterparties/{counterparty_id}", response_model=CounterpartyOut)
@@ -72,6 +95,19 @@ def update_counterparty(
     counterparty_id: uuid.UUID, payload: CounterpartyUpdate, user: Writer, db: DbSession
 ) -> CounterpartyOut:
     try:
-        return _out(service.update_counterparty(db, counterparty_id, payload))
+        row = service.update_counterparty(db, counterparty_id, payload)
     except DirectoryError as exc:
         raise _fail(exc) from exc
+    changed = sorted(payload.model_dump(exclude_none=True))
+    titles = ", ".join(FIELD_TITLES.get(field, field) for field in changed) or "поля"
+    audit_service.record(
+        db,
+        actor=user,
+        action="counterparty.updated",
+        summary=f"Изменён контрагент {row.name}: {titles}",
+        entity_id=row.id,
+        entity_label=row.name,
+        payload={"fields": changed},
+    )
+    db.commit()
+    return _out(row)

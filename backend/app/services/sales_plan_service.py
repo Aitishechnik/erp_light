@@ -29,6 +29,7 @@ from app.models.planning import (
     SalesPlanItem,
 )
 from app.schemas.planning import SalesPlanCreate, SalesPlanItemIn, SalesPlanItemOut, SalesPlanOut
+from app.services import audit_service
 from app.services.plan_freeze import check_months_editable, editable_months
 from app.services.sales_plan_approval_service import invalidate as invalidate_annual
 
@@ -246,6 +247,16 @@ def update_items(
     was_approved = plan.status == "approved"
     if was_approved:
         plan.status = "on_review"
+    audit_service.record(
+        db,
+        actor=user,
+        action="sales_plan.items_changed",
+        summary=(f"План на {plan.year} год, {plan.manager.full_name}: строк {len(items)}"),
+        entity_id=plan.id,
+        entity_label=f"{plan.manager.full_name}, {plan.year}",
+        payload={"stroki": len(items), "bylo_utverzhden": was_approved},
+        year=plan.year,
+    )
     db.commit()
     if was_approved:
         invalidate_annual(db, plan.year, f"изменён план менеджера {plan.manager.full_name}")
@@ -284,6 +295,15 @@ def approve(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
     if plan.status != "on_review":
         raise PlanError("Утвердить можно только план на проверке", status_code=409)
     plan.status = "approved"
+    audit_service.record(
+        db,
+        actor=user,
+        action="sales_plan.approved",
+        summary=f"План продаж на {plan.year} год утверждён: {plan.manager.full_name}",
+        entity_id=plan.id,
+        entity_label=f"{plan.manager.full_name}, {plan.year}",
+        year=plan.year,
+    )
     db.commit()
     invalidate_annual(db, plan.year, f"утверждён план менеджера {plan.manager.full_name}")
     return _serialize(_require(db, plan_id))
@@ -311,5 +331,14 @@ def delete_plan(db: Session, user: User, plan_id: uuid.UUID) -> None:
         raise PlanError("Удалить план вам недоступно", status_code=403)
     if plan.status not in EDITABLE_BY_OWNER:
         raise PlanError("Удалить можно только черновик или план на заполнении", status_code=409)
+    audit_service.record(
+        db,
+        actor=user,
+        action="sales_plan.deleted",
+        summary=f"Удалён план продаж на {plan.year} год: {plan.manager.full_name}",
+        entity_id=plan.id,
+        entity_label=f"{plan.manager.full_name}, {plan.year}",
+        year=plan.year,
+    )
     db.delete(plan)
     db.commit()

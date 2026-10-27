@@ -1,5 +1,6 @@
 """Модели домена. Импортируются здесь, чтобы alembic и create_all их видели."""
 
+from app.models.audit import AUDIT_LEVELS, AuditEvent, AuditEventRead
 from app.models.auth import (
     ROLE_COMMERCIAL_DIRECTOR,
     ROLE_EXECUTIVE_DIRECTOR,
@@ -79,6 +80,9 @@ __all__ = [
     "SALES_PLAN_STATUSES",
     "SALES_PLAN_STATUS_TITLES",
     "SOURCES",
+    "AUDIT_LEVELS",
+    "AuditEvent",
+    "AuditEventRead",
     "AuthSession",
     "Batch",
     "BatchExpense",

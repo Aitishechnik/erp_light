@@ -1,0 +1,143 @@
+import { useCallback, useEffect, useState } from 'react'
+import type { AuditEvent } from './api'
+import { errorMessage, fetchMessages, fetchUnreadCount, markAllMessagesRead } from './api'
+
+type Props = {
+  /** Переход в полный журнал действий. */
+  onOpenJournal: () => void
+}
+
+function formatTime(value: string): string {
+  const date = new Date(value)
+  return date.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+/**
+ * Колокольчик служебных сообщений.
+ *
+ * Счётчик непрочитанных обновляется при входе и после каждого открытия панели:
+ * отдельного «живого» канала нет — сообщения приходят на действия пользователей,
+ * а не мгновенно.
+ */
+export function NotificationsBell({ onOpenJournal }: Props) {
+  const [open, setOpen] = useState(false)
+  const [unread, setUnread] = useState(0)
+  const [rows, setRows] = useState<AuditEvent[]>([])
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const refreshCount = useCallback(async () => {
+    try {
+      const data = await fetchUnreadCount()
+      setUnread(data.unread)
+    } catch {
+      // Колокольчик не должен мешать работе: ошибку счётчика молча пропускаем.
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshCount()
+  }, [refreshCount])
+
+  const showPanel = async () => {
+    const next = !open
+    setOpen(next)
+    if (!next) return
+    try {
+      const data = await fetchMessages({ limit: 20 })
+      setRows(data.rows)
+      setUnread(data.unread)
+      setError('')
+    } catch (err) {
+      setError(errorMessage(err))
+    }
+  }
+
+  const readAll = async () => {
+    setBusy(true)
+    try {
+      const data = await markAllMessagesRead()
+      setUnread(data.unread)
+      setRows((current) => current.map((row) => ({ ...row, read: true })))
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="bell">
+      <button
+        type="button"
+        className={unread > 0 ? 'bell-button has-unread' : 'bell-button'}
+        aria-label={`Служебные сообщения, непрочитанных: ${unread}`}
+        aria-expanded={open}
+        onClick={() => void showPanel()}
+      >
+        <span aria-hidden="true">✉</span>
+        {unread > 0 ? (
+          <span className="bell-badge" data-testid="bell-badge">
+            {unread > 99 ? '99+' : unread}
+          </span>
+        ) : null}
+      </button>
+      {open ? (
+        <div className="bell-panel" role="dialog" aria-label="Служебные сообщения">
+          <div className="bell-head">
+            <strong>Служебные сообщения</strong>
+            <button type="button" className="mini" onClick={() => setOpen(false)}>
+              Закрыть
+            </button>
+          </div>
+          {error ? <p className="hint error">{error}</p> : null}
+          {rows.length === 0 ? (
+            <p className="hint" data-testid="bell-empty">
+              Новых сообщений нет.
+            </p>
+          ) : (
+            <ul className="bell-list" data-testid="bell-list">
+              {rows.map((row) => (
+                <li key={row.id} className={row.read ? 'bell-row read' : 'bell-row'}>
+                  <span className="bell-time">{formatTime(row.created_at)}</span>
+                  <span className="bell-text">
+                    <span className="bell-summary">{row.summary}</span>
+                    <span className="bell-meta">
+                      {row.actor_name ?? 'Система'}
+                      {row.actor_role_title ? ` · ${row.actor_role_title}` : ''}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="bell-actions">
+            <button
+              type="button"
+              className="mini"
+              disabled={busy || unread === 0}
+              onClick={() => void readAll()}
+            >
+              Отметить всё прочитанным
+            </button>
+            <button
+              type="button"
+              className="mini"
+              onClick={() => {
+                setOpen(false)
+                onOpenJournal()
+              }}
+            >
+              Весь журнал
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}

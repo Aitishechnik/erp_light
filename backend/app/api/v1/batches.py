@@ -18,7 +18,7 @@ from app.models.auth import ROLE_IMPORT_MANAGER, ROLE_PURCHASE_DIRECTOR, User
 from app.models.domain import Batch
 from app.schemas.domain import BatchCreate, BatchCustomsIn, BatchOut
 from app.schemas.imports import BatchImportOut
-from app.services import batch_import_service
+from app.services import audit_service, batch_import_service
 from app.services.batch_service import (
     ITEMS_LOCKED,
     batch_finance,
@@ -110,6 +110,18 @@ def put_batch(batch_id: uuid.UUID, payload: BatchCreate, user: Writer, db: DbSes
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Поступление не найдено")
+    audit_service.record(
+        db,
+        actor=user,
+        action="batch.items_changed",
+        summary=f"Изменено поступление {batch.batch_number}: строк {len(payload.items)}",
+        entity_id=batch.id,
+        entity_label=batch.batch_number,
+        payload={"items": len(payload.items)},
+        year=batch.batch_date.year,
+        month=batch.batch_date.month,
+    )
+    db.commit()
     return _out(db, batch)
 
 
@@ -117,8 +129,19 @@ def put_batch(batch_id: uuid.UUID, payload: BatchCreate, user: Writer, db: DbSes
     "/batches/{batch_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response
 )
 def remove_batch(batch_id: uuid.UUID, user: Writer, db: DbSession) -> Response:
+    batch = load_batch(db, batch_id)
     if not delete_batch(db, batch_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Поступление не найдено")
+    if batch is not None:
+        audit_service.record(
+            db,
+            actor=user,
+            action="batch.deleted",
+            summary=f"Удалено поступление {batch.batch_number}",
+            entity_id=batch.id,
+            entity_label=batch.batch_number,
+        )
+        db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -133,6 +156,16 @@ def post_customs(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Поступление не найдено")
+    audit_service.record(
+        db,
+        actor=user,
+        action="batch.customs_applied",
+        summary=f"Растаможено поступление {batch.batch_number}",
+        entity_id=batch.id,
+        entity_label=batch.batch_number,
+        payload={"customs_date": str(batch.customs_date)},
+    )
+    db.commit()
     return _out(db, batch)
 
 

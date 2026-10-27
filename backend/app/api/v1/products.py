@@ -11,6 +11,7 @@ from app.api.deps import CurrentUser, DbSession, require_roles
 from app.models.auth import User
 from app.models.domain import Product
 from app.schemas.domain import ProductIn, ProductOut, ProductUpdate
+from app.services import audit_service
 from app.services import directory_service as service
 from app.services.directory_service import DIRECTORY_WRITE_ROLES, DirectoryError
 
@@ -39,9 +40,20 @@ def list_products(
 @router.post("/products", response_model=ProductOut, status_code=status.HTTP_201_CREATED)
 def create_product(payload: ProductIn, user: Writer, db: DbSession) -> Product:
     try:
-        return service.create_product(db, payload)
+        product = service.create_product(db, payload)
     except DirectoryError as exc:
         raise _fail(exc) from exc
+    audit_service.record(
+        db,
+        actor=user,
+        action="product.created",
+        summary=f"Заведена номенклатура {product.code} · {product.name}",
+        entity_id=product.id,
+        entity_label=f"{product.code} · {product.name}",
+        payload={"kind": product.kind},
+    )
+    db.commit()
+    return product
 
 
 @router.patch("/products/{product_id}", response_model=ProductOut)
@@ -49,6 +61,17 @@ def update_product(
     product_id: uuid.UUID, payload: ProductUpdate, user: Writer, db: DbSession
 ) -> Product:
     try:
-        return service.update_product(db, product_id, payload)
+        product = service.update_product(db, product_id, payload)
     except DirectoryError as exc:
         raise _fail(exc) from exc
+    audit_service.record(
+        db,
+        actor=user,
+        action="product.updated",
+        summary=f"Изменена номенклатура {product.code} · {product.name}",
+        entity_id=product.id,
+        entity_label=f"{product.code} · {product.name}",
+        payload={"fields": sorted(payload.model_dump(exclude_none=True))},
+    )
+    db.commit()
+    return product

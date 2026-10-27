@@ -235,7 +235,6 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
   const [drafts, setDrafts] = useState<DraftRow[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [saved, setSaved] = useState<string | null>(null)
   const [rejectReason, setRejectReason] = useState('')
   const [showChanges, setShowChanges] = useState(false)
   const [flashId, setFlashId] = useState<string | null>(null)
@@ -288,14 +287,12 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
     setRejectReason('')
   }, [plan])
 
-  const run = async (action: () => Promise<unknown>, message: string) => {
+  const run = async (action: () => Promise<unknown>, _message: string) => {
     setBusy(true)
     setError(null)
-    setSaved(null)
     try {
       await action()
       await reload()
-      setSaved(message)
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -305,12 +302,10 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
 
   const updateRow = (key: string, patch: Partial<DraftRow>) => {
     setDrafts((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)))
-    setSaved(null)
   }
 
   const removeRow = (key: string) => {
     setDrafts((current) => current.filter((row) => row.key !== key))
-    setSaved(null)
   }
 
   const addRow = (position: PurchasePlanPosition) => {
@@ -336,7 +331,6 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
       },
     ])
     setError(null)
-    setSaved(null)
   }
 
   const collectItems = (): PurchasePlanItemIn[] | null => {
@@ -428,7 +422,6 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
             disabled={busy}
             onClick={() => {
               setYear(year - 1)
-              setSaved(null)
             }}
           >
             ←
@@ -440,7 +433,6 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
             disabled={busy}
             onClick={() => {
               setYear(year + 1)
-              setSaved(null)
             }}
           >
             →
@@ -469,11 +461,6 @@ export function PurchasePlanPage({ user }: { user: SessionUser }) {
       {error ? (
         <p className="error" role="alert">
           {error}
-        </p>
-      ) : null}
-      {saved ? (
-        <p className="hint saved" data-testid="purchase-saved">
-          {saved}
         </p>
       ) : null}
 

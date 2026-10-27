@@ -1152,6 +1152,62 @@ export function createTransferDrafts(year: number, month: number): Promise<Trans
   })
 }
 
+/** Служебное сообщение или строка журнала действий. */
+export type AuditEvent = {
+  id: string
+  created_at: string
+  action: string
+  action_title: string
+  level: 'info' | 'critical'
+  entity_kind: string | null
+  entity_id: string | null
+  entity_label: string | null
+  summary: string
+  actor_name: string | null
+  actor_role_title: string | null
+  year: number | null
+  month: number | null
+  read: boolean
+}
+
+export type Messages = { rows: AuditEvent[]; unread: number }
+
+/** Служебные сообщения текущего пользователя, свежие сверху. */
+export function fetchMessages(params?: { unread?: boolean; limit?: number }): Promise<Messages> {
+  const query = new URLSearchParams()
+  if (params?.unread) query.set('unread', '1')
+  if (params?.limit) query.set('limit', String(params.limit))
+  const suffix = query.toString() ? `?${query.toString()}` : ''
+  return request<Messages>(`/api/v1/messages${suffix}`)
+}
+
+/** Счётчик непрочитанных для колокольчика. */
+export function fetchUnreadCount(): Promise<{ unread: number }> {
+  return request<{ unread: number }>('/api/v1/messages/count')
+}
+
+/** Отметить выбранные сообщения прочитанными. */
+export function markMessagesRead(ids: string[]): Promise<{ unread: number }> {
+  return request<{ unread: number }>('/api/v1/messages/read', {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  })
+}
+
+/** Отметить все сообщения прочитанными. */
+export function markAllMessagesRead(): Promise<{ unread: number }> {
+  return request<{ unread: number }>('/api/v1/messages/read-all', { method: 'POST' })
+}
+
+/** Журнал действий: директор видит всё, остальные — свои действия. */
+export function fetchJournal(params?: { limit?: number; action?: string }): Promise<AuditEvent[]> {
+  const query = new URLSearchParams()
+  if (params?.limit) query.set('limit', String(params.limit))
+  if (params?.action) query.set('action', params.action)
+  const suffix = query.toString() ? `?${query.toString()}` : ''
+  return request<AuditEvent[]>(`/api/v1/audit${suffix}`)
+}
+
 /** Текст ошибки для показа пользователю. */
 export function errorMessage(err: unknown): string {
   if (err instanceof ApiError) return err.message

@@ -50,6 +50,7 @@ from app.schemas.planning import (
     PurchasePlanSourceEventOut,
     PurchasePlanSourceOut,
 )
+from app.services import audit_service
 from app.services import purchase_need as need
 from app.services.plan_freeze import editable_months
 from app.services.purchase_need import NeedChange, NeedPosition
@@ -665,6 +666,16 @@ def update_items(
         stored.delivery_days = delivery_days
         stored.notes = item.notes
 
+    audit_service.record(
+        db,
+        actor=user,
+        action="purchase_plan.items_changed",
+        summary=f"План закупок на {plan.year} год сохранён, строк {len(items)}",
+        entity_id=plan.id,
+        entity_label=f"План закупок, {plan.year}",
+        payload={"stroki": len(items)},
+        year=plan.year,
+    )
     db.commit()
     return _serialize(db, _require(db, plan_id))
 
@@ -707,6 +718,15 @@ def approve(db: Session, user: User, plan_id: uuid.UUID) -> PurchasePlanOut:
     plan.approved_at = _now()
     plan.revision_requested_at = None
     plan.revision_requested_by_id = None
+    audit_service.record(
+        db,
+        actor=user,
+        action="purchase_plan.approved",
+        summary=f"План закупок на {plan.year} год утверждён",
+        entity_id=plan.id,
+        entity_label=f"План закупок, {plan.year}",
+        year=plan.year,
+    )
     db.commit()
     return _serialize(db, _require(db, plan_id))
 
@@ -746,6 +766,15 @@ def reopen(db: Session, user: User, plan_id: uuid.UUID, reason: str) -> Purchase
     plan.revision_requested_by_id = None
     if reason:
         plan.notes = _append_note(plan.notes, f"Возврат в работу: {reason}")
+    audit_service.record(
+        db,
+        actor=user,
+        action="purchase_plan.reopened",
+        summary=f"План закупок на {plan.year} год возвращён в работу",
+        entity_id=plan.id,
+        entity_label=f"План закупок, {plan.year}",
+        year=plan.year,
+    )
     db.commit()
     return _serialize(db, _require(db, plan_id))
 

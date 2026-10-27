@@ -23,6 +23,7 @@ from app.models.auth import (
     AuthSession,
     User,
 )
+from app.services import audit_service
 
 SESSION_COOKIE = "erp_lite_session"
 PBKDF2_ITERATIONS = 210_000
@@ -56,10 +57,25 @@ def token_hash(token: str) -> str:
 def authenticate(db: Session, login: str, password: str) -> User | None:
     user = db.execute(select(User).where(User.login == login)).scalars().one_or_none()
     if user is None or not user.is_active:
+        _log_failure(db, login)
         return None
     if not verify_password(password, user.password_hash):
+        _log_failure(db, login)
         return None
     return user
+
+
+def _log_failure(db: Session, login: str) -> None:
+    """Неудачный вход — критическое событие для исполнительного директора."""
+    audit_service.record(
+        db,
+        actor=None,
+        action="auth.login_failed",
+        summary=f"Неудачная попытка входа: {login}",
+        actor_login=login,
+        entity_label=login,
+    )
+    db.commit()
 
 
 def create_session(db: Session, user: User, *, ttl_days: int = DEFAULT_SESSION_TTL_DAYS) -> str:

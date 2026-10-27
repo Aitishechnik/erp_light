@@ -240,7 +240,6 @@ describe('PurchasePlanPage', () => {
     expect(sent).toContain('"price_rub":"300.25"')
     // Сохранённая строка уходит со своим id — ссылки поступлений не теряются.
     expect(sent).toContain('"id":"item-1"')
-    expect(await screen.findByTestId('purchase-saved')).toHaveTextContent('План сохранён')
   })
 
   it('показывает diff пересмотренного плана продаж и принимает его к сведению', async () => {
@@ -294,9 +293,6 @@ describe('PurchasePlanPage', () => {
     await waitFor(() => {
       expect(calls().some((url) => url.includes('/acknowledge-source'))).toBe(true)
     })
-    expect(await screen.findByTestId('purchase-saved')).toHaveTextContent(
-      'Изменения плана продаж приняты к сведению',
-    )
   })
 
   it('исполнительный директор утверждает план на проверке', async () => {
@@ -344,7 +340,6 @@ describe('PurchasePlanPage', () => {
     await waitFor(() => {
       expect(postBodies().some((body) => body.includes(`"year":${YEAR}`))).toBe(true)
     })
-    expect(await screen.findByTestId('purchase-saved')).toHaveTextContent('План создан')
   })
 
   it('за прошлый год план только для чтения', async () => {
@@ -430,9 +425,6 @@ describe('PurchasePlanPage', () => {
     await waitFor(() => {
       expect(calls().some((url) => url.includes('/request-revision'))).toBe(true)
     })
-    expect(await screen.findByTestId('purchase-saved')).toHaveTextContent(
-      'Запрос на пересмотр отправлен',
-    )
   })
 
   it('не отправляет план без цены и объясняет почему', async () => {

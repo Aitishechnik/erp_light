@@ -29,7 +29,7 @@ from app.models.auth import User
 from app.models.planning import SalesPlan, SalesPlanCorrection, SalesPlanCorrectionItem
 from app.models.sales import DECISION_TITLES
 from app.schemas.planning import SalesPlanCorrectionCreate
-from app.services import month_close_service, month_result_service
+from app.services import audit_service, month_close_service, month_result_service
 from app.services import sales_plan_correction_service as correction_service
 from app.services.plan_freeze import editable_months
 
@@ -206,6 +206,24 @@ def transfer_drafts(db: Session, user: User, year: int, month: int) -> TransferR
                 quantity=sum(pairs.values(), ZERO),
             )
         )
+    total_lines = sum(row.lines for row in result.created)
+    audit_service.record(
+        db,
+        actor=user,
+        action="month.transfer_drafts_created",
+        summary=(
+            f"Черновики переноса {month:02d}.{year} → {state.target_month:02d}."
+            f"{state.target_year}: менеджеров {len(result.created)}, строк {total_lines}"
+        ),
+        entity_label=f"{month:02d}.{year}",
+        payload={
+            "created": [row.manager_name for row in result.created],
+            "skipped": [row.manager_name for row in result.skipped],
+        },
+        year=year,
+        month=month,
+    )
+    db.commit()
     return result
 
 

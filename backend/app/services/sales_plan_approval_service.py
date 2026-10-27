@@ -32,6 +32,7 @@ from app.schemas.planning import (
     AnnualSalesPlanManagerOut,
     AnnualSalesPlanOut,
 )
+from app.services import audit_service
 
 VIEWERS = (
     ROLE_SALES_MANAGER,
@@ -299,6 +300,15 @@ def approve(db: Session, user: User, year: int) -> AnnualSalesPlanOut:
     approval.approved_by = user
     approval.approved_at = datetime.now(UTC)
     approval.source_hash = source_hash
+    audit_service.record(
+        db,
+        actor=user,
+        action="annual_plan.approved",
+        summary=f"Годовой план отдела продаж на {year} год согласован",
+        entity_id=approval.id,
+        entity_label=f"Годовой план, {year}",
+        year=year,
+    )
     db.commit()
     return get_annual(db, user, year)
 
@@ -364,5 +374,14 @@ def invalidate(db: Session, year: int, reason: str) -> None:
     approval.notes = _append_note(
         approval.notes,
         f"Состав планов изменился: {reason}. Требуется повторное согласование.",
+    )
+    audit_service.record(
+        db,
+        actor=None,
+        action="annual_plan.invalidated",
+        summary=f"Согласование годового плана на {year} год снято: {reason}",
+        entity_id=approval.id,
+        entity_label=f"Годовой план, {year}",
+        year=year,
     )
     db.commit()

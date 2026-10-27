@@ -13,7 +13,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.deps import CurrentUser, DbSession, require_roles
 from app.models.auth import ROLE_PURCHASE_DIRECTOR, User
+from app.models.countries import Country
 from app.schemas.countries import CountryIn, CountryOut, CountryUpdate
+from app.services import audit_service
 from app.services import country_service as service
 from app.services.directory_service import DirectoryError
 
@@ -49,7 +51,22 @@ def create_country(payload: CountryIn, user: Writer, db: DbSession) -> CountryOu
 def update_country(
     country_id: uuid.UUID, payload: CountryUpdate, user: Writer, db: DbSession
 ) -> CountryOut:
+    before = db.get(Country, country_id)
+    before_days = before.delivery_days if before is not None else None
     try:
-        return CountryOut.model_validate(service.update_country(db, country_id, payload))
+        row = service.update_country(db, country_id, payload)
     except DirectoryError as exc:
         raise _fail(exc) from exc
+    audit_service.record(
+        db,
+        actor=user,
+        action="country.updated",
+        summary=(
+            f"Изменена страна {row.name}: срок доставки {before_days} → {row.delivery_days} дн."
+        ),
+        entity_id=row.id,
+        entity_label=row.name,
+        payload={"delivery_days": row.delivery_days, "было": before_days},
+    )
+    db.commit()
+    return CountryOut.model_validate(row)

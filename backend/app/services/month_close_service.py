@@ -28,7 +28,7 @@ from app.models.sales import (
     MonthResultSnapshot,
     SalesFact,
 )
-from app.services import month_result_service
+from app.services import audit_service, month_result_service
 
 CLOSE_ROLES = (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR)
 
@@ -167,6 +167,17 @@ def close_month(db: Session, user: User, year: int, month: int) -> MonthResult:
             closed_at=result.closed_at,
         )
     )
+    audit_service.record(
+        db,
+        actor=user,
+        action="month.closed",
+        summary=f"Месяц {month:02d}.{year} закрыт, версия снимка {result.version}",
+        entity_id=result.id,
+        entity_label=f"{month:02d}.{year}",
+        payload={"version": result.version, "rows": len(summary.rows)},
+        year=year,
+        month=month,
+    )
     db.commit()
     db.refresh(result)
     return result
@@ -185,6 +196,16 @@ def reopen_month(db: Session, user: User, year: int, month: int, reason: str) ->
     result.reopened_by_id = user.id
     result.reopened_at = datetime.now().astimezone()
     result.reopen_reason = text
+    audit_service.record(
+        db,
+        actor=user,
+        action="month.reopened",
+        summary=f"Месяц {month:02d}.{year} открыт заново: {text}",
+        entity_id=result.id,
+        entity_label=f"{month:02d}.{year}",
+        year=year,
+        month=month,
+    )
     db.commit()
     db.refresh(result)
     return result
@@ -226,6 +247,22 @@ def set_decision(
     else:
         result.target_year = target_year
         result.target_month = target_month
+    target = (
+        f" → {target_month:02d}.{target_year}"
+        if decision != "accept" and target_month and target_year
+        else ""
+    )
+    audit_service.record(
+        db,
+        actor=user,
+        action="month.decision_set",
+        summary=f"Решение месяца {month:02d}.{year}: {DECISION_TITLES[decision]}{target}",
+        entity_id=result.id,
+        entity_label=f"{month:02d}.{year}",
+        payload={"decision": decision, "comment": result.decision_comment},
+        year=year,
+        month=month,
+    )
     db.commit()
     db.refresh(result)
     return result

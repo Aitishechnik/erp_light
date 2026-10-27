@@ -214,7 +214,6 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
   const [correctionReason, setCorrectionReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
 
   const isCommercialDirector = user.role === 'commercial_director'
   const isExecutive = user.role === 'executive_director'
@@ -294,14 +293,12 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
       })
   }, [plan, isOwner, isCommercialDirector, isExecutive])
 
-  const run = async (action: () => Promise<unknown>, message?: string) => {
+  const run = async (action: () => Promise<unknown>, _message?: string) => {
     setBusy(true)
     setError(null)
-    setNotice(null)
     try {
       await action()
       await reload()
-      if (message) setNotice(message)
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -611,11 +608,6 @@ export function SalesPlansPage({ user }: { user: SessionUser }) {
       {error ? (
         <p className="error" role="alert">
           {error}
-        </p>
-      ) : null}
-      {notice ? (
-        <p className="hint saved" data-testid="sales-plan-notice">
-          {notice}
         </p>
       ) : null}
 

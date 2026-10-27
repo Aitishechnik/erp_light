@@ -703,7 +703,6 @@ test('закупщик раскладывает потребность план�
   await expect(page.getByTestId('purchase-table')).toContainText('→ окт')
 
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
-  await expect(page.getByTestId('purchase-saved')).toContainText('План сохранён')
   await expect(page.getByTestId('purchase-table')).toContainText('Таиланд')
   await expect(page.getByTestId('position-FIN-1')).toContainText('разложено')
 
@@ -1309,4 +1308,50 @@ test('месяц закрывается и показывает снимок', a
   await expect(page.getByText(/Снимок зафиксирован/)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Закрыть месяц' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Открыть заново' })).toBeVisible()
+})
+
+const EXECUTIVE = {
+  id: 'ed-1',
+  login: 'executive',
+  full_name: 'Ольга Директорова',
+  role: 'executive_director',
+  role_title: 'Исполнительный директор',
+}
+
+const AUDIT_EVENT = {
+  id: 'ev-1',
+  created_at: '2026-10-27T10:00:00Z',
+  action: 'sales_plan.approved',
+  action_title: 'План продаж утверждён',
+  level: 'critical',
+  entity_kind: 'sales_plan',
+  entity_id: 'plan-1',
+  entity_label: 'Менеджер по продажам (демо), 2026',
+  summary: 'План продаж на 2026 год утверждён: Менеджер по продажам (демо)',
+  actor_name: 'Коммерческий директор (демо)',
+  actor_role_title: 'Коммерческий директор',
+  year: 2026,
+  month: null,
+  read: false,
+}
+
+test('колокольчик приносит директору служебные сообщения и открывает журнал', async ({ page }) => {
+  await mockSession(page, EXECUTIVE)
+  await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/messages**', (route) =>
+    route.fulfill({ json: { rows: [AUDIT_EVENT], unread: 1 } }),
+  )
+  await page.route('**/api/v1/messages/count', (route) => route.fulfill({ json: { unread: 1 } }))
+  await page.route('**/api/v1/audit**', (route) => route.fulfill({ json: [AUDIT_EVENT] }))
+  await page.route('**/api/v1/messages/read-all', (route) => route.fulfill({ json: { unread: 0 } }))
+
+  await page.goto('/')
+  await expect(page.getByTestId('bell-badge')).toHaveText('1')
+
+  await page.getByLabel(/Служебные сообщения, непрочитанных: 1/).click()
+  await expect(page.getByTestId('bell-list')).toContainText('План продаж на 2026 год утверждён')
+
+  await page.getByRole('button', { name: 'Весь журнал' }).click()
+  await expect(page.getByTestId('audit-table')).toContainText('План продаж утверждён')
+  await expect(page.getByTestId('messages-unread')).toContainText('Непрочитанных: 1')
 })
