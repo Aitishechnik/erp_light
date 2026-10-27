@@ -2644,6 +2644,26 @@ button.primary:disabled,
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
+  scrollbar-color: #c9ced6 transparent;
+}
+
+/* Явная полоса прокрутки: иначе видно 4 строки из 6 и непонятно, что список длиннее. */
+.bell-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.bell-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #c9ced6;
+}
+
+.bell-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.bell-more {
+  margin: 0.35rem 0 0;
+  font-size: 0.74rem;
 }
 
 .bell-count {

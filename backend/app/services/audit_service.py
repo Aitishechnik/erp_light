@@ -175,7 +175,19 @@ def messages(
     return MessagesOut(
         rows=[_to_out(event, is_read) for event, is_read in rows],
         unread=unread_count(db, user),
+        total=message_total(db, user),
     )
+
+
+def message_total(db: Session, user: User) -> int:
+    """Сколько служебных сообщений у пользователя всего (для «показано N из M»)."""
+    statement = (
+        select(func.count())
+        .select_from(AuditEvent)
+        .where(AuditEvent.is_message.is_(True))
+        .where(AuditEvent.audience.contains([user.role]))
+    )
+    return int(db.execute(statement).scalar_one())
 
 
 def unread_count(db: Session, user: User) -> int:

@@ -1170,7 +1170,7 @@ export type AuditEvent = {
   read: boolean
 }
 
-export type Messages = { rows: AuditEvent[]; unread: number }
+export type Messages = { rows: AuditEvent[]; unread: number; total: number }
 
 /** Служебные сообщения текущего пользователя, свежие сверху. */
 export function fetchMessages(params?: { unread?: boolean; limit?: number }): Promise<Messages> {

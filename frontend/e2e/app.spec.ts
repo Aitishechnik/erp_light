@@ -1339,7 +1339,7 @@ test('колокольчик приносит директору служебн�
   await mockSession(page, EXECUTIVE)
   await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
   await page.route('**/api/v1/messages**', (route) =>
-    route.fulfill({ json: { rows: [AUDIT_EVENT], unread: 1 } }),
+    route.fulfill({ json: { rows: [AUDIT_EVENT], unread: 1, total: 1 } }),
   )
   await page.route('**/api/v1/messages/count', (route) => route.fulfill({ json: { unread: 1 } }))
   await page.route('**/api/v1/audit**', (route) => route.fulfill({ json: [AUDIT_EVENT] }))

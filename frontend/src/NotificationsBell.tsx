@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AuditEvent } from './api'
 import { errorMessage, fetchMessages, fetchUnreadCount, markAllMessagesRead } from './api'
 
@@ -28,9 +28,11 @@ export function NotificationsBell({ onOpenJournal }: Props) {
   const [open, setOpen] = useState(false)
   const [unread, setUnread] = useState(0)
   const [rows, setRows] = useState<AuditEvent[]>([])
-  const [messagesTotal, setMessagesTotal] = useState(0)
+  const [total, setTotal] = useState(0)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [canScroll, setCanScroll] = useState(false)
+  const panelRef = useRef<HTMLDivElement | null>(null)
 
   const refreshCount = useCallback(async () => {
     try {
@@ -45,6 +47,34 @@ export function NotificationsBell({ onOpenJournal }: Props) {
     void refreshCount()
   }, [refreshCount])
 
+  // Клик мимо панели и Esc закрывают её: панель не должна перехватывать меню.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    const onPointer = (event: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onPointer)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onPointer)
+    }
+  }, [open])
+
+  // Список длиннее окна — показываем подсказку, что есть ещё. Меряем после
+  // отрисовки: ref-callback срабатывает, когда список уже в DOM и посчитан.
+  const listRef = useCallback((node: HTMLUListElement | null) => {
+    if (!node) return
+    requestAnimationFrame(() => {
+      setCanScroll(node.scrollHeight > node.clientHeight + 1)
+    })
+  }, [])
+
   const showPanel = async () => {
     const next = !open
     setOpen(next)
@@ -52,8 +82,8 @@ export function NotificationsBell({ onOpenJournal }: Props) {
     try {
       const data = await fetchMessages({ limit: 20 })
       setRows(data.rows)
-      setMessagesTotal(data.rows.length)
       setUnread(data.unread)
+      setTotal(data.total)
       setError('')
     } catch (err) {
       setError(errorMessage(err))
@@ -73,8 +103,9 @@ export function NotificationsBell({ onOpenJournal }: Props) {
     }
   }
 
+  const shown = rows.length
   return (
-    <div className="bell">
+    <div className="bell" ref={panelRef}>
       <button
         type="button"
         className={unread > 0 ? 'bell-button has-unread' : 'bell-button'}
@@ -108,8 +139,8 @@ export function NotificationsBell({ onOpenJournal }: Props) {
         <div className="bell-panel" role="dialog" aria-label="Служебные сообщения">
           <div className="bell-head">
             <strong>Служебные сообщения</strong>
-            <span className="bell-count">
-              {rows.length} из {messagesTotal}
+            <span className="bell-count" data-testid="bell-count">
+              показано {shown} из {total}
             </span>
             <button type="button" className="mini" onClick={() => setOpen(false)}>
               Закрыть
@@ -121,20 +152,27 @@ export function NotificationsBell({ onOpenJournal }: Props) {
               Новых сообщений нет.
             </p>
           ) : (
-            <ul className="bell-list" data-testid="bell-list">
-              {rows.map((row) => (
-                <li key={row.id} className={row.read ? 'bell-row read' : 'bell-row'}>
-                  <span className="bell-time">{formatTime(row.created_at)}</span>
-                  <span className="bell-text">
-                    <span className="bell-summary">{row.summary}</span>
-                    <span className="bell-meta">
-                      {row.actor_name ?? 'Система'}
-                      {row.actor_role_title ? ` · ${row.actor_role_title}` : ''}
+            <>
+              <ul className="bell-list" data-testid="bell-list" ref={listRef}>
+                {rows.map((row) => (
+                  <li key={row.id} className={row.read ? 'bell-row read' : 'bell-row'}>
+                    <span className="bell-time">{formatTime(row.created_at)}</span>
+                    <span className="bell-text">
+                      <span className="bell-summary">{row.summary}</span>
+                      <span className="bell-meta">
+                        {row.actor_name ?? 'Система'}
+                        {row.actor_role_title ? ` · ${row.actor_role_title}` : ''}
+                      </span>
                     </span>
-                  </span>
-                </li>
-              ))}
-            </ul>
+                  </li>
+                ))}
+              </ul>
+              {canScroll ? (
+                <p className="hint bell-more" data-testid="bell-more">
+                  Прокрутите список — есть ещё сообщения.
+                </p>
+              ) : null}
+            </>
           )}
           <div className="bell-actions">
             <button

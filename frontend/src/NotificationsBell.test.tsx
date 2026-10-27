@@ -39,7 +39,9 @@ const SESSION: Record<string, { body?: unknown; status?: number }> = {
   'POST /api/v1/messages/read-all': { body: { unread: 0 } },
   'POST /api/v1/messages/read': { body: { unread: 1 } },
   '/api/v1/messages/count': { body: { unread: 2 } },
-  '/api/v1/messages': { body: { rows: [event(), event({ id: 'ev-2', read: true })], unread: 2 } },
+  '/api/v1/messages': {
+    body: { rows: [event(), event({ id: 'ev-2', read: true })], unread: 2, total: 2 },
+  },
   '/api/v1/audit': { body: [event()] },
 }
 

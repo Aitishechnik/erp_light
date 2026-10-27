@@ -28,10 +28,11 @@ class AuditEventOut(BaseModel):
 
 
 class MessagesOut(BaseModel):
-    """Сообщения и счётчик непрочитанных."""
+    """Сообщения, сколько их всего и счётчик непрочитанных."""
 
     rows: list[AuditEventOut]
     unread: int
+    total: int = Field(default=0, description="Сколько сообщений у пользователя всего")
 
 
 class UnreadOut(BaseModel):
