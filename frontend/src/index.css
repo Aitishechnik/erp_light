@@ -2829,6 +2829,20 @@ button.primary:disabled,
   align-items: center;
   gap: 0.4rem;
   margin: 0 0 0.5rem;
+  padding: 0;
+  border: 0;
+}
+
+.sched-switch legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .sched-summary {
@@ -2899,8 +2913,21 @@ button.primary:disabled,
 }
 
 .sched-bars .bar-label {
+  display: flex;
+  gap: 3px;
   font-size: 0.72rem;
   color: var(--muted);
+}
+
+.sched-bars .bar-label i {
+  font-style: normal;
+  color: #98a2b3;
+}
+
+.sched-bars .sched-legend {
+  margin-top: 0.35rem;
+  color: var(--muted);
+  font-size: 0.72rem;
 }
 
 .sched-quarters .q-card {
@@ -2927,7 +2954,15 @@ button.primary:disabled,
 }
 
 .sched-quarters .q-order {
+  color: var(--muted);
+}
+
+.sched-quarters .q-order.overdue {
   color: #b42318;
+}
+
+.sched-quarters .q-order.soon {
+  color: #b54708;
 }
 
 .sched-quarters .q-fact {
@@ -2980,9 +3015,17 @@ button.primary:disabled,
 }
 
 .sched-bars .bar-col.overdue .bar-body {
+  outline: 1px solid #e5484d;
+}
+
+.sched-bars .bar-col.soon .bar-body {
   outline: 1px solid #f0b26b;
 }
 
 .purchase-table .sched-table tr.overdue td {
   background: #fff4f2;
+}
+
+.purchase-table .sched-table tr.soon td {
+  background: #fffaf2;
 }

@@ -137,12 +137,16 @@ type ScheduleRow = {
   fact: number
   share: number
   remaining: number
+  /** Заказ нужно оформлять в текущем месяце — уже не просрочен, но срок подошёл. */
+  soon: boolean
 }
 
 function scheduleRows(
   entries: PreviewEntry[],
   factMonths: { month: number; quantity: string }[],
 ): ScheduleRow[] {
+  const today = new Date()
+  const current = today.getFullYear() * 12 + today.getMonth()
   return entries.map((entry) => {
     const need = entry.quantityMilli / 1000
     const factRow = factMonths.find((row) => row.month === entry.month)
@@ -153,6 +157,7 @@ function scheduleRows(
       fact,
       share: need > 0 ? (fact / need) * 100 : 0,
       remaining: Math.max(need - fact, 0),
+      soon: !entry.overdue && entry.orderYear * 12 + entry.orderMonth - 1 === current,
     }
   })
 }
@@ -167,6 +172,70 @@ function needMonth(row: ScheduleRow, year: number): string {
 
 const QUARTER_TITLES = ['I квартал', 'II квартал', 'III квартал', 'IV квартал']
 
+/** Факт по месяцам, которых нет в графике: показываем отдельной строкой. */
+function extraFacts(row: DraftRow, schedule: PreviewEntry[]): string {
+  const outside = row.factMonths.filter(
+    (month) => !schedule.some((entry) => entry.month === month.month),
+  )
+  if (outside.length === 0) return ''
+  return `вне графика: ${outside
+    .map((month) => `${monthShort(month.month)} ${formatQuantity(month.quantity)}`)
+    .join(' · ')}`
+}
+
+/** Таблица месяцев: потребность, сколько нужно, к какому числу заказать и что пришло. */
+function ScheduleTable({
+  rows,
+  year,
+  extra,
+}: {
+  rows: ScheduleRow[]
+  year: number
+  extra: string
+}) {
+  return (
+    <table className="sched-table" data-testid="schedule-table">
+      <thead>
+        <tr>
+          <th>Месяц потребности</th>
+          <th>Нужно, кг</th>
+          <th>Заказать к</th>
+          <th>Факт</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr
+            key={row.entry.month}
+            className={row.entry.overdue ? 'overdue' : row.soon ? 'soon' : undefined}
+          >
+            <td>{needMonth(row, year)}</td>
+            <td className="num">{formatQuantity(row.need.toFixed(3))}</td>
+            <td>
+              {orderDate(row)}
+              {row.entry.overdue ? ' · просрочен' : ''}
+            </td>
+            <td>
+              {row.fact > 0
+                ? `${formatQuantity(row.fact.toFixed(3))} · ${formatQuantity(row.share.toFixed(1))} %`
+                : '—'}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+      {extra ? (
+        <tfoot>
+          <tr>
+            <td colSpan={4} className="hint">
+              {extra}
+            </td>
+          </tr>
+        </tfoot>
+      ) : null}
+    </table>
+  )
+}
+
 /** График заказа: один и тот же расчёт, три способа показать. */
 function ScheduleView({
   rows,
@@ -176,6 +245,7 @@ function ScheduleView({
   year,
   extra,
   wide = false,
+  tableOnly = false,
 }: {
   rows: ScheduleRow[]
   mode: ScheduleMode
@@ -184,9 +254,14 @@ function ScheduleView({
   year: number
   extra: string
   wide?: boolean
+  tableOnly?: boolean
 }) {
   const nearest = rows.find((row) => row.remaining > 0) ?? null
   const extraLine = extra ? <span className="month-fact extra">{extra}</span> : null
+
+  if (mode === 'summary' && tableOnly) {
+    return <ScheduleTable rows={rows} year={year} extra="" />
+  }
 
   if (mode === 'bars') {
     const max = Math.max(...rows.map((row) => row.need), 1)
@@ -199,7 +274,9 @@ function ScheduleView({
           return (
             <span
               key={row.entry.month}
-              className={row.entry.overdue ? 'bar-col overdue' : 'bar-col'}
+              className={
+                row.entry.overdue ? 'bar-col overdue' : row.soon ? 'bar-col soon' : 'bar-col'
+              }
               title={`Потребность ${needMonth(row, year)}: ${formatQuantity(
                 row.need.toFixed(3),
               )} кг; заказ к ${orderDate(row)}${
@@ -209,10 +286,14 @@ function ScheduleView({
               <span className="bar-body" style={{ height }}>
                 <i style={{ height: filled }} />
               </span>
-              <span className="bar-label">{monthShort(row.entry.orderMonth)}</span>
+              <span className="bar-label">
+                {monthShort(row.entry.orderMonth)}
+                <i>{String(row.entry.orderYear).slice(2)}</i>
+              </span>
             </span>
           )
         })}
+        <span className="sched-legend">месяцы заказа · тёмная часть столбика — уже пришло</span>
         {extraLine}
       </div>
     )
@@ -238,7 +319,14 @@ function ScheduleView({
                 {QUARTER_TITLES[index]} {year}
               </span>
               <span className="q-sum">{formatQuantity(need.toFixed(3))} кг</span>
-              <span className="q-order">заказ к {orderDate(first)}</span>
+              <span
+                className={
+                  first.entry.overdue ? 'q-order overdue' : first.soon ? 'q-order soon' : 'q-order'
+                }
+              >
+                заказ к {orderDate(first)}
+                {first.entry.overdue ? ' · просрочен' : first.soon ? ' · срок в этом месяце' : ''}
+              </span>
               <span className="q-fact">
                 {fact > 0 ? `пришло ${formatQuantity(fact.toFixed(3))} кг` : 'поступлений не было'}
               </span>
@@ -264,37 +352,6 @@ function ScheduleView({
       <button type="button" className="mini" onClick={onToggle}>
         {expanded ? 'Скрыть график' : 'Весь график'}
       </button>
-      {expanded ? (
-        <table className="sched-table" data-testid="schedule-table">
-          <thead>
-            <tr>
-              <th>Месяц потребности</th>
-              <th>Нужно, кг</th>
-              <th>Заказать к</th>
-              <th>Факт</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.entry.month} className={row.entry.overdue ? 'overdue' : undefined}>
-                <td>{needMonth(row, year)}</td>
-                <td className="num">{formatQuantity(row.need.toFixed(3))}</td>
-                <td>
-                  {orderDate(row)}
-                  {row.entry.overdue ? ' · просрочен' : ''}
-                </td>
-                <td>
-                  {row.fact > 0
-                    ? `${formatQuantity(row.fact.toFixed(3))} · ${formatQuantity(
-                        row.share.toFixed(1),
-                      )} %`
-                    : '—'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : null}
       {extraLine}
     </div>
   )
@@ -404,6 +461,11 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
   const [year, setYear] = useState(focus?.[0] ? Number(focus[0]) : thisYear)
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>('summary')
   const [openSchedule, setOpenSchedule] = useState<string[]>([])
+
+  const toggleSchedule = (key: string) =>
+    setOpenSchedule((current) =>
+      current.includes(key) ? current.filter((row) => row !== key) : [...current, key],
+    )
   const [plans, setPlans] = useState<PurchasePlan[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [suppliers, setSuppliers] = useState<Counterparty[]>([])
@@ -1105,48 +1167,17 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                             <td>
                               {position.status === 'orphan' ? (
                                 '—'
-                              ) : schedule.length === 0 ? (
-                                <span className="hint">
-                                  {row.productId && row.countryId
-                                    ? '—'
-                                    : 'выберите сырьё, страну и количество'}
-                                </span>
-                              ) : (
+                              ) : scheduleMode === 'summary' ? (
                                 <ScheduleView
                                   rows={scheduleRows(schedule, row.factMonths)}
                                   mode="summary"
-                                  wide={false}
                                   expanded={openSchedule.includes(row.key)}
-                                  onToggle={() =>
-                                    setOpenSchedule((current) =>
-                                      current.includes(row.key)
-                                        ? current.filter((key) => key !== row.key)
-                                        : [...current, row.key],
-                                    )
-                                  }
+                                  onToggle={() => toggleSchedule(row.key)}
                                   year={plan.year}
-                                  extra={
-                                    row.factMonths.some(
-                                      (month) =>
-                                        !schedule.some((entry) => entry.month === month.month),
-                                    )
-                                      ? `вне графика: ${row.factMonths
-                                          .filter(
-                                            (month) =>
-                                              !schedule.some(
-                                                (entry) => entry.month === month.month,
-                                              ),
-                                          )
-                                          .map(
-                                            (month) =>
-                                              `${monthShort(month.month)} ${formatQuantity(
-                                                month.quantity,
-                                              )}`,
-                                          )
-                                          .join(' · ')}`
-                                      : ''
-                                  }
+                                  extra={extraFacts(row, schedule)}
                                 />
+                              ) : (
+                                <span className="hint">график ниже</span>
                               )}
                             </td>
                             <td>
@@ -1166,36 +1197,37 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                         )
                       })
                     )}
-                    {scheduleMode === 'summary'
-                      ? null
-                      : rows.map((row) => {
-                          const schedule = splitPreview(
-                            toMilli(row.quantity),
-                            position,
-                            row.deliveryDays,
-                            plan.year,
-                          )
-                          if (schedule.length === 0) return null
-                          return (
-                            <tr key={`${row.key}-schedule`} className="schedule-wide">
-                              <td colSpan={8}>
-                                <div className="sched-wide-head">
-                                  <b>{row.productName || 'Сырьё'}</b>
-                                  {row.countryName ? ` · ${row.countryName}` : ''}
-                                </div>
-                                <ScheduleView
-                                  rows={scheduleRows(schedule, row.factMonths)}
-                                  mode={scheduleMode}
-                                  wide
-                                  expanded={false}
-                                  onToggle={() => undefined}
-                                  year={plan.year}
-                                  extra=""
-                                />
-                              </td>
-                            </tr>
-                          )
-                        })}
+                    {rows.map((row) => {
+                      const schedule = splitPreview(
+                        toMilli(row.quantity),
+                        position,
+                        row.deliveryDays,
+                        plan.year,
+                      )
+                      const expanded = openSchedule.includes(row.key)
+                      if (schedule.length === 0) return null
+                      if (scheduleMode === 'summary' && !expanded) return null
+                      return (
+                        <tr key={`${row.key}-schedule`} className="schedule-wide">
+                          <td colSpan={8}>
+                            <div className="sched-wide-head">
+                              <b>{row.productName || 'Сырьё'}</b>
+                              {row.countryName ? ` · ${row.countryName}` : ''}
+                            </div>
+                            <ScheduleView
+                              rows={scheduleRows(schedule, row.factMonths)}
+                              mode={scheduleMode}
+                              wide
+                              tableOnly
+                              expanded={expanded}
+                              onToggle={() => toggleSchedule(row.key)}
+                              year={plan.year}
+                              extra={extraFacts(row, schedule)}
+                            />
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 )
               })}

@@ -706,6 +706,12 @@ test('закупщик раскладывает потребность план�
   await expect(page.getByTestId('schedule-bars')).toBeVisible()
   await page.getByRole('button', { name: 'кварталы' }).click()
   await expect(page.getByTestId('schedule-quarters')).toContainText('I квартал')
+  // «Кратко» + «Весь график»: таблица месяцев рисуется широкой строкой под сырьём.
+  await page.getByRole('button', { name: 'кратко' }).click()
+  await page.getByRole('button', { name: 'Весь график' }).first().click()
+  const detail = page.getByTestId('schedule-table')
+  await expect(detail).toBeVisible()
+  await expect(detail).toContainText('Месяц потребности')
 
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.getByTestId('purchase-table')).toContainText('Таиланд')
