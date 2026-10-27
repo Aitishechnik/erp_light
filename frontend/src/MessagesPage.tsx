@@ -83,10 +83,11 @@ export function MessagesPage({ user }: Props) {
           ? ' Исполнительный директор видит действия всех сотрудников.'
           : ' Здесь видны только ваши действия.'}
       </p>
-      <div className="toolbar">
+      <div className="toolbar messages-toolbar">
         <input
+          className="audit-search"
           aria-label="Поиск по журналу"
-          placeholder="Поиск: событие, объект, сотрудник"
+          placeholder="Событие, объект, сотрудник"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />

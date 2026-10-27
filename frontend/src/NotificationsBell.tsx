@@ -28,6 +28,7 @@ export function NotificationsBell({ onOpenJournal }: Props) {
   const [open, setOpen] = useState(false)
   const [unread, setUnread] = useState(0)
   const [rows, setRows] = useState<AuditEvent[]>([])
+  const [messagesTotal, setMessagesTotal] = useState(0)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -51,6 +52,7 @@ export function NotificationsBell({ onOpenJournal }: Props) {
     try {
       const data = await fetchMessages({ limit: 20 })
       setRows(data.rows)
+      setMessagesTotal(data.rows.length)
       setUnread(data.unread)
       setError('')
     } catch (err) {
@@ -80,9 +82,21 @@ export function NotificationsBell({ onOpenJournal }: Props) {
         aria-expanded={open}
         onClick={() => void showPanel()}
       >
-        <span className="bell-icon" aria-hidden="true">
-          ✉
-        </span>
+        <svg
+          className="bell-icon"
+          viewBox="0 0 24 24"
+          width="18"
+          height="18"
+          aria-hidden="true"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M18 8a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6" />
+          <path d="M10.3 19a2 2 0 0 0 3.4 0" />
+        </svg>
         <span className="bell-title">Служебные сообщения</span>
         {unread > 0 ? (
           <span className="bell-badge" data-testid="bell-badge">
@@ -94,6 +108,9 @@ export function NotificationsBell({ onOpenJournal }: Props) {
         <div className="bell-panel" role="dialog" aria-label="Служебные сообщения">
           <div className="bell-head">
             <strong>Служебные сообщения</strong>
+            <span className="bell-count">
+              {rows.length} из {messagesTotal}
+            </span>
             <button type="button" className="mini" onClick={() => setOpen(false)}>
               Закрыть
             </button>

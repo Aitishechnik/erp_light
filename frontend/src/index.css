@@ -2643,6 +2643,12 @@ button.primary:disabled,
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.bell-count {
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 .bell-head {
@@ -2715,6 +2721,15 @@ button.primary:disabled,
   font-size: 0.84rem;
 }
 
+.audit-search {
+  flex: 1 1 18rem;
+  min-width: 14rem;
+}
+
+.messages-toolbar {
+  gap: 0.75rem;
+}
+
 .audit-table .nowrap {
   white-space: nowrap;
 }
@@ -2728,6 +2743,13 @@ button.primary:disabled,
 /* «Кто» — имя и роль в две строки; шире не нужно, иначе таблица не влезает. */
 .audit-table td:nth-child(2) {
   max-width: 9rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.audit-table td:nth-child(2) .hint {
+  font-size: 0.74rem;
+  line-height: 1.2;
 }
 
 .audit-table .col-level {
