@@ -699,8 +699,13 @@ test('закупщик раскладывает потребность план�
   await page.getByLabel('Количество FIN-1 1').fill('30')
   await page.getByLabel('Цена FIN-1 1').fill('500')
   await page.getByLabel('Поставщик FIN-1 1').selectOption('sup-1')
-  await expect(page.getByTestId('purchase-table')).toContainText('янв 10')
-  await expect(page.getByTestId('purchase-table')).toContainText('→ окт')
+  await expect(page.getByTestId('purchase-table')).toContainText('Ближайший заказ')
+  await expect(page.getByTestId('purchase-table')).toContainText('10 кг')
+  // Переключатель видов графика: полоса по месяцам заказа и кварталы.
+  await page.getByRole('button', { name: 'полосой' }).click()
+  await expect(page.getByTestId('schedule-bars')).toBeVisible()
+  await page.getByRole('button', { name: 'кварталы' }).click()
+  await expect(page.getByTestId('schedule-quarters')).toContainText('I квартал')
 
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.getByTestId('purchase-table')).toContainText('Таиланд')

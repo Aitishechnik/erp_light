@@ -49,10 +49,6 @@ function monthShort(month: number): string {
   return (MONTH_TITLES[month - 1] ?? '').slice(0, 3).toLowerCase()
 }
 
-function monthYear(year: number, month: number): string {
-  return `${monthShort(month)} ${year}`
-}
-
 type DraftRow = {
   key: string
   /** Строка плана на сервере; пусто у новой. */
@@ -124,6 +120,184 @@ function splitPreview(
     })
   })
   return result
+}
+
+/** Как показывать график заказа: сводкой, полосой по месяцам заказа или кварталами. */
+type ScheduleMode = 'summary' | 'bars' | 'quarters'
+
+const SCHEDULE_MODES: { id: ScheduleMode; title: string }[] = [
+  { id: 'summary', title: 'кратко' },
+  { id: 'bars', title: 'полосой' },
+  { id: 'quarters', title: 'кварталы' },
+]
+
+type ScheduleRow = {
+  entry: PreviewEntry
+  need: number
+  fact: number
+  share: number
+  remaining: number
+}
+
+function scheduleRows(
+  entries: PreviewEntry[],
+  factMonths: { month: number; quantity: string }[],
+): ScheduleRow[] {
+  return entries.map((entry) => {
+    const need = entry.quantityMilli / 1000
+    const factRow = factMonths.find((row) => row.month === entry.month)
+    const fact = factRow ? Number(factRow.quantity) : 0
+    return {
+      entry,
+      need,
+      fact,
+      share: need > 0 ? (fact / need) * 100 : 0,
+      remaining: Math.max(need - fact, 0),
+    }
+  })
+}
+
+function orderDate(row: ScheduleRow): string {
+  return `01.${String(row.entry.orderMonth).padStart(2, '0')}.${row.entry.orderYear}`
+}
+
+function needMonth(row: ScheduleRow, year: number): string {
+  return `${(MONTH_TITLES[row.entry.month - 1] ?? '').toLowerCase()} ${year}`
+}
+
+const QUARTER_TITLES = ['I квартал', 'II квартал', 'III квартал', 'IV квартал']
+
+/** График заказа: один и тот же расчёт, три способа показать. */
+function ScheduleView({
+  rows,
+  mode,
+  expanded,
+  onToggle,
+  year,
+  extra,
+  wide = false,
+}: {
+  rows: ScheduleRow[]
+  mode: ScheduleMode
+  expanded: boolean
+  onToggle: () => void
+  year: number
+  extra: string
+  wide?: boolean
+}) {
+  const nearest = rows.find((row) => row.remaining > 0) ?? null
+  const extraLine = extra ? <span className="month-fact extra">{extra}</span> : null
+
+  if (mode === 'bars') {
+    const max = Math.max(...rows.map((row) => row.need), 1)
+    const maxHeight = wide ? 96 : 56
+    return (
+      <div className="sched-bars" data-testid="schedule-bars">
+        {rows.map((row) => {
+          const height = Math.max(Math.round((row.need / max) * maxHeight), 3)
+          const filled = Math.min(row.fact / Math.max(row.need, 1), 1) * height
+          return (
+            <span
+              key={row.entry.month}
+              className={row.entry.overdue ? 'bar-col overdue' : 'bar-col'}
+              title={`Потребность ${needMonth(row, year)}: ${formatQuantity(
+                row.need.toFixed(3),
+              )} кг; заказ к ${orderDate(row)}${
+                row.fact > 0 ? `; пришло ${formatQuantity(row.fact.toFixed(3))} кг` : ''
+              }`}
+            >
+              <span className="bar-body" style={{ height }}>
+                <i style={{ height: filled }} />
+              </span>
+              <span className="bar-label">{monthShort(row.entry.orderMonth)}</span>
+            </span>
+          )
+        })}
+        {extraLine}
+      </div>
+    )
+  }
+
+  if (mode === 'quarters') {
+    return (
+      <div className="sched-quarters" data-testid="schedule-quarters">
+        {[1, 2, 3, 4].map((quarter, index) => {
+          const group = rows.filter((row) => Math.ceil(row.entry.month / 3) === quarter)
+          if (group.length === 0) return null
+          const need = group.reduce((sum, row) => sum + row.need, 0)
+          const fact = group.reduce((sum, row) => sum + row.fact, 0)
+          const first = group.reduce((best, row) =>
+            row.entry.orderYear * 12 + row.entry.orderMonth <
+            best.entry.orderYear * 12 + best.entry.orderMonth
+              ? row
+              : best,
+          )
+          return (
+            <span className="q-card" key={quarter}>
+              <span className="q-title">
+                {QUARTER_TITLES[index]} {year}
+              </span>
+              <span className="q-sum">{formatQuantity(need.toFixed(3))} кг</span>
+              <span className="q-order">заказ к {orderDate(first)}</span>
+              <span className="q-fact">
+                {fact > 0 ? `пришло ${formatQuantity(fact.toFixed(3))} кг` : 'поступлений не было'}
+              </span>
+            </span>
+          )
+        })}
+        {extraLine}
+      </div>
+    )
+  }
+
+  return (
+    <div className="sched-summary" data-testid="schedule-summary">
+      {nearest ? (
+        <span className="sched-line">
+          Ближайший заказ: <b>к {orderDate(nearest)}</b> — {formatQuantity(nearest.need.toFixed(3))}{' '}
+          кг
+          <span className="sched-need"> (потребность — {needMonth(nearest, year)})</span>
+        </span>
+      ) : (
+        <span className="sched-done">Все заказы по графику уже сделаны</span>
+      )}
+      <button type="button" className="mini" onClick={onToggle}>
+        {expanded ? 'Скрыть график' : 'Весь график'}
+      </button>
+      {expanded ? (
+        <table className="sched-table" data-testid="schedule-table">
+          <thead>
+            <tr>
+              <th>Месяц потребности</th>
+              <th>Нужно, кг</th>
+              <th>Заказать к</th>
+              <th>Факт</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.entry.month} className={row.entry.overdue ? 'overdue' : undefined}>
+                <td>{needMonth(row, year)}</td>
+                <td className="num">{formatQuantity(row.need.toFixed(3))}</td>
+                <td>
+                  {orderDate(row)}
+                  {row.entry.overdue ? ' · просрочен' : ''}
+                </td>
+                <td>
+                  {row.fact > 0
+                    ? `${formatQuantity(row.fact.toFixed(3))} · ${formatQuantity(
+                        row.share.toFixed(1),
+                      )} %`
+                    : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
+      {extraLine}
+    </div>
+  )
 }
 
 function draftsFromPlan(plan: PurchasePlan): DraftRow[] {
@@ -228,6 +402,8 @@ function HistoryBlock({ events }: { events: PurchasePlanSourceEvent[] }) {
 export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: string[] }) {
   const thisYear = new Date().getFullYear()
   const [year, setYear] = useState(focus?.[0] ? Number(focus[0]) : thisYear)
+  const [scheduleMode, setScheduleMode] = useState<ScheduleMode>('summary')
+  const [openSchedule, setOpenSchedule] = useState<string[]>([])
   const [plans, setPlans] = useState<PurchasePlan[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [suppliers, setSuppliers] = useState<Counterparty[]>([])
@@ -664,6 +840,22 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
             ) : null}
           </div>
 
+          <fieldset className="sched-switch">
+            <legend className="sr-only">Вид графика заказа</legend>
+            <span className="hint">График заказа:</span>
+            {SCHEDULE_MODES.map((mode) => (
+              <button
+                key={mode.id}
+                type="button"
+                className={scheduleMode === mode.id ? 'mini active' : 'mini'}
+                aria-pressed={scheduleMode === mode.id}
+                onClick={() => setScheduleMode(mode.id)}
+              >
+                {mode.title}
+              </button>
+            ))}
+          </fieldset>
+
           <div className="purchase-table">
             <table className="plan-grid" data-testid="purchase-table">
               <thead>
@@ -920,63 +1112,41 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                     : 'выберите сырьё, страну и количество'}
                                 </span>
                               ) : (
-                                <div className="schedule-list">
-                                  {schedule.map((entry) => {
-                                    const planned = entry.quantityMilli / 1000
-                                    const factMonth = row.factMonths.find(
-                                      (month) => month.month === entry.month,
+                                <ScheduleView
+                                  rows={scheduleRows(schedule, row.factMonths)}
+                                  mode="summary"
+                                  wide={false}
+                                  expanded={openSchedule.includes(row.key)}
+                                  onToggle={() =>
+                                    setOpenSchedule((current) =>
+                                      current.includes(row.key)
+                                        ? current.filter((key) => key !== row.key)
+                                        : [...current, row.key],
                                     )
-                                    const fact = factMonth ? Number(factMonth.quantity) : 0
-                                    const share =
-                                      planned > 0 ? Math.round((fact / planned) * 1000) / 10 : 0
-                                    const state =
-                                      fact <= 0 ? 'none' : share >= 100 ? 'done' : 'partial'
-                                    return (
-                                      <span
-                                        key={entry.month}
-                                        className={
-                                          entry.overdue ? 'schedule-chip overdue' : 'schedule-chip'
-                                        }
-                                        title={
-                                          entry.overdue
-                                            ? `Срок заказа прошёл: заказ ${monthYear(entry.orderYear, entry.orderMonth)}`
-                                            : `Заказ: ${monthYear(entry.orderYear, entry.orderMonth)}`
-                                        }
-                                      >
-                                        {monthShort(entry.month)}{' '}
-                                        {formatQuantity((entry.quantityMilli / 1000).toFixed(3))}
-                                        <span className="order">
-                                          {' '}
-                                          → {monthYear(entry.orderYear, entry.orderMonth)}
-                                        </span>
-                                        {fact > 0 ? (
-                                          <span className={`month-fact ${state}`}>
-                                            факт {formatQuantity(factMonth?.quantity)} ·{' '}
-                                            {formatQuantity(share.toFixed(1))} %
-                                          </span>
-                                        ) : null}
-                                      </span>
+                                  }
+                                  year={plan.year}
+                                  extra={
+                                    row.factMonths.some(
+                                      (month) =>
+                                        !schedule.some((entry) => entry.month === month.month),
                                     )
-                                  })}
-                                  {row.factMonths.some(
-                                    (month) =>
-                                      !schedule.some((entry) => entry.month === month.month),
-                                  ) ? (
-                                    <span className="month-fact extra">
-                                      вне графика:{' '}
-                                      {row.factMonths
-                                        .filter(
-                                          (month) =>
-                                            !schedule.some((entry) => entry.month === month.month),
-                                        )
-                                        .map(
-                                          (month) =>
-                                            `${monthShort(month.month)} ${formatQuantity(month.quantity)}`,
-                                        )
-                                        .join(' · ')}
-                                    </span>
-                                  ) : null}
-                                </div>
+                                      ? `вне графика: ${row.factMonths
+                                          .filter(
+                                            (month) =>
+                                              !schedule.some(
+                                                (entry) => entry.month === month.month,
+                                              ),
+                                          )
+                                          .map(
+                                            (month) =>
+                                              `${monthShort(month.month)} ${formatQuantity(
+                                                month.quantity,
+                                              )}`,
+                                          )
+                                          .join(' · ')}`
+                                      : ''
+                                  }
+                                />
                               )}
                             </td>
                             <td>
@@ -996,6 +1166,36 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                         )
                       })
                     )}
+                    {scheduleMode === 'summary'
+                      ? null
+                      : rows.map((row) => {
+                          const schedule = splitPreview(
+                            toMilli(row.quantity),
+                            position,
+                            row.deliveryDays,
+                            plan.year,
+                          )
+                          if (schedule.length === 0) return null
+                          return (
+                            <tr key={`${row.key}-schedule`} className="schedule-wide">
+                              <td colSpan={8}>
+                                <div className="sched-wide-head">
+                                  <b>{row.productName || 'Сырьё'}</b>
+                                  {row.countryName ? ` · ${row.countryName}` : ''}
+                                </div>
+                                <ScheduleView
+                                  rows={scheduleRows(schedule, row.factMonths)}
+                                  mode={scheduleMode}
+                                  wide
+                                  expanded={false}
+                                  onToggle={() => undefined}
+                                  year={plan.year}
+                                  extra=""
+                                />
+                              </td>
+                            </tr>
+                          )
+                        })}
                   </tbody>
                 )
               })}

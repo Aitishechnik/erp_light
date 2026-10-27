@@ -2821,3 +2821,168 @@ button.primary:disabled,
   background: #fff8ef;
   font-size: 0.85rem;
 }
+
+/* ── График заказа в плане закупок ─────────────────────────────────────── */
+
+.sched-switch {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.5rem;
+}
+
+.sched-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  white-space: normal;
+}
+
+.sched-line {
+  font-size: 0.82rem;
+  line-height: 1.3;
+}
+
+.sched-need {
+  color: var(--muted);
+}
+
+.sched-done {
+  color: #1c6b3a;
+  font-size: 0.82rem;
+}
+
+.sched-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.sched-quarters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  white-space: normal;
+}
+
+/* Полоса и кварталы рисуются во всю ширину под строкой сырья: в узкой колонке
+   двенадцать месяцев не читаются. */
+.sched-wide-head {
+  margin-bottom: 0.35rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.sched-wide-head b {
+  color: var(--text);
+}
+
+.sched-bars .bar-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.sched-bars .bar-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  width: 100%;
+  background: #e8efff;
+  border-radius: 3px 3px 0 0;
+  overflow: hidden;
+}
+
+.sched-bars .bar-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.sched-quarters .q-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  font-size: 0.8rem;
+}
+
+.sched-quarters .q-title {
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.sched-quarters .q-sum {
+  font-size: 1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.sched-quarters .q-order {
+  color: #b42318;
+}
+
+.sched-quarters .q-fact {
+  color: var(--muted);
+}
+
+.sched-switch .mini.active {
+  border-color: #2563eb;
+  background: #eef4ff;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.sched-bars .bar-body i {
+  display: block;
+  background: #3b82f6;
+}
+
+.purchase-table .schedule-wide > td {
+  padding: 0.4rem 0.5rem 0.6rem;
+  background: #fcfdff;
+  white-space: normal;
+}
+
+.purchase-table .sched-table {
+  width: 100%;
+  margin-top: 0.4rem;
+  font-size: 0.78rem;
+  border-collapse: collapse;
+}
+
+.purchase-table .sched-table th,
+.purchase-table .sched-table td {
+  padding: 0.2rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.purchase-table .sched-table th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.purchase-table .sched-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sched-bars .bar-col.overdue .bar-body {
+  outline: 1px solid #f0b26b;
+}
+
+.purchase-table .sched-table tr.overdue td {
+  background: #fff4f2;
+}

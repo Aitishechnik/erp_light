@@ -212,13 +212,24 @@ describe('PurchasePlanPage', () => {
     // План/факт: 10 кг из 30 — только по явной ссылке поступления на строку.
     expect(screen.getByTestId('fact-item-1')).toHaveTextContent('факт 10')
     expect(screen.getByTestId('fact-item-1')).toHaveTextContent('33,3')
-    // График: 10 кг на январь и 20 кг на февраль, заказ за 90 дней до потребности.
+    // График по умолчанию — одна строка «ближайший заказ», январь уже закрыт фактом.
     const table = screen.getByTestId('purchase-table')
-    expect(table).toHaveTextContent('янв 10')
-    expect(table).toHaveTextContent('фев 20')
-    // Помесячный факт: январь закрыт; у февраля факта нет — строка не рисуется.
-    expect(table).toHaveTextContent('факт 10 · 100 %')
-    expect(table).not.toHaveTextContent('нет поступлений')
+    expect(table).toHaveTextContent(
+      'Ближайший заказ: к 01.11.2025 — 20 кг (потребность — февраль 2026)',
+    )
+
+    // «Весь график» раскрывает таблицу месяцев с заказом и фактом.
+    await user.click(screen.getByRole('button', { name: 'Весь график' }))
+    const detail = await screen.findByTestId('schedule-table')
+    expect(detail).toHaveTextContent('январь 2026')
+    expect(detail).toHaveTextContent('Нужно, кг')
+    expect(detail).toHaveTextContent('10 · 100 %')
+
+    // Переключатель: полоса по месяцам заказа и кварталы.
+    await user.click(screen.getByRole('button', { name: 'полосой' }))
+    expect(screen.getByTestId('schedule-bars')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'кварталы' }))
+    expect(screen.getByTestId('schedule-quarters')).toHaveTextContent('I квартал 2026')
 
     await user.click(screen.getByRole('button', { name: 'Добавить сырьё FIN-1' }))
     await user.selectOptions(screen.getByLabelText('Сырьё FIN-1 2'), 'raw-2')
