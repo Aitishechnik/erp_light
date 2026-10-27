@@ -120,11 +120,61 @@ const GROUPS: Group[] = [
   },
 ]
 
+/** Адрес в строке браузера: #/month/2027/1, #/receipt/<id> и т.п. */
+type Route = { section: SectionId; params: string[] }
+
+const SECTION_TO_PATH: Record<string, string> = {
+  stock: 'stock',
+  sales: 'sales-plan',
+  annual: 'annual-plan',
+  purchase: 'purchase-plan',
+  month: 'month',
+  receipts: 'receipt',
+  nomenclature: 'nomenclature',
+  counterparties: 'counterparties',
+  countries: 'countries',
+  imports: 'imports',
+  messages: 'messages',
+  pricing: 'pricing',
+  suppliers: 'suppliers',
+  currencies: 'currencies',
+  finance: 'finance',
+  tasks: 'tasks',
+  users: 'users',
+  settings: 'settings',
+}
+
+const PATH_TO_SECTION: Record<string, SectionId> = Object.fromEntries(
+  Object.entries(SECTION_TO_PATH).map(([section, path]) => [path, section as SectionId]),
+)
+
+function parseHash(): Route {
+  const raw = window.location.hash.replace(/^#\/?/, '')
+  const [name, ...params] = raw.split('/').filter(Boolean)
+  const section = PATH_TO_SECTION[name ?? ''] ?? 'stock'
+  return { section, params }
+}
+
+function sectionHash(section: SectionId): string {
+  return `#/${SECTION_TO_PATH[section] ?? section}`
+}
+
 export function App() {
   const [user, setUser] = useState<SessionUser | null>(null)
   const [loading, setLoading] = useState(true)
-  const [active, setActive] = useState<SectionId>('stock')
+  const [active, setActive] = useState<SectionId>(parseHash().section)
+  const [route, setRoute] = useState<Route>(parseHash)
   const [openGroup, setOpenGroup] = useState<string | null>('reports')
+
+  useEffect(() => {
+    const onHash = () => {
+      const next = parseHash()
+      setRoute(next)
+      setActive(next.section)
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
 
   useEffect(() => {
     fetchMe()
@@ -164,6 +214,8 @@ export function App() {
     return <p className="hint">Для вашей роли пока нет доступных разделов.</p>
   }
 
+  const focus = route.section === current.id ? route.params : []
+
   const currentGroup = groups.find((group) =>
     group.sections.some((section) => section.id === current.id),
   )
@@ -197,7 +249,11 @@ export function App() {
                           type="button"
                           className={section.id === current.id ? 'nav-item active' : 'nav-item'}
                           aria-current={section.id === current.id ? 'page' : undefined}
-                          onClick={() => setActive(section.id)}
+                          onClick={() => {
+                            setActive(section.id)
+                            window.location.hash = sectionHash(section.id)
+                            setRoute({ section: section.id, params: [] })
+                          }}
                         >
                           {section.title}
                         </button>
@@ -226,16 +282,30 @@ export function App() {
 
       <main className={current.id === 'receipts' ? 'content content-receipts' : 'content'}>
         {current.id === 'stock' && current.ready ? <StockPage /> : null}
-        {current.id === 'sales' && current.ready ? <SalesPlansPage user={user} /> : null}
-        {current.id === 'annual' && current.ready ? <AnnualSalesPlanPage user={user} /> : null}
-        {current.id === 'purchase' && current.ready ? <PurchasePlanPage user={user} /> : null}
-        {current.id === 'nomenclature' && current.ready ? <NomenclaturePage /> : null}
-        {current.id === 'counterparties' && current.ready ? (
-          <CounterpartiesPage user={user} />
+        {current.id === 'sales' && current.ready ? (
+          <SalesPlansPage user={user} focus={focus} />
         ) : null}
-        {current.id === 'countries' && current.ready ? <CountriesPage user={user} /> : null}
-        {current.id === 'month' && current.ready ? <MonthResultsPage user={user} /> : null}
-        {current.id === 'receipts' && current.ready ? <ReceiptsPage user={user} /> : null}
+        {current.id === 'annual' && current.ready ? (
+          <AnnualSalesPlanPage user={user} focus={focus} />
+        ) : null}
+        {current.id === 'purchase' && current.ready ? (
+          <PurchasePlanPage user={user} focus={focus} />
+        ) : null}
+        {current.id === 'nomenclature' && current.ready ? (
+          <NomenclaturePage focusId={focus[0]} />
+        ) : null}
+        {current.id === 'counterparties' && current.ready ? (
+          <CounterpartiesPage user={user} focusId={focus[0]} />
+        ) : null}
+        {current.id === 'countries' && current.ready ? (
+          <CountriesPage user={user} focusId={focus[0]} />
+        ) : null}
+        {current.id === 'month' && current.ready ? (
+          <MonthResultsPage user={user} focus={focus} />
+        ) : null}
+        {current.id === 'receipts' && current.ready ? (
+          <ReceiptsPage user={user} focus={focus} />
+        ) : null}
         {current.id === 'imports' && current.ready ? <ImportsPage user={user} /> : null}
         {current.id === 'messages' && current.ready ? <MessagesPage user={user} /> : null}
         {!current.ready ? (

@@ -2249,6 +2249,14 @@ button.primary:disabled,
   border-color: #f3b4ae;
 }
 
+.focus-row td {
+  background: #fff8ef;
+}
+
+.focus-row td:first-child {
+  box-shadow: inset 3px 0 0 #f0b26b;
+}
+
 .need-row.flash td {
   animation: need-flash 2s ease-out;
 }
@@ -2774,4 +2782,35 @@ button.primary:disabled,
 
 .audit-table .col-level {
   width: 6rem;
+}
+
+/* ── Переходы из журнала и подсветка объекта ───────────────────────────── */
+
+.audit-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: #c9ced6;
+  text-underline-offset: 2px;
+}
+
+.audit-link:hover {
+  text-decoration-color: currentColor;
+}
+
+.focus-card {
+  border-color: #f0b26b;
+  box-shadow: 0 0 0 2px #fdf0dd;
+}
+
+.cleanup-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #f0b26b;
+  border-radius: 0.6rem;
+  background: #fff8ef;
+  font-size: 0.85rem;
 }

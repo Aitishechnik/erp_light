@@ -8,6 +8,7 @@ import {
   deleteBatch,
   type ExpenseCurrency,
   errorMessage,
+  fetchBatch,
   fetchBatches,
   fetchCounterparties,
   fetchProducts,
@@ -584,12 +585,13 @@ function snapshot(source: Draft): string {
   })
 }
 
-export function ReceiptsPage({ user }: { user?: SessionUser }) {
+export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: string[] }) {
   const today = iso(new Date())
   const [month, setMonth] = useState(today.slice(0, 7))
   const [batches, setBatches] = useState<Batch[]>([])
   const [day, setDay] = useState(today)
   const [draft, setDraft] = useState<Draft | null>(null)
+  const [focusId, setFocusId] = useState<string | null>(null)
   /** Слепок сохранённой карточки: по нему видно, есть ли несохранённые правки. */
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null)
   /** Пометка «сохранено»: карточка после сохранения остаётся открытой. */
@@ -707,7 +709,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
     setDay(`${next}-01`)
   }
 
-  const startEdit = (batch: Batch) => {
+  const startEdit = useCallback((batch: Batch) => {
     setOpenSections(['items'])
     setRateHint(null)
     setError(null)
@@ -718,7 +720,7 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
     setDraft(fresh)
     setSavedSnapshot(snapshot(fresh))
     setSavedHint(null)
-  }
+  }, [])
 
   /**
    * Позиции из файла «Партия» (1С): в партию попадают товар и количество.
@@ -1038,6 +1040,38 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
   }
   const isOpen = (section: SectionId) => openSections.includes(section)
 
+  // Переход из журнала: открыть карточку по адресу #/receipt/<id>.
+  useEffect(() => {
+    const id = focus?.[0]
+    if (!id || draft?.id === id) return
+    const open = (batch: Batch) => {
+      setMonth(batch.batch_date.slice(0, 7))
+      setDay(batch.batch_date)
+      setFocusId(batch.id)
+      startEdit(batch)
+      window.setTimeout(() => {
+        document.querySelector('[data-testid="receipt-form"]')?.scrollIntoView({ block: 'start' })
+      }, 100)
+    }
+    const local = batches.find((row) => row.id === id)
+    if (local) {
+      open(local)
+      return
+    }
+    // Поступление может быть за другой месяц: подтягиваем его по id.
+    let alive = true
+    fetchBatch(id)
+      .then((batch) => {
+        if (alive) open(batch)
+      })
+      .catch(() => {
+        // Нет такого поступления — просто остаёмся на календаре.
+      })
+    return () => {
+      alive = false
+    }
+  }, [focus, batches, draft?.id, startEdit])
+
   /** Открыть партию из списка дня. */
   const openBatch = (batch: Batch) => {
     if (draft?.id === batch.id) return
@@ -1228,7 +1262,15 @@ export function ReceiptsPage({ user }: { user?: SessionUser }) {
       <div className="workplace">
         {rail}
         <div className="work-right">
-          <form className="receipt-form receipt-card" onSubmit={submit} data-testid="receipt-form">
+          <form
+            className={
+              focusId && draft?.id === focusId
+                ? 'receipt-form receipt-card focus-card'
+                : 'receipt-form receipt-card'
+            }
+            onSubmit={submit}
+            data-testid="receipt-form"
+          >
             <fieldset className="receipt-edit" disabled={!mayEdit}>
               <header className="doc-header">
                 <div className="doc-header-main">

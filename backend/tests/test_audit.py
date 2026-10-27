@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, date, datetime
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.models.audit import AuditEvent
 from app.models.auth import User
+from app.services import audit_service
 from tests.test_month_results import month, sales_xlsx, upload_sales
 
 
@@ -161,3 +163,85 @@ def test_failed_login_is_logged(client: TestClient, login, db_session: Session) 
     login("executive")
     messages = client.get("/api/v1/messages").json()["rows"]
     assert any(row["action"] == "auth.login_failed" for row in messages)
+
+
+def test_event_links_to_object(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    _approve_plan(client, login, catalog, db_session)
+    login("executive")
+    rows = client.get("/api/v1/messages").json()["rows"]
+    plan_link = next(row for row in rows if row["action"] == "sales_plan.approved")["link"]
+    assert plan_link.startswith("#/sales-plan/2026/")
+    assert plan_link.endswith(rows[0]["entity_id"]) or plan_link.endswith(
+        next(row for row in rows if row["action"] == "sales_plan.approved")["entity_id"]
+    )
+
+
+def test_cleanup_offered_from_march_every_month(db_session: Session, users: None) -> None:
+    executive = _user(db_session, "executive")
+    assert audit_service.cleanup_year_for(date(2026, 2, 28)) is None
+    assert audit_service.cleanup_year_for(date(2026, 3, 1)) == 2025
+
+    # Запись прошлого года: её и предлагаем почистить.
+    old = AuditEvent(
+        action="country.updated",
+        level="critical",
+        summary="старая запись",
+        is_message=False,
+        audience=[],
+        created_at=datetime(2025, 6, 1, tzinfo=UTC),
+    )
+    db_session.add(old)
+    db_session.commit()
+
+    audit_service.maybe_offer_cleanup(db_session, executive, today=date(2026, 3, 1))
+    first = (
+        db_session.execute(select(AuditEvent).where(AuditEvent.action == "audit.cleanup_offered"))
+        .scalars()
+        .all()
+    )
+    assert len(first) == 1
+    assert "2025" in first[0].summary
+
+    # В том же месяце второй раз не предлагаем, в следующем — снова.
+    audit_service.maybe_offer_cleanup(db_session, executive, today=date(2026, 3, 20))
+    assert (
+        len(
+            db_session.execute(
+                select(AuditEvent).where(AuditEvent.action == "audit.cleanup_offered")
+            )
+            .scalars()
+            .all()
+        )
+        == 1
+    )
+
+
+def test_cleanup_deletes_previous_year(db_session: Session, users: None) -> None:
+    executive = _user(db_session, "executive")
+    old = AuditEvent(
+        action="country.updated",
+        level="critical",
+        summary="старая запись",
+        is_message=False,
+        audience=[],
+        created_at=datetime(2025, 6, 1, tzinfo=UTC),
+    )
+    fresh = AuditEvent(
+        action="country.updated",
+        level="critical",
+        summary="свежая запись",
+        is_message=False,
+        audience=[],
+        created_at=datetime(2026, 1, 10, tzinfo=UTC),
+    )
+    db_session.add_all([old, fresh])
+    db_session.commit()
+
+    deleted = audit_service.cleanup_journal(db_session, executive, 2025)
+    assert deleted == 1
+    left = db_session.execute(select(AuditEvent.summary)).scalars().all()
+    assert "старая запись" not in left
+    assert "свежая запись" in left
+    assert "Журнал за 2025 год очищен" in " ".join(left)

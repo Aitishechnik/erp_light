@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import type { AuditEvent } from './api'
 import { mockApi } from './apiMock'
@@ -29,6 +29,7 @@ function event(overrides: Partial<AuditEvent> = {}): AuditEvent {
     year: 2026,
     month: null,
     read: false,
+    link: '#/sales-plan/2026/plan-1',
     ...overrides,
   }
 }
@@ -46,6 +47,10 @@ const SESSION: Record<string, { body?: unknown; status?: number }> = {
 }
 
 describe('Служебные сообщения', () => {
+  beforeEach(() => {
+    window.location.hash = ''
+  })
+
   afterEach(() => {
     vi.unstubAllGlobals()
   })

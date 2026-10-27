@@ -25,6 +25,7 @@ class AuditEventOut(BaseModel):
     year: int | None = None
     month: int | None = None
     read: bool = Field(default=False, description="Прочитано текущим пользователем")
+    link: str | None = Field(default=None, description="Куда ведёт событие: адрес объекта")
 
 
 class MessagesOut(BaseModel):
@@ -39,6 +40,25 @@ class UnreadOut(BaseModel):
     """Только счётчик непрочитанных."""
 
     unread: int
+
+
+class CleanupSuggestionOut(BaseModel):
+    """Предложение очистки журнала за прошлый год."""
+
+    year: int
+    events: int
+
+
+class CleanupIn(BaseModel):
+    """За какой календарный год удалить записи журнала."""
+
+    year: int
+
+
+class CleanupOut(BaseModel):
+    """Сколько записей удалено."""
+
+    deleted: int
 
 
 class MarkReadIn(BaseModel):

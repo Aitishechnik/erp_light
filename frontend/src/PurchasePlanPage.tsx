@@ -225,9 +225,9 @@ function HistoryBlock({ events }: { events: PurchasePlanSourceEvent[] }) {
   )
 }
 
-export function PurchasePlanPage({ user }: { user: SessionUser }) {
+export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: string[] }) {
   const thisYear = new Date().getFullYear()
-  const [year, setYear] = useState(thisYear)
+  const [year, setYear] = useState(focus?.[0] ? Number(focus[0]) : thisYear)
   const [plans, setPlans] = useState<PurchasePlan[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [suppliers, setSuppliers] = useState<Counterparty[]>([])

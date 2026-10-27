@@ -9,10 +9,35 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query
 
 from app.api.deps import CurrentUser, DbSession
-from app.schemas.audit import AuditEventOut, MarkReadIn, MessagesOut, UnreadOut
+from app.schemas.audit import (
+    AuditEventOut,
+    CleanupIn,
+    CleanupOut,
+    CleanupSuggestionOut,
+    MarkReadIn,
+    MessagesOut,
+    UnreadOut,
+)
 from app.services import audit_service
 
 router = APIRouter(tags=["audit"])
+
+
+@router.get("/audit/cleanup", response_model=CleanupSuggestionOut | None)
+def cleanup_suggestion(user: CurrentUser, db: DbSession) -> CleanupSuggestionOut | None:
+    """Что можно почистить: прошлый год, начиная с марта."""
+    suggestion = audit_service.cleanup_suggestion(db, user)
+    return CleanupSuggestionOut(**suggestion) if suggestion else None
+
+
+@router.post("/audit/cleanup", response_model=CleanupOut)
+def cleanup(payload: CleanupIn, user: CurrentUser, db: DbSession) -> CleanupOut:
+    """Удалить записи журнала за календарный год: только исполнительный директор."""
+    try:
+        deleted = audit_service.cleanup_journal(db, user, payload.year)
+    except audit_service.AuditError as exc:
+        raise HTTPException(exc.status_code, exc.message) from exc
+    return CleanupOut(deleted=deleted)
 
 
 @router.get("/messages", response_model=MessagesOut)
@@ -24,12 +49,14 @@ def list_messages(
     before: Annotated[datetime | None, Query(description="Курсор: старше этой даты")] = None,
 ) -> MessagesOut:
     """Служебные сообщения текущего пользователя, свежие сверху."""
+    audit_service.maybe_offer_cleanup(db, user)
     return audit_service.messages(db, user, unread_only=unread, limit=limit, before=before)
 
 
 @router.get("/messages/count", response_model=UnreadOut)
 def unread_messages(user: CurrentUser, db: DbSession) -> UnreadOut:
     """Сколько сообщений не прочитано — для счётчика на колокольчике."""
+    audit_service.maybe_offer_cleanup(db, user)
     return UnreadOut(unread=audit_service.unread_count(db, user))
 
 

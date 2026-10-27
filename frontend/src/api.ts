@@ -1152,6 +1152,11 @@ export function createTransferDrafts(year: number, month: number): Promise<Trans
   })
 }
 
+/** Одно поступление по id: нужно для перехода из журнала. */
+export function fetchBatch(id: string): Promise<Batch> {
+  return request<Batch>(`/api/v1/batches/${id}`)
+}
+
 /** Служебное сообщение или строка журнала действий. */
 export type AuditEvent = {
   id: string
@@ -1168,6 +1173,7 @@ export type AuditEvent = {
   year: number | null
   month: number | null
   read: boolean
+  link: string | null
 }
 
 export type Messages = { rows: AuditEvent[]; unread: number; total: number }
@@ -1197,6 +1203,19 @@ export function markMessagesRead(ids: string[]): Promise<{ unread: number }> {
 /** Отметить все сообщения прочитанными. */
 export function markAllMessagesRead(): Promise<{ unread: number }> {
   return request<{ unread: number }>('/api/v1/messages/read-all', { method: 'POST' })
+}
+
+/** Что можно почистить: прошлый год, начиная с марта. */
+export function fetchCleanupSuggestion(): Promise<{ year: number; events: number } | null> {
+  return request<{ year: number; events: number } | null>('/api/v1/audit/cleanup')
+}
+
+/** Удалить записи журнала за календарный год (только исполнительный директор). */
+export function cleanupJournal(year: number): Promise<{ deleted: number }> {
+  return request<{ deleted: number }>('/api/v1/audit/cleanup', {
+    method: 'POST',
+    body: JSON.stringify({ year }),
+  })
 }
 
 /** Журнал действий: директор видит всё, остальные — свои действия. */

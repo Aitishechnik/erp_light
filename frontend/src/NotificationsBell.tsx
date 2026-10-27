@@ -158,7 +158,15 @@ export function NotificationsBell({ onOpenJournal }: Props) {
                   <li key={row.id} className={row.read ? 'bell-row read' : 'bell-row'}>
                     <span className="bell-time">{formatTime(row.created_at)}</span>
                     <span className="bell-text">
-                      <span className="bell-summary">{row.summary}</span>
+                      <span className="bell-summary">
+                        {row.link ? (
+                          <a className="audit-link" href={row.link} onClick={() => setOpen(false)}>
+                            {row.summary}
+                          </a>
+                        ) : (
+                          row.summary
+                        )}
+                      </span>
                       <span className="bell-meta">
                         {row.actor_name ?? 'Система'}
                         {row.actor_role_title ? ` · ${row.actor_role_title}` : ''}

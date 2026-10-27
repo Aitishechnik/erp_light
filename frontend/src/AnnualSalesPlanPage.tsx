@@ -11,9 +11,9 @@ import {
   type SessionUser,
 } from './api'
 
-export function AnnualSalesPlanPage({ user }: { user: SessionUser }) {
+export function AnnualSalesPlanPage({ user, focus }: { user: SessionUser; focus?: string[] }) {
   const thisYear = new Date().getFullYear()
-  const [year, setYear] = useState(thisYear)
+  const [year, setYear] = useState(focus?.[0] ? Number(focus[0]) : thisYear)
   const [annual, setAnnual] = useState<AnnualSalesPlan | null>(null)
   const [managerFilter, setManagerFilter] = useState('')
   const [reason, setReason] = useState('')

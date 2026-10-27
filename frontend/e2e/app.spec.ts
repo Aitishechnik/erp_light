@@ -1355,3 +1355,54 @@ test('колокольчик приносит директору служебн�
   await expect(page.getByTestId('audit-table')).toContainText('План продаж утверждён')
   await expect(page.getByTestId('messages-unread')).toContainText('Непрочитанных: 1')
 })
+
+test('ссылка из журнала открывает объект и подсвечивает строку', async ({ page }) => {
+  await mockSession(page, EXECUTIVE)
+  await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/audit/cleanup', (route) => route.fulfill({ json: null }))
+  await page.route('**/api/v1/messages**', (route) =>
+    route.fulfill({
+      json: {
+        rows: [
+          {
+            ...AUDIT_EVENT,
+            action: 'product.updated',
+            action_title: 'Изменена номенклатура',
+            entity_kind: 'product',
+            entity_id: 'p-1',
+            entity_label: 'SKU-1 · Товар 1',
+            summary: 'Изменена номенклатура SKU-1 · Товар 1',
+            link: '#/nomenclature/p-1',
+          },
+        ],
+        unread: 0,
+        total: 1,
+      },
+    }),
+  )
+  await page.route('**/api/v1/messages/count', (route) => route.fulfill({ json: { unread: 0 } }))
+  await page.route('**/api/v1/audit**', (route) =>
+    route.fulfill({
+      json: [
+        {
+          ...AUDIT_EVENT,
+          action: 'product.updated',
+          entity_kind: 'product',
+          entity_id: 'p-1',
+          summary: 'Изменена номенклатура SKU-1 · Товар 1',
+          link: '#/nomenclature/p-1',
+        },
+      ],
+    }),
+  )
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Администрирование', exact: true }).click()
+  await page.getByRole('button', { name: 'Служебные сообщения', exact: true }).click()
+
+  await page.getByRole('link', { name: /Изменена номенклатура SKU-1/ }).click()
+  await expect(page).toHaveURL(/#\/nomenclature\/p-1/)
+  await expect(page.getByRole('heading', { level: 1, name: 'Номенклатура' })).toBeVisible()
+  await expect(page.locator('tr.focus-row')).toContainText('SKU-1')
+})

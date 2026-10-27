@@ -13,7 +13,7 @@ import {
 const EMPTY_FORM = { code: '', name: '', kind: 'material', unit: 'шт' }
 const VISIBLE_LIMIT = 100
 
-export function NomenclaturePage() {
+export function NomenclaturePage({ focusId }: { focusId?: string }) {
   const [rows, setRows] = useState<Product[]>([])
   const [form, setForm] = useState(EMPTY_FORM)
   const [kindFilter, setKindFilter] = useState('')
@@ -181,7 +181,7 @@ export function NomenclaturePage() {
             </tr>
           ) : (
             visible.map((product) => (
-              <tr key={product.id}>
+              <tr key={product.id} className={product.id === focusId ? 'focus-row' : undefined}>
                 <td>{product.code}</td>
                 <td>{product.name}</td>
                 <td>{PRODUCT_KIND_LABELS[product.kind] ?? product.kind}</td>

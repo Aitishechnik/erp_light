@@ -32,7 +32,7 @@ const ROLE_FILTERS: { value: '' | CounterpartyRole; title: string }[] = [
 /** Кто может менять справочник: те же роли, что и на бэкенде. */
 const WRITE_ROLES: string[] = ['sales_manager', 'commercial_director', 'purchase_director']
 
-export function CounterpartiesPage({ user }: { user?: SessionUser }) {
+export function CounterpartiesPage({ user, focusId }: { user?: SessionUser; focusId?: string }) {
   const mayEdit = !user || WRITE_ROLES.includes(user.role)
   const [rows, setRows] = useState<Counterparty[]>([])
   const [managers, setManagers] = useState<SessionUser[]>([])
@@ -240,7 +240,7 @@ export function CounterpartiesPage({ user }: { user?: SessionUser }) {
             </tr>
           ) : (
             visible.map((row) => (
-              <tr key={row.id}>
+              <tr key={row.id} className={row.id === focusId ? 'focus-row' : undefined}>
                 <td>{row.name}</td>
                 <td>
                   {row.is_customer && mayEdit ? (

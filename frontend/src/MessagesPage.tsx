@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { AuditEvent, SessionUser } from './api'
-import { errorMessage, fetchJournal, fetchMessages, markAllMessagesRead } from './api'
+import {
+  cleanupJournal,
+  errorMessage,
+  fetchCleanupSuggestion,
+  fetchJournal,
+  fetchMessages,
+  markAllMessagesRead,
+} from './api'
 
 type Props = { user: SessionUser }
 
@@ -28,15 +35,21 @@ export function MessagesPage({ user }: Props) {
   const [onlyMessages, setOnlyMessages] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [cleanup, setCleanup] = useState<{ year: number; events: number } | null>(null)
 
   useEffect(() => {
     let alive = true
-    Promise.all([fetchJournal({ limit: 100 }), fetchMessages({ limit: 100 })])
-      .then(([journal, inbox]) => {
+    Promise.all([
+      fetchJournal({ limit: 100 }),
+      fetchMessages({ limit: 100 }),
+      fetchCleanupSuggestion().catch(() => null),
+    ])
+      .then(([journal, inbox, suggestion]) => {
         if (!alive) return
         setRows(journal)
         setMessages(inbox.rows)
         setUnread(inbox.unread)
+        setCleanup(suggestion)
       })
       .catch((err) => {
         if (alive) setError(errorMessage(err))
@@ -67,6 +80,24 @@ export function MessagesPage({ user }: Props) {
       setUnread(data.unread)
       setMessages((current) => current.map((row) => ({ ...row, read: true })))
       setRows((current) => current.map((row) => ({ ...row, read: true })))
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const cleanUp = async () => {
+    if (!cleanup) return
+    if (!window.confirm(`Удалить записи журнала за ${cleanup.year} год? Действие необратимо.`)) {
+      return
+    }
+    setBusy(true)
+    try {
+      const done = await cleanupJournal(cleanup.year)
+      setCleanup(null)
+      setRows(await fetchJournal({ limit: 100 }))
+      setError(`Журнал за ${cleanup.year} год очищен: удалено записей ${done.deleted}`)
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -112,6 +143,17 @@ export function MessagesPage({ user }: Props) {
         </button>
       </div>
       {error ? <p className="hint error">{error}</p> : null}
+      {cleanup ? (
+        <div className="cleanup-box" data-testid="cleanup-box">
+          <span>
+            За {cleanup.year} год в журнале {cleanup.events} записей. Очистка удаляет их
+            безвозвратно — оставить только текущий год?
+          </span>
+          <button type="button" className="mini" disabled={busy} onClick={() => void cleanUp()}>
+            Удалить журнал за {cleanup.year} год
+          </button>
+        </div>
+      ) : null}
       {visible.length === 0 ? (
         <p className="hint" data-testid="messages-empty">
           Пока ничего не записано.
@@ -141,7 +183,15 @@ export function MessagesPage({ user }: Props) {
                   </td>
                   <td>{row.action_title}</td>
                   <td>{row.entity_label ?? '—'}</td>
-                  <td className="wrap">{row.summary}</td>
+                  <td className="wrap">
+                    {row.link ? (
+                      <a className="audit-link" href={row.link}>
+                        {row.summary}
+                      </a>
+                    ) : (
+                      row.summary
+                    )}
+                  </td>
                   <td>
                     <span
                       className={`badge ${row.level === 'critical' ? 'badge-critical' : 'badge-info'}`}

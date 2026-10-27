@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import type { SessionUser, StockRow } from './api'
 import { mockApi } from './apiMock'
@@ -49,6 +49,10 @@ const STOCK: StockRow[] = [
     snapshot_date: null,
   },
 ]
+
+beforeEach(() => {
+  window.location.hash = ''
+})
 
 afterEach(() => {
   vi.unstubAllGlobals()

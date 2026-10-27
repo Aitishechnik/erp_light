@@ -153,10 +153,10 @@ type State =
   | { status: 'error'; message: string }
   | { status: 'ready'; result: MonthResult }
 
-export function MonthResultsPage({ user }: { user: SessionUser }) {
+export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: string[] }) {
   const today = new Date()
-  const [year, setYear] = useState(today.getFullYear())
-  const [month, setMonth] = useState(today.getMonth() + 1)
+  const [year, setYear] = useState(focus?.[0] ? Number(focus[0]) : today.getFullYear())
+  const [month, setMonth] = useState(focus?.[1] ? Number(focus[1]) : today.getMonth() + 1)
   const [state, setState] = useState<State>({ status: 'loading' })
   const [onlyDeviation, setOnlyDeviation] = useState(false)
   const [search, setSearch] = useState('')

@@ -15,7 +15,7 @@ function parseDays(raw: string): number | null {
   return Number.isInteger(value) && value >= 1 && value <= 365 ? value : null
 }
 
-export function CountriesPage({ user }: { user: SessionUser }) {
+export function CountriesPage({ user, focusId }: { user: SessionUser; focusId?: string }) {
   const [rows, setRows] = useState<Country[]>([])
   const [search, setSearch] = useState('')
   const [showInactive, setShowInactive] = useState(false)
@@ -198,7 +198,11 @@ export function CountriesPage({ user }: { user: SessionUser }) {
             filtered.map((row) => {
               const isEditing = editing === row.id
               return (
-                <tr key={row.id} data-testid={`country-row-${row.id}`}>
+                <tr
+                  key={row.id}
+                  data-testid={`country-row-${row.id}`}
+                  className={row.id === focusId ? 'focus-row' : undefined}
+                >
                   <td>
                     {isEditing ? (
                       <input

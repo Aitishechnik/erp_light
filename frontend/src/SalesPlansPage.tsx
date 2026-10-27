@@ -191,11 +191,11 @@ function countCorrectionChanges(plan: SalesPlan, drafts: Drafts): number {
   }).length
 }
 
-export function SalesPlansPage({ user }: { user: SessionUser }) {
+export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: string[] }) {
   const thisYear = new Date().getFullYear()
-  const [year, setYear] = useState(thisYear)
+  const [year, setYear] = useState(focus?.[0] ? Number(focus[0]) : thisYear)
   const [plans, setPlans] = useState<SalesPlan[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(focus?.[1] ?? null)
   const [drafts, setDrafts] = useState<Drafts>({})
   const [clientId, setClientId] = useState<string>('')
   const [products, setProducts] = useState<Product[]>([])

@@ -14,10 +14,10 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.models.audit import AuditEvent, AuditEventRead
@@ -27,6 +27,10 @@ from app.schemas.audit import AuditEventOut, MessagesOut
 # Сколько строк отдаём по умолчанию и максимум за раз.
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
+
+
+# Очистку журнала предлагаем с марта: до этого прошлый год ещё «свежий».
+CLEANUP_FROM_MONTH = 3
 
 
 class AuditError(Exception):
@@ -79,6 +83,8 @@ CATALOG: dict[str, EventSpec] = {
     "counterparty.updated": EventSpec("Изменён контрагент", "critical", "counterparty"),
     "country.updated": EventSpec("Изменена страна и срок доставки", "critical", "country"),
     "auth.login_failed": EventSpec("Неудачная попытка входа", "critical", "user"),
+    "audit.cleanup_offered": EventSpec("Предложена очистка журнала", "critical", "audit"),
+    "audit.cleanup_done": EventSpec("Журнал очищен", "critical", "audit"),
 }
 
 # Кому на этом этапе уходят служебные сообщения (позже матрица расширится).
@@ -141,7 +147,32 @@ def _to_out(event: AuditEvent, read: bool) -> AuditEventOut:
         year=event.year,
         month=event.month,
         read=read,
+        link=_link(event),
     )
+
+
+def _link(event: AuditEvent) -> str | None:
+    """Адрес объекта события: по нему журнал открывает нужное место."""
+    kind = event.entity_kind
+    if event.action.startswith("audit."):
+        return "#/messages"
+    if kind == "month" and event.year and event.month:
+        return f"#/month/{event.year}/{event.month}"
+    if event.action.startswith("annual_plan") and event.year:
+        return f"#/annual-plan/{event.year}"
+    if kind == "sales_plan" and event.year and event.entity_id:
+        return f"#/sales-plan/{event.year}/{event.entity_id}"
+    if kind == "purchase_plan" and event.year:
+        return f"#/purchase-plan/{event.year}"
+    if kind == "batch" and event.entity_id:
+        return f"#/receipt/{event.entity_id}"
+    if kind == "product" and event.entity_id:
+        return f"#/nomenclature/{event.entity_id}"
+    if kind == "counterparty" and event.entity_id:
+        return f"#/counterparties/{event.entity_id}"
+    if kind == "country" and event.entity_id:
+        return f"#/countries/{event.entity_id}"
+    return None
 
 
 def _limit(limit: int | None) -> int:
@@ -177,6 +208,107 @@ def messages(
         unread=unread_count(db, user),
         total=message_total(db, user),
     )
+
+
+def _year_bounds(year: int) -> tuple[datetime, datetime]:
+    """Начало и конец календарного года в UTC."""
+    return (
+        datetime(year, 1, 1, tzinfo=UTC),
+        datetime(year + 1, 1, 1, tzinfo=UTC),
+    )
+
+
+def cleanup_year_for(today: date) -> int | None:
+    """За какой год предлагаем чистку: прошлый, начиная с марта."""
+    if today.month < CLEANUP_FROM_MONTH:
+        return None
+    return today.year - 1
+
+
+def cleanup_suggestion(
+    db: Session, user: User, *, today: date | None = None
+) -> dict[str, int] | None:
+    """Сколько записей прошлого года есть и за какой это год."""
+    target = cleanup_year_for(today or date.today())
+    if target is None:
+        return None
+    start, end = _year_bounds(target)
+    count = int(
+        db.execute(
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(AuditEvent.created_at >= start, AuditEvent.created_at < end)
+        ).scalar_one()
+    )
+    if count == 0:
+        return None
+    return {"year": target, "events": count}
+
+
+def maybe_offer_cleanup(db: Session, user: User, *, today: date | None = None) -> None:
+    """Раз в месяц, начиная с марта, предлагать директору очистить журнал за прошлый год."""
+    if user.role != ROLE_EXECUTIVE_DIRECTOR:
+        return
+    current = today or date.today()
+    suggestion = cleanup_suggestion(db, user, today=current)
+    if suggestion is None:
+        return
+    month_start = datetime(current.year, current.month, 1, tzinfo=UTC)
+    offered = db.execute(
+        select(func.count())
+        .select_from(AuditEvent)
+        .where(
+            AuditEvent.action == "audit.cleanup_offered",
+            AuditEvent.created_at >= month_start,
+        )
+    ).scalar_one()
+    if offered:
+        return
+    record(
+        db,
+        actor=None,
+        action="audit.cleanup_offered",
+        summary=(
+            f"Журнал за {suggestion['year']} год: записей {suggestion['events']}. "
+            "Можно очистить — старое хранится только для истории"
+        ),
+        entity_label=str(suggestion["year"]),
+        payload=suggestion,
+        year=suggestion["year"],
+    )
+    db.commit()
+
+
+def cleanup_journal(db: Session, user: User, year: int) -> int:
+    """Удалить записи журнала за календарный год. Только исполнительный директор."""
+    if user.role != ROLE_EXECUTIVE_DIRECTOR:
+        raise AuditError("Очистить журнал может только исполнительный директор")
+    if year >= date.today().year:
+        raise AuditError("Чистить можно только прошлые годы", status_code=400)
+    start, end = _year_bounds(year)
+    deleted = int(
+        db.execute(
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(AuditEvent.created_at >= start, AuditEvent.created_at < end)
+        ).scalar_one()
+    )
+    if deleted == 0:
+        raise AuditError(f"За {year} год записей нет", status_code=409)
+    db.execute(
+        delete(AuditEvent).where(AuditEvent.created_at >= start, AuditEvent.created_at < end)
+    )
+    record(
+        db,
+        actor=user,
+        action="audit.cleanup_done",
+        summary=f"Журнал за {year} год очищен: удалено записей {deleted}",
+        entity_label=str(year),
+        payload={"year": year, "deleted": deleted},
+        year=year,
+    )
+    db.commit()
+    return deleted
 
 
 def message_total(db: Session, user: User) -> int:
