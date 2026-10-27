@@ -2867,6 +2867,12 @@ button.primary:disabled,
   font-size: 0.82rem;
 }
 
+.sched-bars-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .sched-bars {
   display: flex;
   align-items: flex-end;
@@ -2907,7 +2913,7 @@ button.primary:disabled,
   flex-direction: column;
   justify-content: flex-end;
   width: 100%;
-  background: #e8efff;
+  background: #c7d7f7;
   border-radius: 3px 3px 0 0;
   overflow: hidden;
 }
@@ -2924,8 +2930,8 @@ button.primary:disabled,
   color: #98a2b3;
 }
 
-.sched-bars .sched-legend {
-  margin-top: 0.35rem;
+.sched-bars .sched-legend,
+.sched-bars-wrap .sched-legend {
   color: var(--muted);
   font-size: 0.72rem;
 }
@@ -2965,6 +2971,11 @@ button.primary:disabled,
   color: #b54708;
 }
 
+.sched-quarters .q-note {
+  color: #b54708;
+  font-size: 0.7rem;
+}
+
 .sched-quarters .q-fact {
   color: var(--muted);
 }
@@ -2992,6 +3003,25 @@ button.primary:disabled,
   margin-top: 0.4rem;
   font-size: 0.78rem;
   border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.purchase-table .sched-table th:nth-child(1) {
+  width: 32%;
+}
+
+.purchase-table .sched-table th:nth-child(2) {
+  width: 18%;
+  text-align: right;
+}
+
+.purchase-table .sched-table th:nth-child(3) {
+  width: 24%;
+}
+
+.purchase-table .sched-table th:nth-child(4) {
+  width: 26%;
+  text-align: right;
 }
 
 .purchase-table .sched-table th,
