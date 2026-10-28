@@ -1,21 +1,26 @@
 """Загрузка выгрузок 1С (.xlsx).
 
-Восемь типов данных, у каждого свой файл и свой набор колонок:
+Типы данных, у каждого свой файл и свой набор колонок:
 
 | Тип | Файл | Колонки |
 |---|---|---|
 | Локальные поставщики | одна колонка | Наименование |
 | Импортные поставщики | одна колонка | Наименование |
 | Покупатели | одна колонка | Наименование |
-| Материалы | три колонки | Код, Наименование, Базовая единица измерения |
-| Сырьё | три колонки | Код, Наименование, Базовая единица измерения |
-| Готовая продукция | три колонки | Код, Наименование, Базовая единица измерения |
+| Номенклатура | четыре колонки | Код, Полное наименование, Единица, Вид номенклатуры |
 | Импортные поступления | четыре колонки | Номер, Дата, Контрагент, Комментарий |
 | Позиции партии | две колонки | Номенклатура, Количество |
 
 Дубли не создаются: номенклатура опознаётся по коду 1С, контрагенты — по
 наименованию без учёта регистра и лишних пробелов, поступления — по номеру.
-Повторная загрузка того же файла только обновляет найденные записи.
+Повторная загрузка того же файла не создаёт дублей: найденные записи
+сравниваются с файлом, и изменившиеся поля (наименование, единица, вид)
+перезаписываются. В журнал попадает, сколько позиций изменилось и чем.
+
+Номенклатура — один файл на сырьё, материалы и готовую продукцию: вид берётся
+из колонки «Вид номенклатуры» (сырьё, готовая продукция, тарные материалы —
+это материалы), а не из имени файла. Строки без «Полного наименования» тоже
+загружаются — имя берётся из колонки «Наименование».
 
 Два последних типа — не справочники: «Импортные поступления» создают черновики
 партий (`receipt_import_service`), «Позиции партии» наполняют уже заведённый
@@ -49,9 +54,7 @@ from app.services.directory_service import DIRECTORY_WRITE_ROLES
 KIND_LOCAL_SUPPLIERS = "local_suppliers"
 KIND_IMPORT_SUPPLIERS = "import_suppliers"
 KIND_CUSTOMERS = "customers"
-KIND_MATERIALS = "materials"
-KIND_RAW = "raw"
-KIND_FINISHED = "finished"
+KIND_NOMENCLATURE = "nomenclature"
 KIND_IMPORT_RECEIPTS = "import_receipts"
 KIND_BATCH_ITEMS = "batch_items"
 KIND_SALES = "sales"
@@ -86,7 +89,14 @@ class ImportKind:
     title: str
     entity: str  # products | counterparties | batches | batch_items
     columns: tuple[str, ...]
+    # Вид продукции для всех строк файла. None — вид берётся из колонки kind_column.
     product_kind: str | None = None
+    # Колонка с видом номенклатуры в терминах 1С (сырьё, готовая продукция, тара).
+    kind_column: str | None = None
+    # Откуда брать название. Полное наименование точнее, поэтому оно главное.
+    name_column: str = "Наименование"
+    # Запасные колонки имени: первая непустая.
+    name_fallback: tuple[str, ...] = ()
     role_field: str | None = None
     roles: tuple[str, ...] = DIRECTORY_WRITE_ROLES
     note: str | None = None
@@ -118,26 +128,26 @@ KINDS: dict[str, ImportKind] = {
         columns=("Наименование",),
         role_field="is_customer",
     ),
-    KIND_MATERIALS: ImportKind(
-        kind=KIND_MATERIALS,
-        title="Материалы",
+    KIND_NOMENCLATURE: ImportKind(
+        kind=KIND_NOMENCLATURE,
+        title="Номенклатура",
         entity="products",
-        columns=("Код", "Наименование", "Базовая единица измерения"),
-        product_kind="material",
-    ),
-    KIND_RAW: ImportKind(
-        kind=KIND_RAW,
-        title="Сырьё",
-        entity="products",
-        columns=("Код", "Наименование", "Базовая единица измерения"),
-        product_kind="raw",
-    ),
-    KIND_FINISHED: ImportKind(
-        kind=KIND_FINISHED,
-        title="Готовая продукция",
-        entity="products",
-        columns=("Код", "Наименование", "Базовая единица измерения"),
-        product_kind="finished",
+        columns=(
+            "Код",
+            "Полное наименование",
+            "Базовая единица измерения",
+            "Вид номенклатуры",
+        ),
+        # Старое «Наименование» нужно там, где 1С не заполнила полное.
+        optional_columns=("Наименование",),
+        name_column="Полное наименование",
+        name_fallback=("Наименование",),
+        kind_column="Вид номенклатуры",
+        note=(
+            "Один файл на сырьё, материалы и готовую продукцию. Вид берётся из колонки "
+            "«Вид номенклатуры»: сырьё, готовая продукция, тара и тарные материалы — это "
+            "материалы. Код 1С — ключ: повторная загрузка обновляет изменившиеся позиции."
+        ),
     ),
     KIND_IMPORT_RECEIPTS: ImportKind(
         kind=KIND_IMPORT_RECEIPTS,
@@ -296,15 +306,59 @@ def read_rows(content: bytes, kind_code: str) -> list[dict[str, str]]:
     return _read_rows(content, kind)
 
 
+# «Вид номенклатуры» из 1С → вид в программе. В скобках 1С пишет счёт учёта:
+# он может смениться, поэтому сравниваем только текст до скобки.
+NOMENCLATURE_KINDS: dict[str, str] = {
+    "готовая продукция": "finished",
+    "сырье": "raw",
+    "сырьё": "raw",
+    "тара и тарные материалы": "material",
+    "тарные материалы": "material",
+    "материалы": "material",
+}
+
+
+def _nomenclature_kind(value: str) -> str | None:
+    """Вид продукции по значению колонки «Вид номенклатуры»."""
+    key = value.split("(", 1)[0].strip().casefold()
+    return NOMENCLATURE_KINDS.get(key)
+
+
 def _import_products(db: Session, kind: ImportKind, rows: list[dict[str, str]]) -> Outcome:
+    """Создать и обновить номенклатуру. Код 1С — ключ, поэтому дублей не бывает.
+
+    Существующая позиция сравнивается с файлом: изменившиеся наименование,
+    единица и вид перезаписываются, а в журнал попадает, сколько позиций
+    изменилось. Строки без полного наименования не пропускаются — имя берётся
+    из запасной колонки.
+    """
     existing = {row.code: row for row in db.execute(select(Product)).scalars().all()}
     seen: set[str] = set()
     outcome = Outcome()
 
+    changed_codes: list[str] = []
+    renamed = unit_changed = kind_changed = 0
+    units_guessed = 0
+
     for number, row in enumerate(rows, start=2):
         code = row["Код"]
-        name = row["Наименование"]
-        unit = row["Базовая единица измерения"] or "шт"
+        name = row.get(kind.name_column, "")
+        if not name:
+            for column in kind.name_fallback:
+                name = row.get(column, "")
+                if name:
+                    break
+        unit = row["Базовая единица измерения"]
+
+        product_kind = kind.product_kind
+        if kind.kind_column is not None:
+            kind_value = row.get(kind.kind_column, "")
+            product_kind = _nomenclature_kind(kind_value)
+            if product_kind is None:
+                outcome.failed += 1
+                outcome.problem(f"строка {number}: неизвестный вид номенклатуры «{kind_value}»")
+                continue
+
         if not code or not name:
             outcome.failed += 1
             outcome.problem(f"строка {number}: пустой код или наименование")
@@ -321,23 +375,50 @@ def _import_products(db: Session, kind: ImportKind, rows: list[dict[str, str]]) 
 
         product = existing.get(code)
         if product is None:
+            if not unit:
+                units_guessed += 1
             product = Product(
                 code=code,
                 name=name,
-                kind=kind.product_kind or "goods",
-                unit=unit,
+                kind=product_kind or "goods",
+                unit=unit or "шт",
                 source="1c",
             )
             db.add(product)
             existing[code] = product
             outcome.created += 1
         else:
-            product.name = name
-            product.unit = unit
-            if kind.product_kind is not None:
-                product.kind = kind.product_kind
+            changed = False
+            if product.name != name:
+                product.name = name
+                renamed += 1
+                changed = True
+            if unit and product.unit != unit:
+                product.unit = unit
+                unit_changed += 1
+                changed = True
+            if product_kind is not None and product.kind != product_kind:
+                product.kind = product_kind
+                kind_changed += 1
+                changed = True
             product.source = "1c"
+            if changed:
+                changed_codes.append(code)
             outcome.updated += 1
+
+    if changed_codes:
+        outcome.notes.append(
+            f"Изменено {len(changed_codes)} поз."
+            f" (наименование {renamed}, единица {unit_changed}, вид {kind_changed}): "
+            + ", ".join(changed_codes[:MAX_PROBLEMS])
+            + ("…" if len(changed_codes) > MAX_PROBLEMS else "")
+        )
+    elif outcome.updated:
+        outcome.notes.append("Существующие позиции не изменились.")
+    if units_guessed:
+        outcome.notes.append(
+            f"У {units_guessed} новых позиций не заполнена единица — записано «шт»."
+        )
     return outcome
 
 

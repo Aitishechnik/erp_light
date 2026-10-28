@@ -65,10 +65,10 @@ const KINDS: ImportKind[] = [
     note: null,
   },
   {
-    kind: 'materials',
-    title: 'Материалы',
+    kind: 'nomenclature',
+    title: 'Номенклатура',
     entity: 'products',
-    columns: ['Код', 'Наименование', 'Базовая единица измерения'],
+    columns: ['Код', 'Полное наименование', 'Базовая единица измерения', 'Вид номенклатуры'],
     roles: DIRECTORY_ROLES,
     note: null,
   },
@@ -93,7 +93,7 @@ const SESSION: ImportSession = {
   rows_updated: 4,
   rows_skipped: 10,
   rows_failed: 0,
-  message: null,
+  message: 'Изменено 2 поз. (наименование 1, вид 1): ТОВ1, ТОВ2',
   created_at: '2026-10-08T01:00:00Z',
 }
 
@@ -262,13 +262,17 @@ describe('ImportsPage', () => {
     render(<ImportsPage user={SALES} />)
 
     expect(await screen.findByTestId('import-card-customers')).toHaveTextContent('Покупатели')
-    expect(screen.getByTestId('import-card-materials')).toHaveTextContent(
-      'Код, Наименование, Базовая единица измерения',
+    expect(screen.getByTestId('import-card-nomenclature')).toHaveTextContent(
+      'Код, Полное наименование, Базовая единица измерения, Вид номенклатуры',
     )
     // Менеджеру по продажам импортные поступления недоступны.
     expect(screen.queryByTestId('import-card-import_receipts')).toBeNull()
     expect(screen.getByTestId('imports-journal')).toHaveTextContent('Покупатели.xlsx')
     expect(screen.getByTestId('imports-journal')).toHaveTextContent('775')
+    // Замечания загрузки (что изменилось или почему строка не прошла) видны в журнале.
+    expect(screen.getByTestId('imports-journal')).toHaveTextContent(
+      'Изменено 2 поз. (наименование 1, вид 1): ТОВ1, ТОВ2',
+    )
   })
 
   it('показывает закупщику только импортные поступления', async () => {
@@ -283,7 +287,7 @@ describe('ImportsPage', () => {
     expect(card).toHaveTextContent('Номер, Дата, Контрагент, Комментарий')
     expect(card).toHaveTextContent('черновики поступлений')
     expect(screen.queryByTestId('import-card-customers')).toBeNull()
-    expect(screen.queryByTestId('import-card-materials')).toBeNull()
+    expect(screen.queryByTestId('import-card-nomenclature')).toBeNull()
   })
 
   it('загружает файл и показывает итог', async () => {

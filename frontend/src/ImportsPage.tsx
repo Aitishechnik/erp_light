@@ -1,4 +1,4 @@
-import { type ChangeEvent, useCallback, useEffect, useState } from 'react'
+import { type ChangeEvent, Fragment, useCallback, useEffect, useState } from 'react'
 import {
   errorMessage,
   fetchImportKinds,
@@ -161,16 +161,25 @@ export function ImportsPage({ user }: { user?: SessionUser }) {
             </tr>
           ) : (
             journal.map((row) => (
-              <tr key={row.id}>
-                <td>{stamp(row.created_at)}</td>
-                <td>{row.kind_title}</td>
-                <td>{row.file_name}</td>
-                <td className="num">{row.rows_total}</td>
-                <td className="num">{row.rows_created}</td>
-                <td className="num">{row.rows_updated}</td>
-                <td className="num">{row.rows_skipped}</td>
-                <td className="num">{row.rows_failed}</td>
-              </tr>
+              <Fragment key={row.id}>
+                <tr>
+                  <td>{stamp(row.created_at)}</td>
+                  <td>{row.kind_title}</td>
+                  <td>{row.file_name}</td>
+                  <td className="num">{row.rows_total}</td>
+                  <td className="num">{row.rows_created}</td>
+                  <td className="num">{row.rows_updated}</td>
+                  <td className="num">{row.rows_skipped}</td>
+                  <td className="num">{row.rows_failed}</td>
+                </tr>
+                {row.message ? (
+                  <tr className="journal-note">
+                    <td colSpan={8} className="hint">
+                      {row.message}
+                    </td>
+                  </tr>
+                ) : null}
+              </Fragment>
             ))
           )}
         </tbody>
