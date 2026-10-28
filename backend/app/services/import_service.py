@@ -104,6 +104,8 @@ class ImportKind:
     optional_columns: tuple[str, ...] = ()
     # listed=False: тип не показывается карточкой на «Загрузке данных» — только в журнале.
     listed: bool = True
+    # full_catalog=True: файл — полный справочник, позиции вне файла удаляются.
+    full_catalog: bool = False
 
 
 KINDS: dict[str, ImportKind] = {
@@ -143,10 +145,13 @@ KINDS: dict[str, ImportKind] = {
         name_column="Полное наименование",
         name_fallback=("Наименование",),
         kind_column="Вид номенклатуры",
+        full_catalog=True,
         note=(
             "Один файл на сырьё, материалы и готовую продукцию. Вид берётся из колонки "
             "«Вид номенклатуры»: сырьё, готовая продукция, тара и тарные материалы — это "
-            "материалы. Код 1С — ключ: повторная загрузка обновляет изменившиеся позиции."
+            "материалы. Код 1С — ключ: повторная загрузка обновляет изменившиеся позиции, "
+            "а позиции, которых в файле нет, удаляет (кроме тех, на которые ссылаются "
+            "планы или партии)."
         ),
     ),
     KIND_IMPORT_RECEIPTS: ImportKind(
@@ -419,7 +424,37 @@ def _import_products(db: Session, kind: ImportKind, rows: list[dict[str, str]]) 
         outcome.notes.append(
             f"У {units_guessed} новых позиций не заполнена единица — записано «шт»."
         )
+
+    if kind.full_catalog:
+        removed, kept = _remove_absent(db, existing, seen)
+        if removed or kept:
+            note = f"Удалено {removed} поз., которых нет в файле."
+            if kept:
+                note += f" Оставлено {kept}: на них ссылаются планы или партии."
+            outcome.notes.append(note)
     return outcome
+
+
+def _remove_absent(db: Session, existing: dict[str, Product], seen: set[str]) -> tuple[int, int]:
+    """Удалить позиции вне файла. Связанные с планами и партиями остаются.
+
+    Удаление каждой позиции идёт в своей точке сохранения: если на неё
+    ссылается план или партия, база отказывает, и позиция остаётся — загрузка
+    при этом не падает и остальные позиции удаляются.
+    """
+    removed = kept = 0
+    for code, product in list(existing.items()):
+        if code in seen:
+            continue
+        try:
+            with db.begin_nested():
+                db.delete(product)
+        except IntegrityError:
+            kept += 1
+        else:
+            removed += 1
+            del existing[code]
+    return removed, kept
 
 
 def _import_counterparties(db: Session, kind: ImportKind, rows: list[dict[str, str]]) -> Outcome:

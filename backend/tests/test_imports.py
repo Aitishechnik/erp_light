@@ -1,9 +1,14 @@
 """Загрузка выгрузок 1С: типы, защита от дублей, обновление изменившегося, журнал."""
 
+import uuid
+from datetime import date
 from io import BytesIO
 
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
+from sqlalchemy.orm import Session
+
+from app.models.domain import Batch, BatchItem
 
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -199,6 +204,50 @@ def test_unknown_kind_value_is_reported(client: TestClient, login) -> None:
     assert body["rows_created"] == 1
     assert body["status"] == "partial"
     assert "неизвестный вид номенклатуры" in body["message"]
+
+
+def test_absent_positions_are_deleted(client: TestClient, login) -> None:
+    """Файл — полный справочник: позиции, которых в нём нет, удаляются."""
+    login("purchase")
+    both = xlsx(
+        NOMENCLATURE_HEADER,
+        ("ТОВ1", "Остаётся", "Остаётся", "шт", "Готовая продукция (43)"),
+        ("ТОВ2", "Мусор", "Мусор", "шт", "Готовая продукция (43)"),
+    )
+    assert upload(client, "nomenclature", "Номенклатура.xlsx", both).json()["rows_created"] == 2
+
+    only_first = xlsx(
+        NOMENCLATURE_HEADER,
+        ("ТОВ1", "Остаётся", "Остаётся", "шт", "Готовая продукция (43)"),
+    )
+    body = upload(client, "nomenclature", "Номенклатура.xlsx", only_first).json()
+    assert body["rows_created"] == 0
+    assert body["rows_updated"] == 1
+    assert "Удалено 1 поз." in body["message"]
+
+    products = client.get("/api/v1/products").json()
+    assert [row["code"] for row in products] == ["ТОВ1"]
+
+
+def test_linked_positions_are_not_deleted(client: TestClient, login, db_session: Session) -> None:
+    """Позицию, на которую ссылается партия, не удаляем — иначе поедет себестоимость."""
+    login("purchase")
+    content = xlsx(NOMENCLATURE_HEADER, ("ТОВ1", "В партии", "В партии", "кг", "Сырье (10.01)"))
+    upload(client, "nomenclature", "Номенклатура.xlsx", content)
+    product_id = client.get("/api/v1/products").json()[0]["id"]
+
+    batch = Batch(batch_number="B-1", batch_date=date(2026, 10, 1))
+    db_session.add(batch)
+    db_session.flush()
+    db_session.add(BatchItem(batch_id=batch.id, product_id=uuid.UUID(product_id)))
+    db_session.commit()
+
+    replacement = xlsx(NOMENCLATURE_HEADER, ("ТОВ2", "Новая", "Новая", "кг", "Сырье (10.01)"))
+    body = upload(client, "nomenclature", "Номенклатура.xlsx", replacement).json()
+    assert "Оставлено 1" in body["message"]
+
+    products = client.get("/api/v1/products").json()
+    assert [row["code"] for row in products] == ["ТОВ1", "ТОВ2"]
 
 
 def test_broken_rows_are_reported(client: TestClient, login) -> None:
