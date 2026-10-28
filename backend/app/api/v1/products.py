@@ -28,7 +28,7 @@ def _fail(exc: DirectoryError) -> HTTPException:
 def list_products(
     user: CurrentUser,
     db: DbSession,
-    kind: str | None = Query(default=None, description="goods | material"),
+    kind: str | None = Query(default=None, description="material | raw | finished"),
     include_inactive: bool = Query(default=True, description="Показать и неактивные"),
 ) -> list[Product]:
     rows = service.list_products(db, kind=kind)

@@ -7,7 +7,7 @@ const STOCK = [
     batch_date: '2026-10-01',
     product_code: 'SKU-1',
     product_name: 'Товар 1',
-    product_kind: 'goods',
+    product_kind: 'finished',
     unit: 'шт',
     quantity_on_hand: '10.000',
     unit_cost: '90.00',
@@ -54,7 +54,7 @@ const CLIENT = {
 }
 
 const PRODUCTS = [
-  { id: 'p-1', code: 'SKU-1', name: 'Товар 1', kind: 'goods', unit: 'шт', is_active: true },
+  { id: 'p-1', code: 'SKU-1', name: 'Товар 1', kind: 'finished', unit: 'шт', is_active: true },
 ]
 
 const PURCHASE_DIRECTOR = {
@@ -137,7 +137,7 @@ const RECEIPT = {
       id: 'i1',
       product_code: 'SKU-1',
       product_name: 'Товар 1',
-      product_kind: 'goods',
+      product_kind: 'finished',
       unit: 'шт',
       quantity: '10.000',
       unit_price_currency: '100.0000',
@@ -537,7 +537,7 @@ test('менеджер заполняет план продаж по клиен�
           product_id: 'p-1',
           product_code: 'SKU-1',
           product_name: 'Товар 1',
-          product_kind: 'goods',
+          product_kind: 'finished',
           unit: 'шт',
           month: index + 1,
           quantity: item.quantity,
@@ -801,7 +801,7 @@ test('менеджер предлагает корректировку утве�
               product_id: 'p-1',
               product_code: 'SKU-1',
               product_name: 'Товар 1',
-              product_kind: 'goods',
+              product_kind: 'finished',
               unit: 'шт',
               month: 10,
               quantity: '10.000',

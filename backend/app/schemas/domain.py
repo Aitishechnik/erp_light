@@ -27,7 +27,10 @@ class ProductIn(BaseModel):
 
     code: str = Field(min_length=1, max_length=64, description="Код (артикул)")
     name: str = Field(min_length=1, max_length=255)
-    kind: str = Field(default="goods", description="goods — товар, material — материал")
+    kind: str = Field(
+        default="material",
+        description="material — материалы, raw — сырьё, finished — готовая продукция",
+    )
     unit: str = Field(default="шт", min_length=1, max_length=16)
 
 
@@ -57,7 +60,7 @@ class BatchItemCreate(BaseModel):
     )
     product_code: str = Field(min_length=1, max_length=64)
     product_name: str | None = None
-    product_kind: str = "goods"
+    product_kind: str = "material"
     unit: str = "шт"
     quantity: Decimal = Field(gt=0)
     unit_price_currency: Decimal = Field(

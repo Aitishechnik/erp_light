@@ -17,7 +17,7 @@ BATCH_PAYLOAD = {
         {
             "product_code": "SKU-1",
             "product_name": "Товар 1",
-            "product_kind": "goods",
+            "product_kind": "finished",
             "quantity": "10",
             "unit_price_currency": "60.00",
             "duty_percent": "0",
@@ -73,7 +73,7 @@ def test_manual_creation_endpoint_is_gone(client: TestClient) -> None:
 
 def test_products_are_created_from_batch(client: TestClient, make_batch) -> None:
     make_batch(BATCH_PAYLOAD)
-    goods = client.get("/api/v1/products", params={"kind": "goods"}).json()
+    goods = client.get("/api/v1/products", params={"kind": "finished"}).json()
     assert [product["code"] for product in goods] == ["SKU-1"]
     materials = client.get("/api/v1/products", params={"kind": "material"}).json()
     assert [product["code"] for product in materials] == ["SKU-2"]

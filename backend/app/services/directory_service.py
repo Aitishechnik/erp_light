@@ -148,7 +148,7 @@ def get_product(db: Session, product_id: uuid.UUID) -> Product:
 def _check_kind(kind: str) -> None:
     if kind not in PRODUCT_KINDS:
         raise DirectoryError(
-            "Вид номенклатуры: goods, material (материалы), raw (сырьё) "
+            "Вид номенклатуры: material (материалы), raw (сырьё) "
             "или finished (готовая продукция)"
         )
 

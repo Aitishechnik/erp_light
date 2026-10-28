@@ -564,7 +564,6 @@ export function formatDate(value: string | null | undefined): string {
 }
 
 export const PRODUCT_KIND_LABELS: Record<string, string> = {
-  goods: 'Товар',
   material: 'Материал',
   raw: 'Сырьё',
   finished: 'Готовая продукция',
@@ -575,10 +574,9 @@ export const PRODUCT_KIND_FILTER_TITLES: Record<string, string> = {
   material: 'Материалы',
   raw: 'Сырьё',
   finished: 'Готовая продукция',
-  goods: 'Товары',
 }
 
-export const PRODUCT_KINDS = ['material', 'raw', 'finished', 'goods']
+export const PRODUCT_KINDS = ['material', 'raw', 'finished']
 
 /** Роли контрагента из его признаков. */
 export function counterpartyRoles(row: {

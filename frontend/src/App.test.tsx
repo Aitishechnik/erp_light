@@ -28,7 +28,7 @@ const STOCK: StockRow[] = [
     batch_date: '2026-10-01',
     product_code: 'SKU-1',
     product_name: 'Товар 1',
-    product_kind: 'goods',
+    product_kind: 'finished',
     unit: 'шт',
     quantity_on_hand: '10.000',
     unit_cost: '90.00',

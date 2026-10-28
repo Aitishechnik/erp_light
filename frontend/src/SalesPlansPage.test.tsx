@@ -65,8 +65,22 @@ const CLIENTS: Counterparty[] = [
 ]
 
 const PRODUCTS = [
-  { id: 'product-1', code: 'SKU-1', name: 'Товар 1', kind: 'goods', unit: 'шт', is_active: true },
-  { id: 'product-2', code: 'SKU-2', name: 'Товар 2', kind: 'goods', unit: 'шт', is_active: true },
+  {
+    id: 'product-1',
+    code: 'SKU-1',
+    name: 'Товар 1',
+    kind: 'finished',
+    unit: 'шт',
+    is_active: true,
+  },
+  {
+    id: 'product-2',
+    code: 'SKU-2',
+    name: 'Товар 2',
+    kind: 'finished',
+    unit: 'шт',
+    is_active: true,
+  },
 ]
 
 function plan(overrides: Partial<SalesPlan> = {}): SalesPlan {
@@ -90,7 +104,7 @@ function plan(overrides: Partial<SalesPlan> = {}): SalesPlan {
         product_id: 'product-1',
         product_code: 'SKU-1',
         product_name: 'Товар 1',
-        product_kind: 'goods',
+        product_kind: 'finished',
         unit: 'шт',
         month: 12,
         quantity: '10.000',

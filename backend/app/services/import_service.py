@@ -380,7 +380,7 @@ def _import_products(db: Session, kind: ImportKind, rows: list[dict[str, str]]) 
             product = Product(
                 code=code,
                 name=name,
-                kind=product_kind or "goods",
+                kind=product_kind or "material",
                 unit=unit or "шт",
                 source="1c",
             )

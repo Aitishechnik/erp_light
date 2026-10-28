@@ -18,7 +18,7 @@ TODAY = date.today()
 
 @pytest.fixture
 def products(db_session: Session) -> list[Product]:
-    goods = Product(code="SKU-1", name="Товар 1", kind="goods", unit="шт")
+    goods = Product(code="SKU-1", name="Товар 1", kind="finished", unit="шт")
     material = Product(code="SKU-2", name="Материал 2", kind="material", unit="кг")
     db_session.add_all([goods, material])
     db_session.commit()

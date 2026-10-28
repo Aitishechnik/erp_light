@@ -85,6 +85,12 @@ def test_unknown_product_kind_is_rejected(client: TestClient, login) -> None:
     assert response.status_code == 400
     assert "Вид номенклатуры" in response.json()["detail"]
 
+    # «Товара» больше нет: таких строк не бывает ни в выгрузке, ни в справочнике.
+    goods = client.post(
+        "/api/v1/products", json={"code": "ТОВ903", "name": "Товар", "kind": "goods"}
+    )
+    assert goods.status_code == 400
+
 
 def test_import_manager_cannot_edit_directories(client: TestClient, login) -> None:
     login("import")

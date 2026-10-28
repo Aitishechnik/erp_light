@@ -33,11 +33,11 @@ from app.db import Base
 if TYPE_CHECKING:
     from app.models.planning import PurchasePlanItem
 
-# Виды номенклатуры: соответствуют файлам выгрузки из 1С.
-PRODUCT_KINDS = ("goods", "material", "raw", "finished")
+# Виды номенклатуры: три группы выгрузки из 1С. «Товара» больше нет:
+# тара и хозтовары — материалы, продажное — готовая продукция.
+PRODUCT_KINDS = ("material", "raw", "finished")
 
 PRODUCT_KIND_TITLES = {
-    "goods": "Товар",
     "material": "Материалы",
     "raw": "Сырьё",
     "finished": "Готовая продукция",
@@ -68,7 +68,7 @@ class Product(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="goods", index=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="material", index=True)
     unit: Mapped[str] = mapped_column(String(16), nullable=False, default="шт")
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
     is_active: Mapped[bool] = mapped_column(nullable=False, default=True)
