@@ -136,9 +136,6 @@ function plan(overrides: Partial<PurchasePlan> = {}): PurchasePlan {
         coverage_months: [{ month: 1, quantity: '10.000' }],
         stock_quantity: '0',
         stock_date: null,
-        product_stock_quantity: '0',
-        product_stock_date: null,
-        product_stock_raw: '0',
         carry_forward: '0',
         schedule: [
           {
@@ -306,30 +303,6 @@ describe('PurchasePlanPage', () => {
     expect(detail).toHaveTextContent('январь 2026')
     expect(detail).toHaveTextContent('100 %')
     expect(detail).toHaveTextContent('75 %')
-  })
-
-  it('готовая продукция на складе закрывает потребность: сырьё не заказываем', async () => {
-    mockApi(
-      routes([
-        plan({
-          items: [
-            planItem({
-              fact_months: [],
-              coverage_months: [],
-              product_stock_quantity: '300.000',
-              product_stock_date: '2026-10-28',
-              product_stock_raw: '30.000',
-              schedule: [],
-            }),
-          ],
-        }),
-      ]),
-    )
-    render(<PurchasePlanPage user={DIRECTOR} />)
-
-    const row = await screen.findByTestId('purchase-row-item-1')
-    expect(row).toHaveTextContent('готовой 300')
-    expect(row).toHaveTextContent('сырьё не нужно: потребность закрыта готовой продукцией (300 кг)')
   })
 
   it('когда потребность закрыта целиком, показывает перенос излишка на следующий год', async () => {

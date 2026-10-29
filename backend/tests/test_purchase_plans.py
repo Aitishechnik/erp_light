@@ -11,12 +11,7 @@ from sqlalchemy.orm import Session
 from app.models.counterparties import Counterparty
 from app.models.domain import Batch, BatchItem, Product, StockBalance
 from app.models.planning import PurchasePlan
-from app.services.purchase_need import (
-    cover_schedule,
-    order_year_month,
-    split_annual,
-    split_annual_from_product_stock,
-)
+from app.services.purchase_need import cover_schedule, order_year_month, split_annual
 
 TODAY = date.today()
 YEAR = TODAY.year + 1
@@ -283,58 +278,6 @@ def test_coverage_caps_share_and_carries_surplus() -> None:
     assert [row.covered for row in stock] == [Decimal("10.000"), Decimal("2.000")]
     assert stock[1].remaining == Decimal("18.000")
     assert stock[-1].carry == Decimal("0")
-
-
-def test_product_stock_reduces_raw_need() -> None:
-    """Готовая продукция на складе закрывает первые месяцы продаж."""
-    months = {1: Decimal("100"), 2: Decimal("200")}
-    rows = split_annual_from_product_stock(
-        Decimal("30"), months, 90, 2027, Decimal("200"), today=date(2026, 10, 21)
-    )
-    # Январь закрыт складом, февраль — наполовину: сырьё нужно только на 10.
-    assert [(row.month, row.quantity) for row in rows] == [(2, Decimal("10.000"))]
-
-    # Склада больше, чем весь год продаж: сырьё не нужно вовсе.
-    assert (
-        split_annual_from_product_stock(
-            Decimal("30"), months, 90, 2027, Decimal("500"), today=date(2026, 10, 21)
-        )
-        == []
-    )
-    # Без склада расчёт прежний.
-    full = split_annual_from_product_stock(Decimal("30"), months, 90, 2027, Decimal("0"))
-    assert [row.quantity for row in full] == [Decimal("10.000"), Decimal("20.000")]
-
-
-def test_product_stock_on_hand_reduces_orders(
-    client: TestClient, login, catalog: dict[str, Any], db_session: Session
-) -> None:
-    """Остаток готовой продукции из отчёта 1С уменьшает потребность в сырье."""
-    _make_annual(client, login, catalog)
-    plan = _create_plan(client, login)
-    saved = _save(client, plan["id"], [_item(catalog, quantity="30", price="500.00")])
-    assert saved.status_code == 200, saved.text
-
-    db_session.add(
-        StockBalance(
-            product_id=catalog["fin"].id,
-            balance_date=date(2026, 10, 28),
-            opening=Decimal("200"),
-            income=Decimal("0"),
-            outcome=Decimal("0"),
-            closing=Decimal("200"),
-        )
-    )
-    db_session.commit()
-
-    login("purchase")
-    item = client.get(f"/api/v1/purchase-plans/{plan['id']}").json()["items"][0]
-    assert item["product_stock_quantity"] == "200.000"
-    assert item["product_stock_date"] == "2026-10-28"
-    # Склад закрыл январь и половину февраля: на сырьё остаётся 10 из 30.
-    assert item["product_stock_raw"] == "20.000"
-    assert [(row["month"], row["quantity"]) for row in item["schedule"]] == [(2, "10.000")]
-    assert item["schedule"][0]["remaining"] == "10.000"
 
 
 def test_coverage_from_stock_and_arrivals(
