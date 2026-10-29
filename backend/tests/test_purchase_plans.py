@@ -9,9 +9,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.counterparties import Counterparty
-from app.models.domain import Product
+from app.models.domain import Batch, BatchItem, Product, StockBalance
 from app.models.planning import PurchasePlan
-from app.services.purchase_need import order_year_month, split_annual
+from app.services.purchase_need import cover_schedule, order_year_month, split_annual
 
 TODAY = date.today()
 YEAR = TODAY.year + 1
@@ -181,22 +181,20 @@ def test_raw_rows_split_by_months_and_lead_time(
     assert item["country_name"] == "Таиланд"
     assert item["delivery_days"] == 90
     assert item["quantity"] == "30.000"
-    assert item["schedule"] == [
-        {
-            "month": 1,
-            "quantity": "10.000",
-            "order_year": YEAR - 1,
-            "order_month": 10,
-            "overdue": False,
-        },
-        {
-            "month": 2,
-            "quantity": "20.000",
-            "order_year": YEAR - 1,
-            "order_month": 11,
-            "overdue": False,
-        },
+    assert [(row["month"], row["quantity"]) for row in item["schedule"]] == [
+        (1, "10.000"),
+        (2, "20.000"),
     ]
+    assert [(row["order_year"], row["order_month"]) for row in item["schedule"]] == [
+        (YEAR - 1, 10),
+        (YEAR - 1, 11),
+    ]
+    assert all(row["overdue"] is False for row in item["schedule"])
+    # Пока ничего не пришло и остатка нет, покрытия нет: нужно докупить всё.
+    assert [row["covered"] for row in item["schedule"]] == ["0.000", "0.000"]
+    assert [row["share"] for row in item["schedule"]] == ["0.0", "0.0"]
+    assert item["stock_quantity"] == "0"
+    assert item["stock_date"] is None
     position = next(row for row in body["positions"] if row["code"] == "FIN-1")
     assert position["decomposed"] is True
     assert sum(Decimal(row["quantity"]) for row in item["schedule"]) == Decimal("30.000")
@@ -256,6 +254,97 @@ def test_split_annual_is_deterministic() -> None:
     assert rows[0].overdue is False
     assert rows[0].order_month == 10
     assert rows[0].order_year == 2026
+
+
+def test_coverage_caps_share_and_carries_surplus() -> None:
+    """Пришло больше потребности месяца: 100 %, излишек идёт на следующие месяцы."""
+    schedule = split_annual(
+        Decimal("30"), {1: Decimal("100"), 2: Decimal("200")}, 90, 2027, today=date(2026, 10, 21)
+    )
+    rows = cover_schedule(schedule, {1: Decimal("50")})
+    assert [row.need for row in rows] == [Decimal("10.000"), Decimal("20.000")]
+    assert [row.covered for row in rows] == [Decimal("10.000"), Decimal("20.000")]
+    assert [row.remaining for row in rows] == [Decimal("0.000"), Decimal("0.000")]
+    assert [row.carry for row in rows] == [Decimal("40.000"), Decimal("20.000")]
+    assert [row.share for row in rows] == [Decimal("100.0"), Decimal("100.0")]
+
+    # Приход попадает в свой месяц: февральский не закрывает январскую потребность.
+    late = cover_schedule(schedule, {2: Decimal("50")})
+    assert [row.covered for row in late] == [Decimal("0"), Decimal("20.000")]
+    assert late[0].remaining == Decimal("10.000")
+
+    # Остаток на складе работает как приход первого месяца.
+    stock = cover_schedule(schedule, {}, Decimal("12"))
+    assert [row.covered for row in stock] == [Decimal("10.000"), Decimal("2.000")]
+    assert stock[1].remaining == Decimal("18.000")
+    assert stock[-1].carry == Decimal("0")
+
+
+def test_coverage_from_stock_and_arrivals(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    """Покрытие месяцев: остаток на складе плюс приходы, приход до снимка не задваивается."""
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    saved = _save(client, plan["id"], [_item(catalog, quantity="30", price="500.00")])
+    assert saved.status_code == 200, saved.text
+    item_id = saved.json()["items"][0]["id"]
+
+    stock_day = date(2026, 10, 28)
+    batch = Batch(
+        batch_number="ИТ-2027-0001",
+        batch_date=date(2026, 12, 11),
+        currency="RUB",
+        source="1c",
+    )
+    early = Batch(
+        batch_number="ИТ-2026-0099",
+        batch_date=date(2026, 10, 1),
+        currency="RUB",
+        source="1c",
+    )
+    db_session.add_all([batch, early])
+    db_session.flush()
+    db_session.add_all(
+        [
+            BatchItem(
+                batch_id=batch.id,
+                product_id=catalog["raw"].id,
+                quantity=Decimal("25"),
+                purchase_plan_item_id=item_id,
+            ),
+            BatchItem(
+                batch_id=early.id,
+                product_id=catalog["raw"].id,
+                quantity=Decimal("5"),
+                purchase_plan_item_id=item_id,
+            ),
+            StockBalance(
+                product_id=catalog["raw"].id,
+                balance_date=stock_day,
+                opening=Decimal("8"),
+                income=Decimal("8"),
+                outcome=Decimal("0"),
+                closing=Decimal("8"),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    login("purchase")
+    body = client.get(f"/api/v1/purchase-plans/{plan['id']}").json()
+    item = body["items"][0]
+    assert item["stock_quantity"] == "8.000"
+    assert item["stock_date"] == stock_day.isoformat()
+    # Приход до снимка остатков уже внутри остатка — в покрытие не идёт.
+    assert item["fact_quantity"] == "30.000"
+    schedule = item["schedule"]
+    assert [row["quantity"] for row in schedule] == ["10.000", "20.000"]
+    assert [row["covered"] for row in schedule] == ["10.000", "20.000"]
+    assert [row["share"] for row in schedule] == ["100.0", "100.0"]
+    assert [row["remaining"] for row in schedule] == ["0.000", "0.000"]
+    assert schedule[-1]["carry"] == "3.000"
+    assert item["carry_forward"] == "3.000"
 
 
 def test_validation_keeps_previous_rows(client: TestClient, login, catalog: dict[str, Any]) -> None:

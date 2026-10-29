@@ -6,6 +6,7 @@ import type {
   Country,
   Product,
   PurchasePlan,
+  PurchasePlanItem,
   PurchasePlanPosition,
   SessionUser,
 } from './api'
@@ -132,10 +133,18 @@ function plan(overrides: Partial<PurchasePlan> = {}): PurchasePlan {
         fact_quantity: '10.000',
         fact_share: '33.3',
         fact_months: [{ month: 1, quantity: '10.000' }],
+        coverage_months: [{ month: 1, quantity: '10.000' }],
+        stock_quantity: '0',
+        stock_date: null,
+        carry_forward: '0',
         schedule: [
           {
             month: 1,
             quantity: '10.000',
+            covered: '10.000',
+            remaining: '0',
+            carry: '0',
+            share: '100.0',
             order_year: YEAR - 1,
             order_month: 10,
             overdue: false,
@@ -143,6 +152,10 @@ function plan(overrides: Partial<PurchasePlan> = {}): PurchasePlan {
           {
             month: 2,
             quantity: '20.000',
+            covered: '0',
+            remaining: '20.000',
+            carry: '0',
+            share: '0.0',
             order_year: YEAR - 1,
             order_month: 11,
             overdue: false,
@@ -152,6 +165,12 @@ function plan(overrides: Partial<PurchasePlan> = {}): PurchasePlan {
     ],
     ...overrides,
   }
+}
+
+function planItem(overrides: Partial<PurchasePlanItem> = {}): PurchasePlanItem {
+  const [first] = plan().items
+  if (!first) throw new Error('в фикстуре нет строки плана')
+  return { ...first, ...overrides }
 }
 
 function routes(
@@ -209,10 +228,9 @@ describe('PurchasePlanPage', () => {
     expect(screen.getByTestId('position-FIN-1')).toHaveTextContent('разложено')
     expect(await screen.findByLabelText('Количество FIN-1 1')).toHaveValue('30')
     expect(screen.getByTestId('purchase-plan-card')).toHaveTextContent(/15\s*000,00/)
-    // План/факт: 10 кг из 30 — только по явной ссылке поступления на строку.
-    expect(screen.getByTestId('fact-item-1')).toHaveTextContent('факт 10')
-    expect(screen.getByTestId('fact-item-1')).toHaveTextContent('33,3')
-    // График по умолчанию — одна строка «ближайший заказ», январь уже закрыт фактом.
+    // Приход: 10 кг из 30 — только по явной ссылке поступления на строку.
+    expect(screen.getByTestId('fact-item-1')).toHaveTextContent('пришло 10')
+    // График по умолчанию — одна строка «ближайший заказ», январь уже перекрыт приходом.
     const table = screen.getByTestId('purchase-table')
     expect(table).toHaveTextContent(
       'Ближайший заказ: к 01.11.2025 — 20 кг (потребность — февраль 2026)',
@@ -223,7 +241,9 @@ describe('PurchasePlanPage', () => {
     const detail = await screen.findByTestId('schedule-table')
     expect(detail).toHaveTextContent('январь 2026')
     expect(detail).toHaveTextContent('Нужно, кг')
-    expect(detail).toHaveTextContent('10 · 100 %')
+    expect(detail).toHaveTextContent('Перекрыто')
+    expect(detail).toHaveTextContent('Докупить, кг')
+    expect(detail).toHaveTextContent('100 %')
 
     // Переключатель: полоса по месяцам заказа и кварталы.
     await user.click(screen.getByRole('button', { name: 'полосой' }))
@@ -251,6 +271,61 @@ describe('PurchasePlanPage', () => {
     expect(sent).toContain('"price_rub":"300.25"')
     // Сохранённая строка уходит со своим id — ссылки поступлений не теряются.
     expect(sent).toContain('"id":"item-1"')
+  })
+
+  it('излишек на складе перекрывает следующие месяцы и не даёт больше 100 %', async () => {
+    mockApi(
+      routes([
+        plan({
+          items: [
+            planItem({
+              fact_months: [],
+              coverage_months: [],
+              stock_quantity: '25.000',
+              stock_date: '2026-10-28',
+            }),
+          ],
+        }),
+      ]),
+    )
+    render(<PurchasePlanPage user={DIRECTOR} />)
+
+    expect(await screen.findByTestId('fact-item-1')).toHaveTextContent('на складе 25 · 28.10')
+    const table = screen.getByTestId('purchase-table')
+    // Январь закрыт полностью, остаток 15 кг пошёл на февраль: докупить 5 кг.
+    expect(table).toHaveTextContent(
+      'Ближайший заказ: к 01.11.2025 — 5 кг (потребность — февраль 2026)',
+    )
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Весь график' }))
+    const detail = await screen.findByTestId('schedule-table')
+    // Январь перекрыт полностью (100 %), февраль — на 15 из 20 кг: докупить 5.
+    expect(detail).toHaveTextContent('январь 2026')
+    expect(detail).toHaveTextContent('100 %')
+    expect(detail).toHaveTextContent('75 %')
+  })
+
+  it('когда потребность закрыта целиком, показывает перенос излишка на следующий год', async () => {
+    mockApi(
+      routes([
+        plan({
+          items: [
+            planItem({
+              fact_months: [],
+              coverage_months: [],
+              stock_quantity: '42.000',
+              stock_date: '2026-10-28',
+              carry_forward: '12.000',
+            }),
+          ],
+        }),
+      ]),
+    )
+    render(<PurchasePlanPage user={DIRECTOR} />)
+
+    const table = await screen.findByTestId('purchase-table')
+    expect(table).toHaveTextContent('Потребность закрыта до конца года')
+    expect(table).toHaveTextContent('излишек после февраль 2026 — 12 кг, переносим на 2027 год')
   })
 
   it('показывает diff пересмотренного плана продаж и принимает его к сведению', async () => {

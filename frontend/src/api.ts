@@ -163,7 +163,16 @@ export type PurchasePlanStatus = 'draft' | 'on_review' | 'approved'
 
 export type PurchasePlanScheduleEntry = {
   month: number
+  /** Потребность месяца. */
   quantity: string
+  /** Перекрыто остатком на складе и приходами этого и прошлых месяцев. */
+  covered: string
+  /** Ещё нужно докупить: потребность минус покрытие. */
+  remaining: string
+  /** Остаток после месяца — переходит на следующий. */
+  carry: string
+  /** Перекрыто, %: не больше 100. */
+  share: string
   order_year: number
   order_month: number
   overdue: boolean
@@ -192,6 +201,13 @@ export type PurchasePlanItem = {
   fact_share: string
   /** Поступило по месяцам прихода партии: только месяцы с фактом. */
   fact_months: { month: number; quantity: string }[]
+  /** Приходы, которые участвуют в покрытии: пришедшие после снимка остатков. */
+  coverage_months: { month: number; quantity: string }[]
+  /** Остаток сырья на складе по последнему отчёту 1С. */
+  stock_quantity: string
+  stock_date: string | null
+  /** Излишек после последнего месяца — переходит на следующий год. */
+  carry_forward: string
   schedule: PurchasePlanScheduleEntry[]
 }
 

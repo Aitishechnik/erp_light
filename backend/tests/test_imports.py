@@ -44,6 +44,7 @@ def test_kinds_are_listed(client: TestClient) -> None:
         "nomenclature",
         "import_receipts",
         "sales",
+        "stock",
     ]
     nomenclature = next(row for row in kinds if row["kind"] == "nomenclature")
     assert nomenclature["title"] == "Номенклатура"
@@ -60,6 +61,17 @@ def test_kinds_are_listed(client: TestClient) -> None:
     sales = next(row for row in kinds if row["kind"] == "sales")
     assert sales["title"] == "Продажи за месяц"
     assert sales["roles"] == ["commercial_director", "executive_director"]
+    stock = next(row for row in kinds if row["kind"] == "stock")
+    assert stock["title"] == "Остатки на складе"
+    assert stock["roles"] == ["purchase_director", "import_manager"]
+    assert stock["columns"] == [
+        "Номенклатура",
+        "Код",
+        "Начальный остаток",
+        "Приход",
+        "Расход",
+        "Конечный остаток",
+    ]
 
 
 def test_customers_are_loaded_without_duplicates(client: TestClient, login) -> None:

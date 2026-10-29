@@ -69,6 +69,11 @@ type DraftRow = {
   factShare: string
   /** Факт по месяцам прихода: месяц → количество. */
   factMonths: { month: number; quantity: string }[]
+  /** Приходы, которые участвуют в покрытии: пришедшие после снимка остатков. */
+  coverageMonths: { month: number; quantity: string }[]
+  /** Остаток сырья на складе по последнему отчёту 1С. */
+  stockQuantity: string
+  stockDate: string | null
 }
 
 type PreviewEntry = {
@@ -134,29 +139,36 @@ const SCHEDULE_MODES: { id: ScheduleMode; title: string }[] = [
 type ScheduleRow = {
   entry: PreviewEntry
   need: number
-  fact: number
-  share: number
+  covered: number
   remaining: number
-  /** Заказ нужно оформлять в текущем месяце — уже не просрочен, но срок подошёл. */
+  carry: number
+  /** Перекрыто, %: не больше 100 — перезатар показывать не нужно. */
+  share: number
+  /** Срок заказа — этот месяц, но ещё не прошёл. */
   soon: boolean
 }
 
 function scheduleRows(
   entries: PreviewEntry[],
   factMonths: { month: number; quantity: string }[],
+  stockQuantity = '0',
 ): ScheduleRow[] {
   const today = new Date()
   const current = today.getFullYear() * 12 + today.getMonth()
+  let available = toMilli(stockQuantity)
   return entries.map((entry) => {
-    const need = entry.quantityMilli / 1000
     const factRow = factMonths.find((row) => row.month === entry.month)
-    const fact = factRow ? Number(factRow.quantity) : 0
+    const needMilli = entry.quantityMilli
+    available += factRow ? toMilli(factRow.quantity) : 0
+    const coveredMilli = Math.min(needMilli, Math.max(available, 0))
+    available -= coveredMilli
     return {
       entry,
-      need,
-      fact,
-      share: need > 0 ? (fact / need) * 100 : 0,
-      remaining: Math.max(need - fact, 0),
+      need: needMilli / 1000,
+      covered: coveredMilli / 1000,
+      remaining: (needMilli - coveredMilli) / 1000,
+      carry: available / 1000,
+      share: needMilli > 0 ? (coveredMilli / needMilli) * 100 : 0,
       soon: !entry.overdue && entry.orderYear * 12 + entry.orderMonth - 1 === current,
     }
   })
@@ -200,7 +212,8 @@ function ScheduleTable({
           <th>Месяц потребности</th>
           <th>Нужно, кг</th>
           <th>Заказать к</th>
-          <th>Факт</th>
+          <th>Перекрыто</th>
+          <th>Докупить, кг</th>
         </tr>
       </thead>
       <tbody>
@@ -216,9 +229,19 @@ function ScheduleTable({
               {row.entry.overdue ? ' · просрочен' : ''}
             </td>
             <td>
-              {row.fact > 0
-                ? `${formatQuantity(row.fact.toFixed(3))} · ${formatQuantity(row.share.toFixed(1))} %`
-                : '—'}
+              {row.covered > 0 ? (
+                <span
+                  className={row.share >= 100 ? 'cover-line done' : 'cover-line'}
+                  title={`Перекрыто ${formatQuantity(row.covered.toFixed(3))} кг`}
+                >
+                  {formatQuantity(row.share.toFixed(1))} %
+                </span>
+              ) : (
+                '—'
+              )}
+            </td>
+            <td className="num">
+              {row.remaining > 0 ? formatQuantity(row.remaining.toFixed(3)) : '—'}
             </td>
           </tr>
         ))}
@@ -226,7 +249,7 @@ function ScheduleTable({
       {extra ? (
         <tfoot>
           <tr>
-            <td colSpan={4} className="hint">
+            <td colSpan={5} className="hint">
               {extra}
             </td>
           </tr>
@@ -257,6 +280,8 @@ function ScheduleView({
   tableOnly?: boolean
 }) {
   const nearest = rows.find((row) => row.remaining > 0) ?? null
+  const last = rows.length > 0 ? rows[rows.length - 1] : null
+  const carry = last ? last.carry : 0
   const extraLine = extra ? <span className="month-fact extra">{extra}</span> : null
 
   if (mode === 'summary' && tableOnly) {
@@ -271,7 +296,7 @@ function ScheduleView({
         <div className="sched-bars" data-testid="schedule-bars">
           {rows.map((row) => {
             const height = Math.max(Math.round((row.need / max) * maxHeight), 3)
-            const filled = Math.min(row.fact / Math.max(row.need, 1), 1) * height
+            const filled = Math.min(row.covered / Math.max(row.need, 1), 1) * height
             return (
               <span
                 key={row.entry.month}
@@ -281,7 +306,11 @@ function ScheduleView({
                 title={`Потребность ${needMonth(row, year)}: ${formatQuantity(
                   row.need.toFixed(3),
                 )} кг; заказ к ${orderDate(row)}${
-                  row.fact > 0 ? `; пришло ${formatQuantity(row.fact.toFixed(3))} кг` : ''
+                  row.covered > 0
+                    ? `; перекрыто ${formatQuantity(row.covered.toFixed(3))} кг (${formatQuantity(
+                        row.share.toFixed(1),
+                      )} %)`
+                    : ''
                 }`}
               >
                 <span className="bar-body" style={{ height }}>
@@ -295,7 +324,9 @@ function ScheduleView({
             )
           })}
         </div>
-        <span className="sched-legend">месяцы заказа · тёмная часть столбика — уже пришло</span>
+        <span className="sched-legend">
+          месяцы заказа · тёмная часть столбика — перекрыто остатком и приходами
+        </span>
         {extraLine}
       </div>
     )
@@ -308,7 +339,8 @@ function ScheduleView({
           const group = rows.filter((row) => Math.ceil(row.entry.month / 3) === quarter)
           if (group.length === 0) return null
           const need = group.reduce((sum, row) => sum + row.need, 0)
-          const fact = group.reduce((sum, row) => sum + row.fact, 0)
+          const covered = group.reduce((sum, row) => sum + row.covered, 0)
+          const remaining = group.reduce((sum, row) => sum + row.remaining, 0)
           const first = group.reduce((best, row) =>
             row.entry.orderYear * 12 + row.entry.orderMonth <
             best.entry.orderYear * 12 + best.entry.orderMonth
@@ -334,7 +366,11 @@ function ScheduleView({
                 </span>
               ) : null}
               <span className="q-fact">
-                {fact > 0 ? `пришло ${formatQuantity(fact.toFixed(3))} кг` : 'поступлений не было'}
+                {remaining > 0
+                  ? `перекрыто ${formatQuantity(covered.toFixed(3))} · докупить ${formatQuantity(
+                      remaining.toFixed(3),
+                    )} кг`
+                  : `перекрыто полностью (${formatQuantity(covered.toFixed(3))} кг)`}
               </span>
             </span>
           )
@@ -348,13 +384,19 @@ function ScheduleView({
     <div className="sched-summary" data-testid="schedule-summary">
       {nearest ? (
         <span className="sched-line">
-          Ближайший заказ: <b>к {orderDate(nearest)}</b> — {formatQuantity(nearest.need.toFixed(3))}{' '}
-          кг
+          Ближайший заказ: <b>к {orderDate(nearest)}</b> —{' '}
+          {formatQuantity(nearest.remaining.toFixed(3))} кг
           <span className="sched-need"> (потребность — {needMonth(nearest, year)})</span>
         </span>
       ) : (
-        <span className="sched-done">Все заказы по графику уже сделаны</span>
+        <span className="sched-done">Потребность закрыта до конца года</span>
       )}
+      {carry > 0 && last ? (
+        <span className="sched-carry">
+          излишек после {needMonth(last, year)} — {formatQuantity(carry.toFixed(3))} кг, переносим
+          на {year + 1} год
+        </span>
+      ) : null}
       <button type="button" className="mini" onClick={onToggle}>
         {expanded ? 'Скрыть график' : 'Весь график'}
       </button>
@@ -381,6 +423,9 @@ function draftsFromPlan(plan: PurchasePlan): DraftRow[] {
     factQuantity: item.fact_quantity,
     factShare: item.fact_share,
     factMonths: item.fact_months ?? [],
+    coverageMonths: item.coverage_months ?? [],
+    stockQuantity: item.stock_quantity,
+    stockDate: item.stock_date,
   }))
 }
 
@@ -572,6 +617,9 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
         factQuantity: '0',
         factShare: '0',
         factMonths: [],
+        coverageMonths: [],
+        stockQuantity: '0',
+        stockDate: null,
       },
     ])
     setError(null)
@@ -1105,16 +1153,20 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                               )}
                               {row.id ? (
                                 <span
-                                  className={
-                                    Number(row.factShare) >= 100 ? 'fact-line done' : 'fact-line'
-                                  }
+                                  className="fact-line"
                                   data-testid={`fact-${row.key}`}
-                                  title="Поступило по явно связанным поступлениям"
+                                  title="Остаток по последнему отчёту 1С и приход по связанным поступлениям"
                                 >
-                                  факт {formatQuantity(row.factQuantity)}{' '}
-                                  <span className="fact-share">
-                                    {formatQuantity(row.factShare)} %
-                                  </span>
+                                  {Number(row.stockQuantity) > 0 ? (
+                                    <>
+                                      на складе {formatQuantity(row.stockQuantity)}
+                                      {row.stockDate
+                                        ? ` · ${formatDate(row.stockDate).slice(0, 5)}`
+                                        : ''}{' '}
+                                      ·{' '}
+                                    </>
+                                  ) : null}
+                                  пришло {formatQuantity(row.factQuantity)}
                                 </span>
                               ) : null}
                             </td>
@@ -1175,7 +1227,11 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                 '—'
                               ) : scheduleMode === 'summary' ? (
                                 <ScheduleView
-                                  rows={scheduleRows(schedule, row.factMonths)}
+                                  rows={scheduleRows(
+                                    schedule,
+                                    row.coverageMonths,
+                                    row.stockQuantity,
+                                  )}
                                   mode="summary"
                                   expanded={openSchedule.includes(row.key)}
                                   onToggle={() => toggleSchedule(row.key)}
@@ -1230,7 +1286,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                               )}
                             </div>
                             <ScheduleView
-                              rows={scheduleRows(schedule, row.factMonths)}
+                              rows={scheduleRows(schedule, row.coverageMonths, row.stockQuantity)}
                               mode={scheduleMode}
                               wide
                               tableOnly
@@ -1241,7 +1297,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                             />
                             {scheduleMode !== 'summary' && expanded ? (
                               <ScheduleTable
-                                rows={scheduleRows(schedule, row.factMonths)}
+                                rows={scheduleRows(schedule, row.coverageMonths, row.stockQuantity)}
                                 year={plan.year}
                                 extra=""
                               />

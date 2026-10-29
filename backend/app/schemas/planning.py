@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, Field
@@ -99,10 +99,21 @@ class PurchasePlanRejectIn(BaseModel):
 
 
 class PurchasePlanScheduleEntryOut(BaseModel):
-    """Месячная потребность строки и месяц, до которого нужно оформить заказ."""
+    """Месяц плана: потребность, её покрытие и что ещё нужно докупить."""
 
     month: int
-    quantity: Decimal
+    quantity: Decimal = Field(description="Потребность месяца, в единицах сырья")
+    covered: Decimal = Field(
+        default=Decimal("0"),
+        description="Перекрыто остатком на складе и приходами этого и прошлых месяцев",
+    )
+    remaining: Decimal = Field(
+        default=Decimal("0"), description="Ещё нужно докупить: потребность минус покрытие"
+    )
+    carry: Decimal = Field(
+        default=Decimal("0"), description="Остаток после месяца — переходит на следующий"
+    )
+    share: Decimal = Field(default=Decimal("0"), description="Перекрыто, %: не больше 100")
     order_year: int
     order_month: int
     overdue: bool = Field(description="Срок заказа уже прошёл")
@@ -139,6 +150,18 @@ class PurchasePlanItemOut(BaseModel):
     fact_months: list[PurchasePlanMonthOut] = Field(
         default_factory=list,
         description="Поступило по месяцам (месяц прихода партии): только месяцы с фактом",
+    )
+    coverage_months: list[PurchasePlanMonthOut] = Field(
+        default_factory=list,
+        description="Приходы, которые участвуют в покрытии: пришедшие после снимка остатков",
+    )
+    stock_quantity: Decimal = Field(
+        default=Decimal("0"), description="Остаток сырья на складе по последнему отчёту"
+    )
+    stock_date: date | None = Field(default=None, description="Дата снимка остатков")
+    carry_forward: Decimal = Field(
+        default=Decimal("0"),
+        description="Излишек после последнего месяца — переходит на следующий год",
     )
     schedule: list[PurchasePlanScheduleEntryOut]
 

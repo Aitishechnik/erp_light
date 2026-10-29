@@ -33,6 +33,8 @@ from app.services.sales_plan_approval_service import current_hash
 
 QTY = Decimal("0.001")
 ZERO = Decimal("0")
+ONE_HUNDRED = Decimal("100")
+SHARE = Decimal("0.1")
 
 
 def quantize_qty(value: Decimal | int | str) -> Decimal:
@@ -78,6 +80,33 @@ class MonthPlan:
     order_year: int
     order_month: int
     overdue: bool
+
+
+@dataclass(frozen=True)
+class CoverageEntry:
+    """Месяц плана: сколько нужно, сколько перекрыто и сколько осталось докупить.
+
+    Потребность месяца не равна объёму заказа: сырьё приходит контейнером, и
+    излишек перекрывает следующие месяцы. Поэтому процент считается по покрытию
+    (не выше 100), а не по приходу — ``carry`` показывает, сколько осталось на
+    следующий месяц, ``remaining`` — сколько ещё нужно докупить.
+    """
+
+    month: int
+    need: Decimal
+    covered: Decimal
+    remaining: Decimal
+    carry: Decimal
+    order_year: int
+    order_month: int
+    overdue: bool
+
+    @property
+    def share(self) -> Decimal:
+        """Перекрыто, %: не больше 100 — перезатар показывать не нужно."""
+        if self.need <= 0:
+            return ZERO
+        return (self.covered / self.need * ONE_HUNDRED).quantize(SHARE, rounding=ROUND_HALF_UP)
 
 
 def annual_approval(db: Session, year: int) -> SalesPlanApproval | None:
@@ -311,6 +340,41 @@ def split_annual(
                 order_year=order_year,
                 order_month=order_month,
                 overdue=(order_year, order_month) < (current_day.year, current_day.month),
+            )
+        )
+    return result
+
+
+def cover_schedule(
+    schedule: list[MonthPlan],
+    arrivals: dict[int, Decimal] | None = None,
+    opening: Decimal = ZERO,
+) -> list[CoverageEntry]:
+    """Разложить по месяцам то, что уже есть: остаток и приходы.
+
+    Месяцы идут по порядку: остаток на начало плюс приход месяца закрывают
+    потребность месяца, излишек переходит на следующий. Поэтому поставка
+    контейнером сверх месяца не даёт 250 % — она даёт 100 % и запас на будущее.
+    Приходы складываются с того месяца, в котором пришли: раньше времени они
+    потребность не закрывают.
+    """
+    by_month = arrivals or {}
+    available = quantize_qty(opening)
+    result: list[CoverageEntry] = []
+    for entry in schedule:
+        available = quantize_qty(available + by_month.get(entry.month, ZERO))
+        covered = quantize_qty(min(entry.quantity, max(available, ZERO)))
+        available = quantize_qty(available - covered)
+        result.append(
+            CoverageEntry(
+                month=entry.month,
+                need=entry.quantity,
+                covered=covered,
+                remaining=quantize_qty(entry.quantity - covered),
+                carry=available if available > 0 else ZERO,
+                order_year=entry.order_year,
+                order_month=entry.order_month,
+                overdue=entry.overdue,
             )
         )
     return result

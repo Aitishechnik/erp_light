@@ -29,7 +29,7 @@ from app.models.auth import (
 )
 from app.models.counterparties import Counterparty
 from app.models.countries import Country
-from app.models.domain import Batch, BatchItem, Product
+from app.models.domain import Batch, BatchItem, Product, StockBalance
 from app.models.planning import (
     PURCHASE_PLAN_STATUS_TITLES,
     SALES_PLAN_APPROVAL_STATUS_TITLES,
@@ -54,6 +54,7 @@ from app.services import audit_service
 from app.services import purchase_need as need
 from app.services.plan_freeze import editable_months
 from app.services.purchase_need import NeedChange, NeedPosition
+from app.services.stock_import_service import latest_balances
 
 EDITORS = (ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER)
 VIEWERS = (ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER, ROLE_EXECUTIVE_DIRECTOR)
@@ -373,10 +374,14 @@ def _fact_month(day: date, plan_year: int) -> int:
     return 1 if day.year < plan_year else 12
 
 
-def _facts(
-    db: Session, item_ids: list[uuid.UUID], plan_year: int
-) -> dict[uuid.UUID, tuple[Decimal, dict[int, Decimal]]]:
-    """Факт по строкам плана: всего и по месяцам прихода партий."""
+def _arrivals(
+    db: Session, item_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[tuple[date, Decimal]]]:
+    """Приходы по строкам плана: дата поступления и количество.
+
+    Дата нужна, чтобы не задвоить приход с остатком: то, что пришло до снимка
+    остатков, уже лежит в остатке, и второй раз в покрытие не идёт.
+    """
     if not item_ids:
         return {}
     rows = db.execute(
@@ -384,16 +389,21 @@ def _facts(
         .join(Batch, Batch.id == BatchItem.batch_id)
         .where(BatchItem.purchase_plan_item_id.in_(item_ids))
     ).all()
-    result: dict[uuid.UUID, tuple[Decimal, dict[int, Decimal]]] = {}
+    result: dict[uuid.UUID, list[tuple[date, Decimal]]] = {}
     for item_id, quantity, day in rows:
         if item_id is None:
             continue
-        total, months = result.get(item_id, (ZERO, {}))
-        value = Decimal(quantity)
+        result.setdefault(item_id, []).append((day, Decimal(quantity)))
+    return result
+
+
+def _months_of(arrivals: list[tuple[date, Decimal]], plan_year: int) -> dict[int, Decimal]:
+    """Приходы по месяцам плана: месяц прихода, а не месяц потребности."""
+    months: dict[int, Decimal] = {}
+    for day, value in arrivals:
         month = _fact_month(day, plan_year)
         months[month] = months.get(month, ZERO) + value
-        result[item_id] = (total + value, months)
-    return result
+    return months
 
 
 def _fact_share(fact: Decimal, quantity: Decimal) -> Decimal:
@@ -405,9 +415,11 @@ def _fact_share(fact: Decimal, quantity: Decimal) -> Decimal:
 def _items_out(
     plan: PurchasePlan,
     source: dict[uuid.UUID, NeedPosition],
-    facts: dict[uuid.UUID, tuple[Decimal, dict[int, Decimal]]] | None = None,
+    arrivals: dict[uuid.UUID, list[tuple[date, Decimal]]] | None = None,
+    stocks: dict[uuid.UUID, StockBalance] | None = None,
 ) -> list[PurchasePlanItemOut]:
-    fact_by_item = facts or {}
+    arrivals_by_item = arrivals or {}
+    stock_by_product = stocks or {}
     result: list[PurchasePlanItemOut] = []
     for item in sorted(
         plan.items,
@@ -425,7 +437,19 @@ def _items_out(
             item.delivery_days,
             plan.year,
         )
-        fact, fact_months = fact_by_item.get(item.id, (ZERO, {}))
+        rows = arrivals_by_item.get(item.id, [])
+        fact = sum((value for _day, value in rows), ZERO)
+        fact_months = _months_of(rows, plan.year)
+        stock = stock_by_product.get(item.product_id)
+        stock_quantity = stock.closing if stock else ZERO
+        stock_date = stock.balance_date if stock else None
+        # Приход до снимка остатков уже внутри остатка: второй раз не считаем.
+        countable = [(day, value) for day, value in rows if stock_date is None or day > stock_date]
+        coverage = need.cover_schedule(
+            schedule,
+            _months_of(countable, plan.year),
+            stock_quantity,
+        )
         result.append(
             PurchasePlanItemOut(
                 id=item.id,
@@ -450,15 +474,26 @@ def _items_out(
                     PurchasePlanMonthOut(month=month, quantity=quantity)
                     for month, quantity in sorted(fact_months.items())
                 ],
+                coverage_months=[
+                    PurchasePlanMonthOut(month=month, quantity=quantity)
+                    for month, quantity in sorted(_months_of(countable, plan.year).items())
+                ],
+                stock_quantity=stock_quantity,
+                stock_date=stock_date,
+                carry_forward=coverage[-1].carry if coverage else ZERO,
                 schedule=[
                     PurchasePlanScheduleEntryOut(
                         month=entry.month,
-                        quantity=entry.quantity,
+                        quantity=entry.need,
+                        covered=entry.covered,
+                        remaining=entry.remaining,
+                        carry=entry.carry,
+                        share=entry.share,
                         order_year=entry.order_year,
                         order_month=entry.order_month,
                         overdue=entry.overdue,
                     )
-                    for entry in schedule
+                    for entry in coverage
                 ],
             )
         )
@@ -467,7 +502,9 @@ def _items_out(
 
 def _serialize(db: Session, plan: PurchasePlan) -> PurchasePlanOut:
     source = _source_positions(db, plan)
-    facts = _facts(db, [item.id for item in plan.items], plan.year)
+    item_ids = [item.id for item in plan.items]
+    arrivals = _arrivals(db, item_ids)
+    stocks = latest_balances(db, [item.product_id for item in plan.items])
     return PurchasePlanOut(
         id=plan.id,
         year=plan.year,
@@ -482,7 +519,7 @@ def _serialize(db: Session, plan: PurchasePlan) -> PurchasePlanOut:
         editable_months=editable_months(plan.year),
         source=_source_out(db, plan),
         positions=_positions_out(db, plan, source),
-        items=_items_out(plan, source, facts),
+        items=_items_out(plan, source, arrivals, stocks),
     )
 
 
