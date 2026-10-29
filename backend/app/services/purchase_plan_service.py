@@ -431,11 +431,14 @@ def _items_out(
         ),
     ):
         position = source.get(item.sales_product_id)
-        schedule = need.split_annual(
+        product_stock = stock_by_product.get(item.sales_product_id)
+        product_stock_quantity = product_stock.closing if product_stock else ZERO
+        schedule = need.split_annual_from_product_stock(
             item.quantity,
             position.months if position else {},
             item.delivery_days,
             plan.year,
+            product_stock_quantity,
         )
         rows = arrivals_by_item.get(item.id, [])
         fact = sum((value for _day, value in rows), ZERO)
@@ -449,6 +452,10 @@ def _items_out(
             schedule,
             _months_of(countable, plan.year),
             stock_quantity,
+        )
+        planned = sum((entry.quantity for entry in schedule), ZERO)
+        product_stock_raw = (
+            max(item.quantity - planned, ZERO) if position is not None and schedule else ZERO
         )
         result.append(
             PurchasePlanItemOut(
@@ -480,6 +487,9 @@ def _items_out(
                 ],
                 stock_quantity=stock_quantity,
                 stock_date=stock_date,
+                product_stock_quantity=product_stock_quantity,
+                product_stock_date=product_stock.balance_date if product_stock else None,
+                product_stock_raw=product_stock_raw,
                 carry_forward=coverage[-1].carry if coverage else ZERO,
                 schedule=[
                     PurchasePlanScheduleEntryOut(
@@ -504,7 +514,10 @@ def _serialize(db: Session, plan: PurchasePlan) -> PurchasePlanOut:
     source = _source_positions(db, plan)
     item_ids = [item.id for item in plan.items]
     arrivals = _arrivals(db, item_ids)
-    stocks = latest_balances(db, [item.product_id for item in plan.items])
+    stocks = latest_balances(
+        db,
+        [item.product_id for item in plan.items] + [item.sales_product_id for item in plan.items],
+    )
     return PurchasePlanOut(
         id=plan.id,
         year=plan.year,

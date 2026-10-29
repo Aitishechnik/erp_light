@@ -74,6 +74,8 @@ type DraftRow = {
   /** Остаток сырья на складе по последнему отчёту 1С. */
   stockQuantity: string
   stockDate: string | null
+  /** Остаток готовой продукции: закрывает часть потребности. */
+  productStockQuantity: string
 }
 
 type PreviewEntry = {
@@ -84,30 +86,48 @@ type PreviewEntry = {
   overdue: boolean
 }
 
-/** Тот же расчёт, что на сервере: доли месяцев и месяц заказа от срока доставки. */
+/** Тот же расчёт, что на сервере: доли месяцев, остаток готовой продукции и срок доставки. */
 function splitPreview(
   annualMilli: number,
   position: PurchasePlanPosition | undefined,
   deliveryDays: number,
   planYear: number,
+  productStockMilli = 0,
 ): PreviewEntry[] {
   if (!position || annualMilli <= 0) return []
-  const shares = position.months
+  const sold = position.months
     .map((row) => ({ month: row.month, milli: toMilli(row.quantity) }))
     .filter((row) => row.milli > 0)
     .sort((left, right) => left.month - right.month)
-  const total = shares.reduce((sum, row) => sum + row.milli, 0)
+  const total = sold.reduce((sum, row) => sum + row.milli, 0)
   if (total <= 0) return []
+
+  // Готовая продукция на складе закрывает первые месяцы: сырьё нужно не на весь год.
+  let shares = sold
+  let buy = annualMilli
+  const stock = Math.min(Math.max(productStockMilli, 0), total)
+  if (stock > 0) {
+    let left = stock
+    shares = []
+    for (const row of sold) {
+      const deficit = row.milli - left
+      if (deficit > 0) shares.push({ month: row.month, milli: deficit })
+      left = Math.max(left - row.milli, 0)
+    }
+    if (shares.length === 0) return []
+    buy = Math.round((annualMilli * (total - stock)) / total)
+    if (buy <= 0) return []
+  }
+  const weight = shares.reduce((sum, row) => sum + row.milli, 0)
+  if (weight <= 0) return []
 
   const today = new Date()
   const shift = deliveryDays > 0 ? Math.ceil(deliveryDays / 30) : 0
   const result: PreviewEntry[] = []
-  let remaining = annualMilli
+  let remaining = buy
   shares.forEach((share, index) => {
     const isLast = index === shares.length - 1
-    let milli = isLast
-      ? remaining
-      : Math.min(Math.round((annualMilli * share.milli) / total), remaining)
+    let milli = isLast ? remaining : Math.min(Math.round((buy * share.milli) / weight), remaining)
     milli = Math.max(milli, 0)
     remaining -= milli
     if (milli <= 0) return
@@ -184,15 +204,29 @@ function needMonth(row: ScheduleRow, year: number): string {
 
 const QUARTER_TITLES = ['I квартал', 'II квартал', 'III квартал', 'IV квартал']
 
-/** Факт по месяцам, которых нет в графике: показываем отдельной строкой. */
+/** Пояснения под графиком: что закрыл склад готовой продукции и что пришло вне графика. */
 function extraFacts(row: DraftRow, schedule: PreviewEntry[]): string {
+  const parts: string[] = []
+  const need = schedule.reduce((sum, entry) => sum + entry.quantityMilli, 0)
+  const annual = toMilli(row.quantity)
+  if (Number(normalize(row.productStockQuantity) || 0) > 0 && annual > need) {
+    parts.push(
+      `склад готовой продукции закрывает ${formatQuantity(
+        ((annual - need) / 1000).toFixed(3),
+      )} кг сырья — заказывать ${formatQuantity((need / 1000).toFixed(3))}`,
+    )
+  }
   const outside = row.factMonths.filter(
     (month) => !schedule.some((entry) => entry.month === month.month),
   )
-  if (outside.length === 0) return ''
-  return `вне графика: ${outside
-    .map((month) => `${monthShort(month.month)} ${formatQuantity(month.quantity)}`)
-    .join(' · ')}`
+  if (outside.length > 0) {
+    parts.push(
+      `вне графика: ${outside
+        .map((month) => `${monthShort(month.month)} ${formatQuantity(month.quantity)}`)
+        .join(' · ')}`,
+    )
+  }
+  return parts.join(' · ')
 }
 
 /** Таблица месяцев: потребность, сколько нужно, к какому числу заказать и что пришло. */
@@ -424,8 +458,9 @@ function draftsFromPlan(plan: PurchasePlan): DraftRow[] {
     factShare: item.fact_share,
     factMonths: item.fact_months ?? [],
     coverageMonths: item.coverage_months ?? [],
-    stockQuantity: item.stock_quantity,
-    stockDate: item.stock_date,
+    stockQuantity: item.stock_quantity ?? '0',
+    stockDate: item.stock_date ?? null,
+    productStockQuantity: item.product_stock_quantity ?? '0',
   }))
 }
 
@@ -620,6 +655,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
         coverageMonths: [],
         stockQuantity: '0',
         stockDate: null,
+        productStockQuantity: '0',
       },
     ])
     setError(null)
@@ -1056,6 +1092,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                           position,
                           row.deliveryDays,
                           plan.year,
+                          toMilli(row.productStockQuantity),
                         )
                         const price = normalize(row.priceRub)
                         const quantity = normalize(row.quantity)
@@ -1157,6 +1194,9 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                   data-testid={`fact-${row.key}`}
                                   title="Остаток по последнему отчёту 1С и приход по связанным поступлениям"
                                 >
+                                  {Number(row.productStockQuantity) > 0 ? (
+                                    <>готовой {formatQuantity(row.productStockQuantity)} · </>
+                                  ) : null}
                                   {Number(row.stockQuantity) > 0 ? (
                                     <>
                                       на складе {formatQuantity(row.stockQuantity)}
@@ -1225,6 +1265,13 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                             <td>
                               {position.status === 'orphan' ? (
                                 '—'
+                              ) : schedule.length === 0 ? (
+                                <span className="hint" data-testid={`no-raw-${row.key}`}>
+                                  сырьё не нужно: потребность закрыта готовой продукцией
+                                  {Number(row.productStockQuantity) > 0
+                                    ? ` (${formatQuantity(row.productStockQuantity)} кг)`
+                                    : ''}
+                                </span>
                               ) : scheduleMode === 'summary' ? (
                                 <ScheduleView
                                   rows={scheduleRows(
@@ -1265,6 +1312,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                         position,
                         row.deliveryDays,
                         plan.year,
+                        toMilli(row.productStockQuantity),
                       )
                       const expanded = openSchedule.includes(row.key)
                       if (schedule.length === 0) return null

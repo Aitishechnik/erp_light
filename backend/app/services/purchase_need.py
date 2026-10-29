@@ -345,6 +345,46 @@ def split_annual(
     return result
 
 
+def split_annual_from_product_stock(
+    annual: Decimal,
+    position_months: dict[int, Decimal],
+    delivery_days: int,
+    plan_year: int,
+    product_stock: Decimal = ZERO,
+    today: date | None = None,
+) -> list[MonthPlan]:
+    """Потребность в сырье с учётом остатка готовой продукции.
+
+    Готовая продукция на складе закрывает первые месяцы продаж: на этот объём
+    сырьё заказывать не нужно. Остаток переводится в сырьё коэффициентом строки
+    — годовое количество сырья к годовому объёму продаж позиции, — поэтому
+    месяцы сохраняют пропорции продаж, но суммарное количество уменьшается.
+    """
+    total = sum(position_months.values(), ZERO)
+    if annual <= 0 or total <= 0:
+        return []
+    stock = min(max(quantize_qty(product_stock), ZERO), total)
+    if stock <= 0:
+        return split_annual(annual, position_months, delivery_days, plan_year, today)
+
+    left = stock
+    deficits: dict[int, Decimal] = {}
+    for month in sorted(month for month, quantity in position_months.items() if quantity > 0):
+        sold = position_months[month]
+        deficit = quantize_qty(sold - left)
+        if deficit > 0:
+            deficits[month] = deficit
+        left = max(quantize_qty(left - sold), ZERO)
+    if not deficits:
+        return []
+
+    # Сырьё нужно не на весь год, а только на непокрытую складом часть продаж.
+    buy = quantize_qty(annual * (total - stock) / total)
+    if buy <= 0:
+        return []
+    return split_annual(buy, deficits, delivery_days, plan_year, today)
+
+
 def cover_schedule(
     schedule: list[MonthPlan],
     arrivals: dict[int, Decimal] | None = None,

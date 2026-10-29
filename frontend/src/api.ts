@@ -206,6 +206,11 @@ export type PurchasePlanItem = {
   /** Остаток сырья на складе по последнему отчёту 1С. */
   stock_quantity: string
   stock_date: string | null
+  /** Остаток готовой продукции: закрывает часть потребности в сырье. */
+  product_stock_quantity: string
+  product_stock_date: string | null
+  /** Сколько сырья не нужно заказывать: остаток готовой продукции в пересчёте на сырьё. */
+  product_stock_raw: string
   /** Излишек после последнего месяца — переходит на следующий год. */
   carry_forward: string
   schedule: PurchasePlanScheduleEntry[]

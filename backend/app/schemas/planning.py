@@ -159,6 +159,17 @@ class PurchasePlanItemOut(BaseModel):
         default=Decimal("0"), description="Остаток сырья на складе по последнему отчёту"
     )
     stock_date: date | None = Field(default=None, description="Дата снимка остатков")
+    product_stock_quantity: Decimal = Field(
+        default=Decimal("0"),
+        description="Остаток готовой продукции на складе: закрывает часть потребности",
+    )
+    product_stock_date: date | None = Field(
+        default=None, description="Дата снимка остатков готовой продукции"
+    )
+    product_stock_raw: Decimal = Field(
+        default=Decimal("0"),
+        description="Сколько сырья не нужно заказывать: остаток готовой продукции в сырье",
+    )
     carry_forward: Decimal = Field(
         default=Decimal("0"),
         description="Излишек после последнего месяца — переходит на следующий год",
