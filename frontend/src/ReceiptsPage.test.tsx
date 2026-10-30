@@ -337,6 +337,49 @@ describe('ReceiptsPage', () => {
     expect(screen.getByTestId('plan-select-i0')).toHaveValue('pl1')
   })
 
+  it('одно сырьё в плане — один вариант привязки, а не строка на позицию', async () => {
+    const user = userEvent.setup()
+    const linked = batch()
+    const [item] = linked.items
+    if (!item) throw new Error('у партии нет строк')
+    linked.items = [{ ...item, purchase_plan_item_id: 'pl1', purchase_plan_label: '2027 · Китай' }]
+    mockApi({
+      'PUT /api/v1/batches/b1': { body: linked },
+      ...routes({
+        '/api/v1/purchase-plans': {
+          body: [
+            {
+              status: 'approved',
+              year: 2027,
+              items: [
+                { id: 'pl1', product_id: 'p1', country_name: 'Китай' },
+                { id: 'pl2', product_id: 'p1', country_name: 'Китай' },
+                { id: 'pl3', product_id: 'p1', country_name: 'Узбекистан' },
+              ],
+            },
+          ],
+        },
+      }),
+    })
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await openBatch(user)
+    const select = await screen.findByTestId('plan-select-i0')
+    const options = within(select).getAllByRole('option')
+    // «Не по плану» и один пункт на год: три строки одного сырья — не три выбора.
+    expect(options.map((option) => option.textContent)).toEqual([
+      '— не по плану —',
+      '2027 · план закупок',
+    ])
+    await user.selectOptions(select, 'pl1')
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }))
+
+    await waitFor(() => {
+      expect(bodies().some((body) => body.includes('"purchase_plan_item_id":"pl1"'))).toBe(true)
+    })
+  })
+
   it('помечает в списке дня поступление, связанное с планом', async () => {
     const planned = batch()
     const [item] = planned.items

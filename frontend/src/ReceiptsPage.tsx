@@ -83,14 +83,20 @@ type ExpenseDraft = {
   amount: string
 }
 
-/** Вариант строки плана закупок для выбора в позиции поступления. */
+/** Строка утверждённого плана закупок: у одного сырья их может быть несколько. */
 type PlanLine = {
   id: string
   productId: string
-  /** Что видно в списке: год, страна и поставщик. */
+  year: number
+  /** Подпись строки для старых привязок: год, страна и поставщик. */
   label: string
-  /** Для какого товара плана продаж закупается строка. */
-  detail: string
+}
+
+/** Вариант привязки: одна строка на сырьё и год — какая именно строка, не важно. */
+type PlanOption = {
+  id: string
+  label: string
+  title: string
 }
 
 /** Утверждённые планы: выбирать можно только их строки. */
@@ -102,10 +108,10 @@ function approvedPlanLines(plans: PurchasePlan[]): PlanLine[] {
       rows.push({
         id: line.id,
         productId: line.product_id,
+        year: plan.year,
         label: `${plan.year} · ${line.country_name}${
           line.supplier_name ? ` · ${line.supplier_name}` : ''
         }`,
-        detail: line.sales_product_name,
       })
     }
   }
@@ -113,10 +119,37 @@ function approvedPlanLines(plans: PurchasePlan[]): PlanLine[] {
 }
 
 /**
- * Ссылка позиции поступления на строку плана закупок.
+ * Приход считается по сырью, поэтому на год — один вариант: строки одного
+ * сырья делят общий котёл, и выбирать между позициями незачем.
+ */
+function planOptions(lines: PlanLine[], productId: string): PlanOption[] {
+  const byYear = new Map<number, PlanLine[]>()
+  for (const line of lines) {
+    if (line.productId !== productId) continue
+    const bucket = byYear.get(line.year) ?? []
+    bucket.push(line)
+    byYear.set(line.year, bucket)
+  }
+  return [...byYear.entries()]
+    .sort((left, right) => left[0] - right[0])
+    .flatMap(([year, rows]) => {
+      const first = rows[0]
+      if (first === undefined) return []
+      return [
+        {
+          id: first.id,
+          label: `${year} · план закупок`,
+          title: `Приход закроет все позиции этого сырья в плане ${year} — какая строка выбрана, не важно`,
+        },
+      ]
+    })
+}
+
+/**
+ * Ссылка позиции поступления на план закупок.
  *
- * Ссылку ставит закупщик: 1С не знает наш план. Предлагаются только строки того же
- * сырья из утверждённых планов; «не по плану» — обычное поступление.
+ * Ссылку ставит закупщик: 1С не знает наш план. Предлагается сырьё из
+ * утверждённых планов — одна строка на год; «не по плану» — обычное поступление.
  */
 function PlanLink({
   item,
@@ -134,8 +167,9 @@ function PlanLink({
   onChange: (planItemId: string, label: string) => void
 }) {
   const product = findProduct(products, item.code || item.title)
-  const options = product ? lines.filter((row) => row.productId === product.id) : []
+  const options = product ? planOptions(lines, product.id) : []
   const current = item.planItemId ? lines.find((row) => row.id === item.planItemId) : undefined
+  const linked = options.some((option) => option.id === item.planItemId)
 
   if (!mayEdit) {
     return current || item.planItemId ? (
@@ -148,31 +182,30 @@ function PlanLink({
 
   return (
     <>
-      <span className="plan-caption">Строка плана</span>
+      <span className="plan-caption">План закупок</span>
       <select
         className="plan-select"
-        aria-label={`Строка плана ${item.key}`}
+        aria-label={`План закупок ${item.key}`}
         data-testid={`plan-select-${item.key}`}
-        title={
-          current
-            ? `${current.label} · для «${current.detail}»`
-            : 'Строка плана закупок, по которой пришёл товар'
-        }
+        title="Приход считается по сырью: выбранная строка плана закрывает все позиции с этим сырьём"
         disabled={disabled}
         value={item.planItemId}
         onChange={(event) => {
-          const chosen = lines.find((row) => row.id === event.target.value)
-          onChange(event.target.value, chosen?.label ?? '')
+          const chosen = options.find((option) => option.id === event.target.value)
+          const legacy = lines.find((row) => row.id === event.target.value)
+          onChange(event.target.value, chosen?.label ?? legacy?.label ?? '')
         }}
       >
         <option value="">— не по плану —</option>
-        {options.map((row) => (
-          <option key={row.id} value={row.id}>
-            {row.label} · для «{row.detail}»
+        {options.map((option) => (
+          <option key={option.id} value={option.id} title={option.title}>
+            {option.label}
           </option>
         ))}
-        {current === undefined && item.planItemId ? (
-          <option value={item.planItemId}>{item.planLabel || 'сохранённая строка плана'}</option>
+        {!linked && item.planItemId ? (
+          <option value={item.planItemId}>
+            {item.planLabel || current?.label || 'сохранённая строка плана'}
+          </option>
         ) : null}
       </select>
     </>
