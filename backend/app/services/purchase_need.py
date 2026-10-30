@@ -10,6 +10,9 @@
    позиции и считает, до какого месяца нужно оформить заказ с учётом срока
    доставки страны.
 
+Покрытие считается по сырью, а не по строке плана: если одно сырьё нужно
+нескольким позициям, приход и излишек у них общие (``cover_group``).
+
 Когда заказ попадает в прошлый год (январь при сроке 90 дней — это октябрь
 предыдущего года), возвращается настоящий год и месяц, а не «месяц 1».
 """
@@ -18,11 +21,12 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Hashable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from math import ceil
-from typing import Any
+from typing import Any, TypeVar
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -35,6 +39,9 @@ QTY = Decimal("0.001")
 ZERO = Decimal("0")
 ONE_HUNDRED = Decimal("100")
 SHARE = Decimal("0.1")
+MILLI = Decimal("1000")
+
+Key = TypeVar("Key", bound=Hashable)
 
 
 def quantize_qty(value: Decimal | int | str) -> Decimal:
@@ -345,36 +352,87 @@ def split_annual(
     return result
 
 
+def _milli(value: Decimal) -> int:
+    """Количество в тысячных, чтобы делить без потерь на округлении."""
+    return int((value * MILLI).to_integral_value(rounding=ROUND_HALF_UP))
+
+
+def _from_milli(value: int) -> Decimal:
+    return Decimal(value).scaleb(-3).quantize(QTY, rounding=ROUND_HALF_UP)
+
+
+def _split_covered(needs: list[int], covered: int) -> list[int]:
+    """Поделить покрытие пропорционально потребности, остаток — большей доле.
+
+    Считаем в тысячных: целые части по пропорции, а единицы, потерянные на
+    округлении, отдаём строкам с самым большим остатком. Сумма всегда равна
+    ``covered``, и ни одна строка не получает больше своей потребности.
+    """
+    total = sum(needs)
+    if total <= 0 or covered <= 0:
+        return [0] * len(needs)
+    parts = [covered * need // total for need in needs]
+    rest = covered - sum(parts)
+    if rest > 0:
+        order = sorted(
+            range(len(needs)),
+            key=lambda index: (-((covered * needs[index]) % total), index),
+        )
+        for index in order[:rest]:
+            parts[index] += 1
+    return parts
+
+
+def cover_group(
+    schedules: dict[Key, list[MonthPlan]],
+    arrivals: dict[int, Decimal] | None = None,
+    opening: Decimal = ZERO,
+) -> dict[Key, list[CoverageEntry]]:
+    """Покрытие по сырью: приходы и излишек общие для всех строк одного сырья.
+
+    Месяцы идут по порядку. В каждом месяце приход закрывает суммарную
+    потребность всех строк, а покрытие делится между строками пропорционально
+    их потребности в этом месяце: строка видит свой кусок, но приход у них
+    один. Излишек после месяца остаётся в общем котле и перекрывает следующие
+    месяцы любой из строк. Поэтому «перекрыто» по строкам в сумме даёт ровно
+    то, что пришло, и не бывает больше 100 %.
+    """
+    by_month = arrivals or {}
+    month_rows: dict[int, list[tuple[Key, MonthPlan]]] = {}
+    for key, schedule in schedules.items():
+        for entry in schedule:
+            month_rows.setdefault(entry.month, []).append((key, entry))
+
+    available = _milli(opening)
+    result: dict[Key, list[CoverageEntry]] = {key: [] for key in schedules}
+    for month in sorted(month_rows):
+        available += _milli(by_month.get(month, ZERO))
+        rows = sorted(month_rows[month], key=lambda pair: (-pair[1].quantity, str(pair[0])))
+        needs = [_milli(entry.quantity) for _key, entry in rows]
+        covered = min(sum(needs), max(available, 0))
+        parts = _split_covered(needs, covered)
+        available -= covered
+        carry = _from_milli(max(available, 0))
+        for (key, entry), need, part in zip(rows, needs, parts, strict=True):
+            result[key].append(
+                CoverageEntry(
+                    month=month,
+                    need=_from_milli(need),
+                    covered=_from_milli(part),
+                    remaining=_from_milli(need - part),
+                    carry=carry,
+                    order_year=entry.order_year,
+                    order_month=entry.order_month,
+                    overdue=entry.overdue,
+                )
+            )
+    return result
+
+
 def cover_schedule(
     schedule: list[MonthPlan],
     arrivals: dict[int, Decimal] | None = None,
     opening: Decimal = ZERO,
 ) -> list[CoverageEntry]:
-    """Разложить по месяцам то, что уже есть: остаток и приходы.
-
-    Месяцы идут по порядку: остаток на начало плюс приход месяца закрывают
-    потребность месяца, излишек переходит на следующий. Поэтому поставка
-    контейнером сверх месяца не даёт 250 % — она даёт 100 % и запас на будущее.
-    Приходы складываются с того месяца, в котором пришли: раньше времени они
-    потребность не закрывают.
-    """
-    by_month = arrivals or {}
-    available = quantize_qty(opening)
-    result: list[CoverageEntry] = []
-    for entry in schedule:
-        available = quantize_qty(available + by_month.get(entry.month, ZERO))
-        covered = quantize_qty(min(entry.quantity, max(available, ZERO)))
-        available = quantize_qty(available - covered)
-        result.append(
-            CoverageEntry(
-                month=entry.month,
-                need=entry.quantity,
-                covered=covered,
-                remaining=quantize_qty(entry.quantity - covered),
-                carry=available if available > 0 else ZERO,
-                order_year=entry.order_year,
-                order_month=entry.order_month,
-                overdue=entry.overdue,
-            )
-        )
-    return result
+    """Покрытие одной строки — частный случай общего котла по сырью."""
+    return cover_group({None: schedule}, arrivals, opening)[None]

@@ -11,7 +11,12 @@ from sqlalchemy.orm import Session
 from app.models.counterparties import Counterparty
 from app.models.domain import Batch, BatchItem, Product, StockBalance
 from app.models.planning import PurchasePlan
-from app.services.purchase_need import cover_schedule, order_year_month, split_annual
+from app.services.purchase_need import (
+    cover_group,
+    cover_schedule,
+    order_year_month,
+    split_annual,
+)
 
 TODAY = date.today()
 YEAR = TODAY.year + 1
@@ -344,8 +349,103 @@ def test_coverage_counts_our_arrivals_only(
     assert [row["covered"] for row in schedule] == ["10.000", "20.000"]
     assert [row["share"] for row in schedule] == ["100.0", "100.0"]
     assert [row["remaining"] for row in schedule] == ["0.000", "0.000"]
-    assert [row["carry"] for row in schedule] == ["20.000", "0"]
-    assert item["carry_forward"] == "0"
+    assert [row["carry"] for row in schedule] == ["20.000", "0.000"]
+    assert item["carry_forward"] == "0.000"
+
+
+def test_cover_group_shares_the_arrival_between_rows() -> None:
+    """Один приход закрывает потребность всех строк одного сырья."""
+    first = split_annual(
+        Decimal("30"), {1: Decimal("100"), 2: Decimal("200")}, 90, 2027, today=date(2026, 10, 21)
+    )
+    second = split_annual(Decimal("15"), {1: Decimal("50")}, 65, 2027, today=date(2026, 10, 21))
+    shared = cover_group({"first": first, "second": second}, {1: Decimal("40")})
+
+    # Январь: нужно 10 + 15, пришло 40 — закрываем всё, излишек 15 идёт в февраль.
+    assert [(row.need, row.covered, row.carry) for row in shared["first"]] == [
+        (Decimal("10.000"), Decimal("10.000"), Decimal("15.000")),
+        (Decimal("20.000"), Decimal("15.000"), Decimal("0")),
+    ]
+    assert shared["first"][1].remaining == Decimal("5.000")
+    assert [(row.need, row.covered, row.share) for row in shared["second"]] == [
+        (Decimal("15.000"), Decimal("15.000"), Decimal("100.0")),
+    ]
+
+    # Не хватает на всех: делим пропорционально потребности месяца.
+    tight = cover_group(
+        {
+            "a": split_annual(Decimal("10"), {1: Decimal("10")}, 0, 2027),
+            "b": split_annual(Decimal("10"), {1: Decimal("10")}, 0, 2027),
+            "c": split_annual(Decimal("10"), {1: Decimal("10")}, 0, 2027),
+        },
+        {1: Decimal("10")},
+    )
+    assert [tight[key][0].covered for key in ("a", "b", "c")] == [
+        Decimal("3.334"),
+        Decimal("3.333"),
+        Decimal("3.333"),
+    ]
+    assert sum(row[0].covered for row in tight.values()) == Decimal("10.000")
+
+
+def test_coverage_is_shared_by_raw_material(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    """Партия, привязанная к одной строке, перекрывает все позиции с этим сырьём."""
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    saved = _save(
+        client,
+        plan["id"],
+        [
+            _item(catalog, sales="fin", raw="raw", quantity="30"),
+            _item(catalog, sales="fin2", raw="raw", quantity="15", country="china"),
+        ],
+    )
+    assert saved.status_code == 200, saved.text
+    items = {item["sales_product_id"]: item for item in saved.json()["items"]}
+    first_id = items[str(catalog["fin"].id)]["id"]
+
+    batch = Batch(
+        batch_number="ИТ-2027-0100",
+        batch_date=date(YEAR, 1, 15),
+        currency="RUB",
+        source="1c",
+    )
+    db_session.add(batch)
+    db_session.flush()
+    db_session.add(
+        BatchItem(
+            batch_id=batch.id,
+            product_id=catalog["raw"].id,
+            quantity=Decimal("40"),
+            purchase_plan_item_id=first_id,
+        )
+    )
+    db_session.commit()
+
+    login("purchase")
+    body = client.get(f"/api/v1/purchase-plans/{plan['id']}").json()
+    items = {item["sales_product_id"]: item for item in body["items"]}
+    first = items[str(catalog["fin"].id)]
+    second = items[str(catalog["fin2"].id)]
+
+    # Приход лежит только на первой строке, но закрывает и вторую позицию.
+    assert first["fact_quantity"] == "40.000"
+    assert second["fact_quantity"] == "0"
+    assert [(row["quantity"], row["covered"]) for row in first["schedule"]] == [
+        ("10.000", "10.000"),
+        ("20.000", "15.000"),
+    ]
+    assert first["schedule"][1]["remaining"] == "5.000"
+    assert [(row["quantity"], row["covered"]) for row in second["schedule"]] == [
+        ("15.000", "15.000"),
+    ]
+    assert second["schedule"][0]["share"] == "100.0"
+    assert (first["carry_forward"], second["carry_forward"]) == ("0.000", "0.000")
+    # В сумме по строкам перекрыто ровно то, что пришло: 40 из 45.
+    covered = sum(Decimal(row["covered"]) for item in (first, second) for row in item["schedule"])
+    assert covered == Decimal("40.000")
 
 
 def test_validation_keeps_previous_rows(client: TestClient, login, catalog: dict[str, Any]) -> None:

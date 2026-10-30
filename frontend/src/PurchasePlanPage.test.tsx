@@ -321,8 +321,56 @@ describe('PurchasePlanPage', () => {
     render(<PurchasePlanPage user={DIRECTOR} />)
 
     const table = await screen.findByTestId('purchase-table')
+    expect(await screen.findByLabelText('Количество FIN-1 1')).toHaveValue('30')
     expect(table).toHaveTextContent('Потребность закрыта до конца года')
     expect(table).toHaveTextContent('излишек после февраль 2026 — 12 кг, переносим на 2027 год')
+  })
+
+  it('одно сырьё на две позиции: приход считаем общим котлом', async () => {
+    mockApi(
+      routes([
+        plan({
+          positions: [
+            POSITION,
+            {
+              ...POSITION,
+              product_id: 'fin-2',
+              code: 'FIN-2',
+              name: 'Финики',
+              total: '50.000',
+              months: [{ month: 1, quantity: '50.000' }],
+            },
+          ],
+          items: [
+            planItem({
+              fact_quantity: '40.000',
+              fact_months: [{ month: 1, quantity: '40.000' }],
+            }),
+            planItem({
+              id: 'item-2',
+              sales_product_id: 'fin-2',
+              sales_product_name: 'Финики',
+              quantity: '15.000',
+              fact_quantity: '0',
+              fact_months: [],
+            }),
+          ],
+        }),
+      ]),
+    )
+    render(<PurchasePlanPage user={DIRECTOR} />)
+
+    // Приход связан только с первой строкой, но показан как общий по сырью.
+    expect(await screen.findByTestId('fact-item-1')).toHaveTextContent('пришло 40')
+    expect(screen.getByTestId('fact-item-2')).toHaveTextContent('пришло 40')
+    const table = screen.getByTestId('purchase-table')
+    expect(screen.getAllByTestId('schedule-group')).toHaveLength(2)
+    // Нужно 45 кг, пришло 40: обе строки закрыты пропорционально, докупить 5.
+    expect(table).toHaveTextContent('перекрыто 40 из 45 кг (88,9 %)')
+    expect(table).toHaveTextContent('докупить 5 кг')
+    expect(table).toHaveTextContent(
+      'Ближайший заказ: к 01.11.2025 — 5 кг (потребность — февраль 2026)',
+    )
   })
 
   it('показывает diff пересмотренного плана продаж и принимает его к сведению', async () => {

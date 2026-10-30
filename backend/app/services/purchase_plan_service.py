@@ -420,8 +420,7 @@ def _items_out(
 ) -> list[PurchasePlanItemOut]:
     arrivals_by_item = arrivals or {}
     stock_by_product = stocks or {}
-    result: list[PurchasePlanItemOut] = []
-    for item in sorted(
+    items = sorted(
         plan.items,
         key=lambda row: (
             row.sales_product.name,
@@ -429,22 +428,53 @@ def _items_out(
             row.product.name,
             row.supplier.name if row.supplier else "",
         ),
-    ):
+    )
+
+    schedules: dict[uuid.UUID, list[need.MonthPlan]] = {}
+    fact_by_item: dict[uuid.UUID, Decimal] = {}
+    fact_months_by_item: dict[uuid.UUID, dict[int, Decimal]] = {}
+    for item in items:
         position = source.get(item.sales_product_id)
-        schedule = need.split_annual(
+        schedules[item.id] = need.split_annual(
             item.quantity,
             position.months if position else {},
             item.delivery_days,
             plan.year,
         )
         rows = arrivals_by_item.get(item.id, [])
-        fact = sum((value for _day, value in rows), ZERO)
-        fact_months = _months_of(rows, plan.year)
+        fact_by_item[item.id] = sum((value for _day, value in rows), ZERO)
+        fact_months_by_item[item.id] = _months_of(rows, plan.year)
+
+    # Одно сырьё у нескольких позиций — один общий котёл приходов: партия,
+    # привязанная к любой из строк, перекрывает потребность всех.
+    groups: dict[uuid.UUID, list[PurchasePlanItem]] = {}
+    for item in items:
+        groups.setdefault(item.product_id, []).append(item)
+    coverage_by_item: dict[uuid.UUID, list[need.CoverageEntry]] = {}
+    # Излишек — общий для сырья: он остаётся после последнего месяца любой строки.
+    carry_by_item: dict[uuid.UUID, Decimal] = {}
+    for group in groups.values():
+        arrivals_by_month: dict[int, Decimal] = {}
+        for item in group:
+            for month, quantity in fact_months_by_item[item.id].items():
+                arrivals_by_month[month] = arrivals_by_month.get(month, ZERO) + quantity
+        calculated = need.cover_group(
+            {item.id: schedules[item.id] for item in group}, arrivals_by_month
+        )
+        coverage_by_item.update(calculated)
+        entries = [entry for schedule in calculated.values() for entry in schedule]
+        last = max(entries, key=lambda entry: entry.month, default=None)
+        for item in group:
+            carry_by_item[item.id] = last.carry if last else ZERO
+
+    result: list[PurchasePlanItemOut] = []
+    for item in items:
+        coverage = coverage_by_item[item.id]
+        fact_months = fact_months_by_item[item.id]
         stock = stock_by_product.get(item.product_id)
         # Остаток на складе — только справка: покрытие считаем по нашим приходам.
         stock_quantity = stock.closing if stock else ZERO
         stock_date = stock.balance_date if stock else None
-        coverage = need.cover_schedule(schedule, fact_months)
         result.append(
             PurchasePlanItemOut(
                 id=item.id,
@@ -463,15 +493,15 @@ def _items_out(
                 supplier_id=item.supplier_id,
                 supplier_name=item.supplier.name if item.supplier else None,
                 notes=item.notes,
-                fact_quantity=fact,
-                fact_share=_fact_share(fact, item.quantity),
+                fact_quantity=fact_by_item[item.id],
+                fact_share=_fact_share(fact_by_item[item.id], item.quantity),
                 fact_months=[
                     PurchasePlanMonthOut(month=month, quantity=quantity)
                     for month, quantity in sorted(fact_months.items())
                 ],
                 stock_quantity=stock_quantity,
                 stock_date=stock_date,
-                carry_forward=coverage[-1].carry if coverage else ZERO,
+                carry_forward=carry_by_item[item.id],
                 schedule=[
                     PurchasePlanScheduleEntryOut(
                         month=entry.month,

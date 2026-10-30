@@ -146,29 +146,140 @@ type ScheduleRow = {
   soon: boolean
 }
 
-function scheduleRows(
-  entries: PreviewEntry[],
-  factMonths: { month: number; quantity: string }[],
-): ScheduleRow[] {
+/** Сводка по сырью: строки плана с одним сырьём делят приходы и излишек. */
+type GroupTotals = {
+  rows: number
+  positions: number
+  need: number
+  fact: number
+  covered: number
+  remaining: number
+  carry: number
+  months: Set<number>
+}
+
+type Coverage = {
+  byRow: Map<string, ScheduleRow[]>
+  group: Map<string, GroupTotals>
+}
+
+/** Строки с одним сырьём — один общий котёл; у новой строки без сырья свой. */
+function groupKey(row: DraftRow): string {
+  return row.productId ? `product:${row.productId}` : `row:${row.key}`
+}
+
+/** Поделить покрытие пропорционально потребности; остаток — большей доле. */
+function allocateShare(needs: number[], covered: number): number[] {
+  const total = needs.reduce((sum, need) => sum + need, 0)
+  if (total <= 0 || covered <= 0) return needs.map(() => 0)
+  const ratio = covered / total
+  const parts = needs.map((need) => Math.min(Math.floor(ratio * need), need))
+  let rest = covered - parts.reduce((sum, part) => sum + part, 0)
+  const order = needs
+    .map((need, index) => ({ index, left: ratio * need - Math.floor(ratio * need) }))
+    .sort((left, right) => right.left - left.left || left.index - right.index)
+  let cursor = 0
+  while (rest > 0 && order.length > 0) {
+    const target = order[cursor % order.length]
+    if (target === undefined) break
+    parts[target.index] = (parts[target.index] ?? 0) + 1
+    rest -= 1
+    cursor += 1
+  }
+  return parts
+}
+
+/** Тот же расчёт покрытия, что на сервере: приходы общие по сырью. */
+function coverDrafts(
+  drafts: DraftRow[],
+  positions: PurchasePlanPosition[],
+  planYear: number,
+): Coverage {
+  const byRow = new Map<string, ScheduleRow[]>()
+  const group = new Map<string, GroupTotals>()
+  const buckets = new Map<string, DraftRow[]>()
+  for (const row of drafts) {
+    const key = groupKey(row)
+    const bucket = buckets.get(key) ?? []
+    bucket.push(row)
+    buckets.set(key, bucket)
+  }
   const today = new Date()
   const current = today.getFullYear() * 12 + today.getMonth()
-  let available = 0
-  return entries.map((entry) => {
-    const factRow = factMonths.find((row) => row.month === entry.month)
-    const needMilli = entry.quantityMilli
-    available += factRow ? toMilli(factRow.quantity) : 0
-    const coveredMilli = Math.min(needMilli, Math.max(available, 0))
-    available -= coveredMilli
-    return {
-      entry,
-      need: needMilli / 1000,
-      covered: coveredMilli / 1000,
-      remaining: (needMilli - coveredMilli) / 1000,
-      carry: available / 1000,
-      share: needMilli > 0 ? (coveredMilli / needMilli) * 100 : 0,
-      soon: !entry.overdue && entry.orderYear * 12 + entry.orderMonth - 1 === current,
+
+  buckets.forEach((rows, key) => {
+    const entries = new Map<string, PreviewEntry[]>()
+    const fact = new Map<string, Map<number, number>>()
+    for (const row of rows) {
+      const position = positions.find((item) => item.product_id === row.salesProductId)
+      entries.set(
+        row.key,
+        splitPreview(toMilli(row.quantity), position, row.deliveryDays, planYear),
+      )
+      const months = new Map<number, number>()
+      for (const month of row.factMonths) {
+        months.set(month.month, (months.get(month.month) ?? 0) + toMilli(month.quantity))
+      }
+      fact.set(row.key, months)
+      byRow.set(row.key, [])
     }
+
+    const monthSet = new Set<number>()
+    entries.forEach((list) => {
+      list.forEach((entry) => {
+        monthSet.add(entry.month)
+      })
+    })
+    const months = [...monthSet].sort((left, right) => left - right)
+
+    let available = 0
+    let coveredMilli = 0
+    for (const month of months) {
+      for (const row of rows) available += fact.get(row.key)?.get(month) ?? 0
+      const participants = rows
+        .map((row) => ({ row, entry: entries.get(row.key)?.find((item) => item.month === month) }))
+        .filter((item): item is { row: DraftRow; entry: PreviewEntry } => item.entry !== undefined)
+      const needs = participants.map((item) => item.entry.quantityMilli)
+      const covered = Math.min(
+        needs.reduce((sum, need) => sum + need, 0),
+        Math.max(available, 0),
+      )
+      const parts = allocateShare(needs, covered)
+      available -= covered
+      participants.forEach((item, index) => {
+        const part = parts[index] ?? 0
+        byRow.get(item.row.key)?.push({
+          entry: item.entry,
+          need: item.entry.quantityMilli / 1000,
+          covered: part / 1000,
+          remaining: (item.entry.quantityMilli - part) / 1000,
+          carry: Math.max(available, 0) / 1000,
+          share: item.entry.quantityMilli > 0 ? (part / item.entry.quantityMilli) * 100 : 0,
+          soon:
+            !item.entry.overdue &&
+            item.entry.orderYear * 12 + item.entry.orderMonth - 1 === current,
+        })
+      })
+      coveredMilli += covered
+    }
+
+    const needMilli = rows.reduce((sum, row) => sum + toMilli(row.quantity), 0)
+    const factMilli = rows.reduce(
+      (sum, row) => sum + row.factMonths.reduce((acc, month) => acc + toMilli(month.quantity), 0),
+      0,
+    )
+    group.set(key, {
+      rows: rows.length,
+      positions: new Set(rows.map((row) => row.salesProductId)).size,
+      need: needMilli / 1000,
+      fact: factMilli / 1000,
+      covered: coveredMilli / 1000,
+      remaining: Math.max(needMilli - coveredMilli, 0) / 1000,
+      carry: Math.max(available, 0) / 1000,
+      months: monthSet,
+    })
   })
+  return { byRow, group }
 }
 
 function orderDate(row: ScheduleRow): string {
@@ -181,15 +292,36 @@ function needMonth(row: ScheduleRow, year: number): string {
 
 const QUARTER_TITLES = ['I квартал', 'II квартал', 'III квартал', 'IV квартал']
 
-/** Факт по месяцам, которых нет в графике: показываем отдельной строкой. */
-function extraFacts(row: DraftRow, schedule: PreviewEntry[]): string {
-  const outside = row.factMonths.filter(
-    (month) => !schedule.some((entry) => entry.month === month.month),
-  )
+/** Месяцы графика одной строки — запасной вариант, когда сырьё у строки одно. */
+function monthsOf(schedule: PreviewEntry[]): Set<number> {
+  return new Set(schedule.map((entry) => entry.month))
+}
+
+/** Факт по месяцам, которых нет в графике сырья: показываем отдельной строкой. */
+function extraFacts(row: DraftRow, months: Set<number>): string {
+  const outside = row.factMonths.filter((month) => !months.has(month.month))
   if (outside.length === 0) return ''
   return `вне графика: ${outside
     .map((month) => `${monthShort(month.month)} ${formatQuantity(month.quantity)}`)
     .join(' · ')}`
+}
+
+/** Строка «по сырью»: приход общий, поэтому показываем котёл целиком. */
+function GroupNote({ group, year }: { group: GroupTotals; year: number }) {
+  const share = group.need > 0 ? (group.covered / group.need) * 100 : 0
+  const rest =
+    group.remaining > 0 ? `докупить ${formatQuantity(group.remaining.toFixed(3))} кг` : ''
+  const carry =
+    group.carry > 0 ? `излишек ${formatQuantity(group.carry.toFixed(3))} на ${year + 1}` : ''
+  return (
+    <span className="sched-group" data-testid="schedule-group">
+      <span className="sched-group-line">
+        по сырью ({group.positions} поз.): перекрыто {formatQuantity(group.covered.toFixed(3))} из{' '}
+        {formatQuantity(group.need.toFixed(3))} кг ({formatQuantity(share.toFixed(1))} %)
+      </span>
+      <span className="sched-group-line">{[rest, carry].filter(Boolean).join(' · ')}</span>
+    </span>
+  )
 }
 
 /** Таблица месяцев: потребность, сколько нужно, к какому числу заказать и что пришло. */
@@ -266,6 +398,7 @@ function ScheduleView({
   extra,
   wide = false,
   tableOnly = false,
+  showCarry = true,
 }: {
   rows: ScheduleRow[]
   mode: ScheduleMode
@@ -275,6 +408,8 @@ function ScheduleView({
   extra: string
   wide?: boolean
   tableOnly?: boolean
+  /** Излишек одной строки не показываем: по сырью он общий, его видно в сводке. */
+  showCarry?: boolean
 }) {
   const nearest = rows.find((row) => row.remaining > 0) ?? null
   const last = rows.length > 0 ? rows[rows.length - 1] : null
@@ -388,7 +523,7 @@ function ScheduleView({
       ) : (
         <span className="sched-done">Потребность закрыта до конца года</span>
       )}
-      {carry > 0 && last ? (
+      {showCarry && carry > 0 && last ? (
         <span className="sched-carry">
           излишек после {needMonth(last, year)} — {formatQuantity(carry.toFixed(3))} кг, переносим
           на {year + 1} год
@@ -692,6 +827,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
 
   const changedPositions = new Set((plan?.source.changes ?? []).map((row) => row.product_id))
   const source = plan?.source
+  const coverage = coverDrafts(drafts, plan?.positions ?? [], plan?.year ?? year)
 
   return (
     <section>
@@ -1059,6 +1195,15 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                             ? Number(price) * Number(quantity)
                             : null
                         const label = `${position.code} ${index + 1}`
+                        const group = coverage.group.get(groupKey(row))
+                        const rowSchedule = coverage.byRow.get(row.key) ?? []
+                        const grouped = (group?.rows ?? 1) > 1
+                        const factText = `пришло ${formatQuantity(
+                          grouped ? (group?.fact ?? 0).toFixed(3) : row.factQuantity,
+                        )}`
+                        const factTitle = grouped
+                          ? 'Остаток по последнему отчёту 1С и общий приход по сырью — по всем строкам этого сырья'
+                          : 'Остаток по последнему отчёту 1С и приход по связанным поступлениям'
                         return (
                           <tr key={row.key} data-testid={`purchase-row-${row.key}`}>
                             <td>
@@ -1150,7 +1295,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                 <span
                                   className="fact-line"
                                   data-testid={`fact-${row.key}`}
-                                  title="Остаток по последнему отчёту 1С и приход по связанным поступлениям"
+                                  title={factTitle}
                                 >
                                   {Number(row.stockQuantity) > 0 ? (
                                     <>
@@ -1161,7 +1306,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                       ·{' '}
                                     </>
                                   ) : null}
-                                  пришло {formatQuantity(row.factQuantity)}
+                                  {factText}
                                 </span>
                               ) : null}
                             </td>
@@ -1221,14 +1366,20 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                               {position.status === 'orphan' ? (
                                 '—'
                               ) : scheduleMode === 'summary' ? (
-                                <ScheduleView
-                                  rows={scheduleRows(schedule, row.factMonths)}
-                                  mode="summary"
-                                  expanded={openSchedule.includes(row.key)}
-                                  onToggle={() => toggleSchedule(row.key)}
-                                  year={plan.year}
-                                  extra={extraFacts(row, schedule)}
-                                />
+                                <>
+                                  <ScheduleView
+                                    rows={rowSchedule}
+                                    mode="summary"
+                                    expanded={openSchedule.includes(row.key)}
+                                    onToggle={() => toggleSchedule(row.key)}
+                                    year={plan.year}
+                                    extra={extraFacts(row, group?.months ?? monthsOf(schedule))}
+                                    showCarry={!grouped}
+                                  />
+                                  {grouped && group ? (
+                                    <GroupNote group={group} year={plan.year} />
+                                  ) : null}
+                                </>
                               ) : (
                                 <span className="hint">график ниже</span>
                               )}
@@ -1257,6 +1408,9 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                         row.deliveryDays,
                         plan.year,
                       )
+                      const group = coverage.group.get(groupKey(row))
+                      const rowSchedule = coverage.byRow.get(row.key) ?? []
+                      const grouped = (group?.rows ?? 1) > 1
                       const expanded = openSchedule.includes(row.key)
                       if (schedule.length === 0) return null
                       if (scheduleMode === 'summary' && !expanded) return null
@@ -1275,23 +1429,23 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                   {expanded ? 'Скрыть таблицу' : 'Показать таблицей'}
                                 </button>
                               )}
+                              {grouped && group ? (
+                                <GroupNote group={group} year={plan.year} />
+                              ) : null}
                             </div>
                             <ScheduleView
-                              rows={scheduleRows(schedule, row.factMonths)}
+                              rows={rowSchedule}
                               mode={scheduleMode}
                               wide
                               tableOnly
                               expanded={expanded}
                               onToggle={() => toggleSchedule(row.key)}
                               year={plan.year}
-                              extra={extraFacts(row, schedule)}
+                              extra={extraFacts(row, group?.months ?? monthsOf(schedule))}
+                              showCarry={!grouped}
                             />
                             {scheduleMode !== 'summary' && expanded ? (
-                              <ScheduleTable
-                                rows={scheduleRows(schedule, row.factMonths)}
-                                year={plan.year}
-                                extra=""
-                              />
+                              <ScheduleTable rows={rowSchedule} year={plan.year} extra="" />
                             ) : null}
                           </td>
                         </tr>
