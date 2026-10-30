@@ -133,7 +133,6 @@ function plan(overrides: Partial<PurchasePlan> = {}): PurchasePlan {
         fact_quantity: '10.000',
         fact_share: '33.3',
         fact_months: [{ month: 1, quantity: '10.000' }],
-        coverage_months: [{ month: 1, quantity: '10.000' }],
         stock_quantity: '0',
         stock_date: null,
         carry_forward: '0',
@@ -279,8 +278,7 @@ describe('PurchasePlanPage', () => {
         plan({
           items: [
             planItem({
-              fact_months: [],
-              coverage_months: [],
+              fact_months: [{ month: 1, quantity: '25.000' }],
               stock_quantity: '25.000',
               stock_date: '2026-10-28',
             }),
@@ -311,8 +309,7 @@ describe('PurchasePlanPage', () => {
         plan({
           items: [
             planItem({
-              fact_months: [],
-              coverage_months: [],
+              fact_months: [{ month: 1, quantity: '42.000' }],
               stock_quantity: '42.000',
               stock_date: '2026-10-28',
               carry_forward: '12.000',

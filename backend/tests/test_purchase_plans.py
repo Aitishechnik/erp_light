@@ -280,10 +280,10 @@ def test_coverage_caps_share_and_carries_surplus() -> None:
     assert stock[-1].carry == Decimal("0")
 
 
-def test_coverage_from_stock_and_arrivals(
+def test_coverage_counts_our_arrivals_only(
     client: TestClient, login, catalog: dict[str, Any], db_session: Session
 ) -> None:
-    """Покрытие месяцев: остаток на складе плюс приходы, приход до снимка не задваивается."""
+    """Покрытие считаем по своим приходам: остаток на складе — только справка."""
     _make_annual(client, login, catalog)
     plan = _create_plan(client, login)
     saved = _save(client, plan["id"], [_item(catalog, quantity="30", price="500.00")])
@@ -334,17 +334,18 @@ def test_coverage_from_stock_and_arrivals(
     login("purchase")
     body = client.get(f"/api/v1/purchase-plans/{plan['id']}").json()
     item = body["items"][0]
+    # Остаток склада показываем, но в покрытие он не идёт.
     assert item["stock_quantity"] == "8.000"
     assert item["stock_date"] == stock_day.isoformat()
-    # Приход до снимка остатков уже внутри остатка — в покрытие не идёт.
     assert item["fact_quantity"] == "30.000"
+
     schedule = item["schedule"]
     assert [row["quantity"] for row in schedule] == ["10.000", "20.000"]
     assert [row["covered"] for row in schedule] == ["10.000", "20.000"]
     assert [row["share"] for row in schedule] == ["100.0", "100.0"]
     assert [row["remaining"] for row in schedule] == ["0.000", "0.000"]
-    assert schedule[-1]["carry"] == "3.000"
-    assert item["carry_forward"] == "3.000"
+    assert [row["carry"] for row in schedule] == ["20.000", "0"]
+    assert item["carry_forward"] == "0"
 
 
 def test_validation_keeps_previous_rows(client: TestClient, login, catalog: dict[str, Any]) -> None:

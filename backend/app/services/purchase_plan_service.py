@@ -441,15 +441,10 @@ def _items_out(
         fact = sum((value for _day, value in rows), ZERO)
         fact_months = _months_of(rows, plan.year)
         stock = stock_by_product.get(item.product_id)
+        # Остаток на складе — только справка: покрытие считаем по нашим приходам.
         stock_quantity = stock.closing if stock else ZERO
         stock_date = stock.balance_date if stock else None
-        # Приход до снимка остатков уже внутри остатка: второй раз не считаем.
-        countable = [(day, value) for day, value in rows if stock_date is None or day > stock_date]
-        coverage = need.cover_schedule(
-            schedule,
-            _months_of(countable, plan.year),
-            stock_quantity,
-        )
+        coverage = need.cover_schedule(schedule, fact_months)
         result.append(
             PurchasePlanItemOut(
                 id=item.id,
@@ -473,10 +468,6 @@ def _items_out(
                 fact_months=[
                     PurchasePlanMonthOut(month=month, quantity=quantity)
                     for month, quantity in sorted(fact_months.items())
-                ],
-                coverage_months=[
-                    PurchasePlanMonthOut(month=month, quantity=quantity)
-                    for month, quantity in sorted(_months_of(countable, plan.year).items())
                 ],
                 stock_quantity=stock_quantity,
                 stock_date=stock_date,

@@ -69,8 +69,6 @@ type DraftRow = {
   factShare: string
   /** Факт по месяцам прихода: месяц → количество. */
   factMonths: { month: number; quantity: string }[]
-  /** Приходы, которые участвуют в покрытии: пришедшие после снимка остатков. */
-  coverageMonths: { month: number; quantity: string }[]
   /** Остаток сырья на складе по последнему отчёту 1С. */
   stockQuantity: string
   stockDate: string | null
@@ -151,11 +149,10 @@ type ScheduleRow = {
 function scheduleRows(
   entries: PreviewEntry[],
   factMonths: { month: number; quantity: string }[],
-  stockQuantity = '0',
 ): ScheduleRow[] {
   const today = new Date()
   const current = today.getFullYear() * 12 + today.getMonth()
-  let available = toMilli(stockQuantity)
+  let available = 0
   return entries.map((entry) => {
     const factRow = factMonths.find((row) => row.month === entry.month)
     const needMilli = entry.quantityMilli
@@ -423,7 +420,6 @@ function draftsFromPlan(plan: PurchasePlan): DraftRow[] {
     factQuantity: item.fact_quantity,
     factShare: item.fact_share,
     factMonths: item.fact_months ?? [],
-    coverageMonths: item.coverage_months ?? [],
     stockQuantity: item.stock_quantity,
     stockDate: item.stock_date,
   }))
@@ -617,7 +613,6 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
         factQuantity: '0',
         factShare: '0',
         factMonths: [],
-        coverageMonths: [],
         stockQuantity: '0',
         stockDate: null,
       },
@@ -1227,11 +1222,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                 '—'
                               ) : scheduleMode === 'summary' ? (
                                 <ScheduleView
-                                  rows={scheduleRows(
-                                    schedule,
-                                    row.coverageMonths,
-                                    row.stockQuantity,
-                                  )}
+                                  rows={scheduleRows(schedule, row.factMonths)}
                                   mode="summary"
                                   expanded={openSchedule.includes(row.key)}
                                   onToggle={() => toggleSchedule(row.key)}
@@ -1286,7 +1277,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                               )}
                             </div>
                             <ScheduleView
-                              rows={scheduleRows(schedule, row.coverageMonths, row.stockQuantity)}
+                              rows={scheduleRows(schedule, row.factMonths)}
                               mode={scheduleMode}
                               wide
                               tableOnly
@@ -1297,7 +1288,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                             />
                             {scheduleMode !== 'summary' && expanded ? (
                               <ScheduleTable
-                                rows={scheduleRows(schedule, row.coverageMonths, row.stockQuantity)}
+                                rows={scheduleRows(schedule, row.factMonths)}
                                 year={plan.year}
                                 extra=""
                               />

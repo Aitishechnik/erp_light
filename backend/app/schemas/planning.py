@@ -151,12 +151,9 @@ class PurchasePlanItemOut(BaseModel):
         default_factory=list,
         description="Поступило по месяцам (месяц прихода партии): только месяцы с фактом",
     )
-    coverage_months: list[PurchasePlanMonthOut] = Field(
-        default_factory=list,
-        description="Приходы, которые участвуют в покрытии: пришедшие после снимка остатков",
-    )
     stock_quantity: Decimal = Field(
-        default=Decimal("0"), description="Остаток сырья на складе по последнему отчёту"
+        default=Decimal("0"),
+        description="Остаток сырья на складе по последнему отчёту — справочно",
     )
     stock_date: date | None = Field(default=None, description="Дата снимка остатков")
     carry_forward: Decimal = Field(
