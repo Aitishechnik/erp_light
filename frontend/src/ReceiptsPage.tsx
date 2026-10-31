@@ -109,9 +109,7 @@ function approvedPlanLines(plans: PurchasePlan[]): PlanLine[] {
         id: line.id,
         productId: line.product_id,
         year: plan.year,
-        label: `${plan.year} · ${line.country_name}${
-          line.supplier_name ? ` · ${line.supplier_name}` : ''
-        }`,
+        label: `${plan.year} · ${line.country_name}`,
       })
     }
   }

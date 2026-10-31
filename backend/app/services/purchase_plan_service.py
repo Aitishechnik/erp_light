@@ -27,7 +27,6 @@ from app.models.auth import (
     ROLE_PURCHASE_DIRECTOR,
     User,
 )
-from app.models.counterparties import Counterparty
 from app.models.countries import Country
 from app.models.domain import Batch, BatchItem, Product, StockBalance
 from app.models.planning import (
@@ -146,19 +145,6 @@ def _check_country(db: Session, country_id: uuid.UUID) -> Country:
     if not country.is_active:
         raise PlanError(f"«{country.name}» отключена — выберите другую страну")
     return country
-
-
-def _check_supplier(db: Session, supplier_id: uuid.UUID | None) -> Counterparty | None:
-    if supplier_id is None:
-        return None
-    supplier = db.get(Counterparty, supplier_id)
-    if supplier is None:
-        raise PlanError("Поставщик не найден", status_code=404)
-    if not supplier.is_active:
-        raise PlanError(f"«{supplier.name}» отключён — поставщиком не выбрать")
-    if not (supplier.is_local_supplier or supplier.is_import_supplier):
-        raise PlanError(f"«{supplier.name}» не отмечен поставщиком — в план не подходит")
-    return supplier
 
 
 def _check_year_editable(plan: PurchasePlan) -> None:
@@ -426,7 +412,6 @@ def _items_out(
             row.sales_product.name,
             row.country.name,
             row.product.name,
-            row.supplier.name if row.supplier else "",
         ),
     )
 
@@ -490,8 +475,6 @@ def _items_out(
                 delivery_days=item.delivery_days,
                 quantity=item.quantity,
                 price_rub=item.price_rub,
-                supplier_id=item.supplier_id,
-                supplier_name=item.supplier.name if item.supplier else None,
                 notes=item.notes,
                 fact_quantity=fact_by_item[item.id],
                 fact_share=_fact_share(fact_by_item[item.id], item.quantity),
@@ -667,7 +650,6 @@ def update_items(
             raise PlanError("Цена не может быть отрицательной")
         _check_product(db, item.product_id)
         country = _check_country(db, item.country_id)
-        _check_supplier(db, item.supplier_id)
         prepared.append((item, country.delivery_days, stored))
 
     for item, _, stored in prepared:
@@ -709,7 +691,6 @@ def update_items(
                     country_id=item.country_id,
                     quantity=item.quantity,
                     price_rub=item.price_rub,
-                    supplier_id=item.supplier_id,
                     delivery_days=delivery_days,
                     notes=item.notes,
                 )
@@ -720,7 +701,6 @@ def update_items(
         stored.country_id = item.country_id
         stored.quantity = item.quantity
         stored.price_rub = item.price_rub
-        stored.supplier_id = item.supplier_id
         stored.delivery_days = delivery_days
         stored.notes = item.notes
 

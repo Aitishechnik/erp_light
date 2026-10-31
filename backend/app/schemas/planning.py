@@ -81,7 +81,6 @@ class PurchasePlanItemIn(BaseModel):
     country_id: uuid.UUID = Field(description="Страна происхождения: срок доставки")
     quantity: Decimal = Field(gt=0, description="Годовое количество")
     price_rub: Decimal | None = Field(default=None, ge=0, description="Цена за единицу, ₽")
-    supplier_id: uuid.UUID | None = Field(default=None, description="Поставщик из справочника")
     notes: str | None = Field(default=None, max_length=255)
 
 
@@ -138,8 +137,6 @@ class PurchasePlanItemOut(BaseModel):
     delivery_days: int
     quantity: Decimal
     price_rub: Decimal | None
-    supplier_id: uuid.UUID | None
-    supplier_name: str | None
     notes: str | None
     fact_quantity: Decimal = Field(
         default=Decimal("0"), description="Поступило по связанным поступлениям, в единицах сырья"

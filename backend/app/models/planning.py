@@ -219,9 +219,6 @@ class PurchasePlanItem(Base):
         Numeric(15, 3), nullable=False, default=Decimal("0"), comment="Годовое количество"
     )
     price_rub: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
-    supplier_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True, index=True
-    )
     delivery_days: Mapped[int] = mapped_column(
         Integer, nullable=False, default=30, comment="Снимок срока доставки страны, дней"
     )
@@ -234,7 +231,6 @@ class PurchasePlanItem(Base):
     sales_product: Mapped[Product] = relationship(foreign_keys=[sales_product_id], lazy="joined")
     product: Mapped[Product] = relationship(foreign_keys=[product_id], lazy="joined")
     country: Mapped[Country] = relationship(lazy="joined")
-    supplier: Mapped[Counterparty | None] = relationship(lazy="joined")
 
 
 class PurchasePlanSourceEvent(Base):

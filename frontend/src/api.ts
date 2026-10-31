@@ -192,8 +192,6 @@ export type PurchasePlanItem = {
   delivery_days: number
   quantity: string
   price_rub: string | null
-  supplier_id: string | null
-  supplier_name: string | null
   notes: string | null
   /** Поступило по связанным поступлениям, в единицах сырья. */
   fact_quantity: string
@@ -278,7 +276,6 @@ export type PurchasePlanItemIn = {
   country_id: string
   quantity: string
   price_rub: string | null
-  supplier_id: string | null
   notes?: string | null
 }
 

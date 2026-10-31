@@ -75,7 +75,7 @@ def test_receipt_item_links_to_plan_line_and_counts_in_fact(
     body = put_batch(client, _receipt("ИТ-1", plan_item_id=str(line["id"])))
     item = body["items"][0]
     assert item["purchase_plan_item_id"] == str(line["id"])
-    assert item["purchase_plan_label"] == f"{YEAR} · Таиланд · ООО Импорт"
+    assert item["purchase_plan_label"] == f"{YEAR} · Таиланд"
 
     plan = _plan(client, data["plan"]["id"])
     fact = plan["items"][0]

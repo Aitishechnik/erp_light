@@ -639,7 +639,6 @@ test('закупщик раскладывает потребность план�
           country_id: string
           quantity: string
           price_rub: string | null
-          supplier_id: string | null
         }[]
       }
       items = body.items.map((item, index) => ({
@@ -655,8 +654,6 @@ test('закупщик раскладывает потребность план�
         delivery_days: 90,
         quantity: Number(item.quantity).toFixed(3),
         price_rub: item.price_rub === null ? null : Number(item.price_rub).toFixed(2),
-        supplier_id: item.supplier_id,
-        supplier_name: 'ООО Импорт',
         notes: null,
         fact_quantity: '0',
         fact_share: '0',
@@ -698,7 +695,6 @@ test('закупщик раскладывает потребность план�
   await page.getByLabel('Страна FIN-1 1').selectOption('th-1')
   await page.getByLabel('Количество FIN-1 1').fill('30')
   await page.getByLabel('Цена FIN-1 1').fill('500')
-  await page.getByLabel('Поставщик FIN-1 1').selectOption('sup-1')
   await expect(page.getByTestId('purchase-table')).toContainText('Ближайший заказ')
   await expect(page.getByTestId('purchase-table')).toContainText('10 кг')
   // Переключатель видов графика: полоса по месяцам заказа и кварталы.

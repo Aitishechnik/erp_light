@@ -170,14 +170,11 @@ def batch_finance(db: Session, batch: Batch) -> tuple[BatchFinance, CurrencyRate
 
 
 def plan_link_label(item: BatchItem) -> str | None:
-    """Подпись строки плана для карточки: «2026 · Китай · ООО Импорт»."""
+    """Подпись строки плана для карточки: «2026 · Китай»."""
     link = item.purchase_plan_item
     if link is None:
         return None
-    parts = [str(link.plan.year), link.country.name]
-    if link.supplier is not None:
-        parts.append(link.supplier.name)
-    return " · ".join(parts)
+    return f"{link.plan.year} · {link.country.name}"
 
 
 def serialize_batch(

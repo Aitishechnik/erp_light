@@ -96,7 +96,6 @@ def _item(
     country: str = "thailand",
     quantity: str = "30",
     price: str | None = "500.00",
-    supplier: str | None = "supplier",
 ) -> dict[str, Any]:
     return {
         "sales_product_id": str(catalog[sales].id),
@@ -104,7 +103,6 @@ def _item(
         "country_id": str(catalog[country].id),
         "quantity": quantity,
         "price_rub": price,
-        "supplier_id": str(catalog[supplier].id) if supplier else None,
     }
 
 
@@ -464,10 +462,6 @@ def test_validation_keeps_previous_rows(client: TestClient, login, catalog: dict
     inactive_country = _save(client, plan["id"], [_item(catalog, country="inactive_country")])
     assert inactive_country.status_code == 400, inactive_country.text
     assert "отключена" in inactive_country.json()["detail"]
-
-    wrong_supplier = _save(client, plan["id"], [_item(catalog, supplier="customer")])
-    assert wrong_supplier.status_code == 400, wrong_supplier.text
-    assert "не отмечен поставщиком" in wrong_supplier.json()["detail"]
 
     foreign_position = _save(client, plan["id"], [_item(catalog, sales="raw")])
     assert foreign_position.status_code == 400, foreign_position.text

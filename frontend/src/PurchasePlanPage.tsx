@@ -2,12 +2,10 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   acknowledgePurchasePlanSource,
   approvePurchasePlan,
-  type Counterparty,
   type Country,
   createPurchasePlan,
   deletePurchasePlan,
   errorMessage,
-  fetchCounterparties,
   fetchCountries,
   fetchProducts,
   fetchPurchasePlans,
@@ -61,8 +59,6 @@ type DraftRow = {
   deliveryDays: number
   quantity: string
   priceRub: string
-  supplierId: string
-  supplierName: string
   notes: string
   /** Поступило по связанным поступлениям и процент исполнения. */
   factQuantity: string
@@ -549,8 +545,6 @@ function draftsFromPlan(plan: PurchasePlan): DraftRow[] {
     deliveryDays: item.delivery_days,
     quantity: trimZeros(item.quantity),
     priceRub: item.price_rub === null ? '' : trimZeros(item.price_rub),
-    supplierId: item.supplier_id ?? '',
-    supplierName: item.supplier_name ?? '',
     notes: item.notes ?? '',
     factQuantity: item.fact_quantity,
     factShare: item.fact_share,
@@ -650,7 +644,6 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
     )
   const [plans, setPlans] = useState<PurchasePlan[]>([])
   const [products, setProducts] = useState<Product[]>([])
-  const [suppliers, setSuppliers] = useState<Counterparty[]>([])
   const [countries, setCountries] = useState<Country[]>([])
   const [drafts, setDrafts] = useState<DraftRow[]>([])
   const [busy, setBusy] = useState(false)
@@ -690,13 +683,6 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
     fetchProducts()
       .then((rows) => setProducts(rows.filter((row) => row.is_active && row.kind === 'raw')))
       .catch(() => setProducts([]))
-    fetchCounterparties()
-      .then((rows) =>
-        setSuppliers(
-          rows.filter((row) => row.is_active && (row.is_local_supplier || row.is_import_supplier)),
-        ),
-      )
-      .catch(() => setSuppliers([]))
     fetchCountries()
       .then(setCountries)
       .catch(() => setCountries([]))
@@ -742,8 +728,6 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
         deliveryDays: 30,
         quantity: '',
         priceRub: '',
-        supplierId: '',
-        supplierName: '',
         notes: '',
         factQuantity: '0',
         factShare: '0',
@@ -783,7 +767,6 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
         country_id: row.countryId,
         quantity,
         price_rub: price === '' ? null : price,
-        supplier_id: row.supplierId || null,
         notes: row.notes || null,
       })
     }
@@ -1118,7 +1101,6 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                   <th scope="col" className="num">
                     Сумма, ₽
                   </th>
-                  <th scope="col">Поставщик</th>
                   <th scope="col">График заказа</th>
                   <th scope="col" aria-label="Действия" />
                 </tr>
@@ -1132,7 +1114,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                       id={`position-${position.product_id}`}
                       data-testid={`position-${position.code}`}
                     >
-                      <td colSpan={8}>
+                      <td colSpan={7}>
                         <div className="need-head">
                           <span className="need-total">
                             {formatQuantity(position.total)}
@@ -1175,13 +1157,12 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                     </tr>
                     {rows.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="hint" data-testid={`empty-${position.code}`}>
+                        <td colSpan={7} className="hint" data-testid={`empty-${position.code}`}>
                           Сырьё не добавлено.
                         </td>
                       </tr>
                     ) : (
                       rows.map((row, index) => {
-                        const supplier = suppliers.find((item) => item.id === row.supplierId)
                         const schedule = splitPreview(
                           toMilli(row.quantity),
                           position,
@@ -1327,41 +1308,6 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                             <td className="num">
                               {sum === null ? '—' : formatMoney(sum.toFixed(2))}
                             </td>
-                            <td
-                              className="supplier-cell purchase-supplier"
-                              title={row.supplierName || undefined}
-                            >
-                              {canEdit ? (
-                                <select
-                                  className="plan-select"
-                                  aria-label={`Поставщик ${label}`}
-                                  title={row.supplierName || undefined}
-                                  value={row.supplierId}
-                                  onChange={(event) => {
-                                    const chosen = suppliers.find(
-                                      (item) => item.id === event.target.value,
-                                    )
-                                    updateRow(row.key, {
-                                      supplierId: event.target.value,
-                                      supplierName: chosen?.name ?? '',
-                                    })
-                                  }}
-                                >
-                                  <option value="">—</option>
-                                  {row.supplierId &&
-                                  !suppliers.some((item) => item.id === row.supplierId) ? (
-                                    <option value={row.supplierId}>{row.supplierName}</option>
-                                  ) : null}
-                                  {suppliers.map((item) => (
-                                    <option key={item.id} value={item.id}>
-                                      {item.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              ) : (
-                                row.supplierName || supplier?.name || '—'
-                              )}
-                            </td>
                             <td>
                               {position.status === 'orphan' ? (
                                 '—'
@@ -1416,7 +1362,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                       if (scheduleMode === 'summary' && !expanded) return null
                       return (
                         <tr key={`${row.key}-schedule`} className="schedule-wide">
-                          <td colSpan={8}>
+                          <td colSpan={7}>
                             <div className="sched-wide-head">
                               <b>{row.productName || 'Сырьё'}</b>
                               {row.countryName ? ` · ${row.countryName}` : ''}

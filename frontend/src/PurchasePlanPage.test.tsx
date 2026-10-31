@@ -2,7 +2,6 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
-  Counterparty,
   Country,
   Product,
   PurchasePlan,
@@ -47,20 +46,6 @@ const PRODUCTS: Product[] = [
     name: 'Кокосовая стружка',
     kind: 'raw',
     unit: 'кг',
-    source: '1c',
-    is_active: true,
-  },
-]
-
-const SUPPLIERS: Counterparty[] = [
-  {
-    id: 'sup-1',
-    name: 'ООО Импорт',
-    inn: null,
-    note: null,
-    is_customer: false,
-    is_local_supplier: false,
-    is_import_supplier: true,
     source: '1c',
     is_active: true,
   },
@@ -127,8 +112,6 @@ function plan(overrides: Partial<PurchasePlan> = {}): PurchasePlan {
         delivery_days: 90,
         quantity: '30.000',
         price_rub: '500.00',
-        supplier_id: 'sup-1',
-        supplier_name: 'ООО Импорт',
         notes: null,
         fact_quantity: '10.000',
         fact_share: '33.3',
@@ -181,7 +164,6 @@ function routes(
   return {
     ...extra,
     '/api/v1/products': { body: PRODUCTS },
-    '/api/v1/counterparties': { body: SUPPLIERS },
     '/api/v1/countries': { body: COUNTRIES },
     '/api/v1/purchase-plans': { body: planBody },
   }
@@ -255,7 +237,6 @@ describe('PurchasePlanPage', () => {
     await user.selectOptions(screen.getByLabelText('Страна FIN-1 2'), 'cn-1')
     await user.type(screen.getByLabelText('Количество FIN-1 2'), '12,5')
     await user.type(screen.getByLabelText('Цена FIN-1 2'), '300.25')
-    await user.selectOptions(screen.getByLabelText('Поставщик FIN-1 2'), 'sup-1')
 
     await user.click(screen.getByRole('button', { name: 'Сохранить' }))
     await waitFor(() => {
@@ -457,7 +438,6 @@ describe('PurchasePlanPage', () => {
     const user = userEvent.setup()
     mockApi({
       '/api/v1/products': { body: PRODUCTS },
-      '/api/v1/counterparties': { body: SUPPLIERS },
       '/api/v1/countries': { body: COUNTRIES },
       'POST /api/v1/purchase-plans': { body: plan() },
       '/api/v1/purchase-plans': { body: [] },
