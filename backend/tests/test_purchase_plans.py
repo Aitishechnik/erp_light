@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.counterparties import Counterparty
-from app.models.domain import Batch, BatchItem, Product, StockBalance
+from app.models.domain import Batch, BatchItem, Product
 from app.models.planning import PurchasePlan
 from app.services.purchase_need import (
     cover_group,
@@ -196,12 +196,15 @@ def test_raw_rows_split_by_months_and_lead_time(
         (YEAR - 1, 10),
         (YEAR - 1, 11),
     ]
-    assert all(row["overdue"] is False for row in item["schedule"])
+    # Просроченность зависит от сегодняшней даты: сверяем с ней, а не с «нет».
+    today = date.today()
+    assert [row["overdue"] for row in item["schedule"]] == [
+        (today.year, today.month) > (YEAR - 1, 10),
+        (today.year, today.month) > (YEAR - 1, 11),
+    ]
     # Пока ничего не пришло и остатка нет, покрытия нет: нужно докупить всё.
     assert [row["covered"] for row in item["schedule"]] == ["0.000", "0.000"]
     assert [row["share"] for row in item["schedule"]] == ["0.0", "0.0"]
-    assert item["stock_quantity"] == "0"
-    assert item["stock_date"] is None
     position = next(row for row in body["positions"] if row["code"] == "FIN-1")
     assert position["decomposed"] is True
     assert sum(Decimal(row["quantity"]) for row in item["schedule"]) == Decimal("30.000")
@@ -290,14 +293,13 @@ def test_coverage_caps_share_and_carries_surplus() -> None:
 def test_coverage_counts_our_arrivals_only(
     client: TestClient, login, catalog: dict[str, Any], db_session: Session
 ) -> None:
-    """Покрытие считаем по своим приходам: остаток на складе — только справка."""
+    """Покрытие считаем только по приходам, привязанным к плану."""
     _make_annual(client, login, catalog)
     plan = _create_plan(client, login)
     saved = _save(client, plan["id"], [_item(catalog, quantity="30", price="500.00")])
     assert saved.status_code == 200, saved.text
     item_id = saved.json()["items"][0]["id"]
 
-    stock_day = date(2026, 10, 28)
     batch = Batch(
         batch_number="ИТ-2027-0001",
         batch_date=date(2026, 12, 11),
@@ -326,14 +328,6 @@ def test_coverage_counts_our_arrivals_only(
                 quantity=Decimal("5"),
                 purchase_plan_item_id=item_id,
             ),
-            StockBalance(
-                product_id=catalog["raw"].id,
-                balance_date=stock_day,
-                opening=Decimal("8"),
-                income=Decimal("8"),
-                outcome=Decimal("0"),
-                closing=Decimal("8"),
-            ),
         ]
     )
     db_session.commit()
@@ -341,9 +335,6 @@ def test_coverage_counts_our_arrivals_only(
     login("purchase")
     body = client.get(f"/api/v1/purchase-plans/{plan['id']}").json()
     item = body["items"][0]
-    # Остаток склада показываем, но в покрытие он не идёт.
-    assert item["stock_quantity"] == "8.000"
-    assert item["stock_date"] == stock_day.isoformat()
     assert item["fact_quantity"] == "30.000"
 
     schedule = item["schedule"]

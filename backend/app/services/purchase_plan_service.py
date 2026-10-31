@@ -28,7 +28,7 @@ from app.models.auth import (
     User,
 )
 from app.models.countries import Country
-from app.models.domain import Batch, BatchItem, Product, StockBalance
+from app.models.domain import Batch, BatchItem, Product
 from app.models.planning import (
     PURCHASE_PLAN_STATUS_TITLES,
     SALES_PLAN_APPROVAL_STATUS_TITLES,
@@ -53,7 +53,6 @@ from app.services import audit_service
 from app.services import purchase_need as need
 from app.services.plan_freeze import editable_months
 from app.services.purchase_need import NeedChange, NeedPosition
-from app.services.stock_import_service import latest_balances
 
 EDITORS = (ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER)
 VIEWERS = (ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER, ROLE_EXECUTIVE_DIRECTOR)
@@ -402,10 +401,8 @@ def _items_out(
     plan: PurchasePlan,
     source: dict[uuid.UUID, NeedPosition],
     arrivals: dict[uuid.UUID, list[tuple[date, Decimal]]] | None = None,
-    stocks: dict[uuid.UUID, StockBalance] | None = None,
 ) -> list[PurchasePlanItemOut]:
     arrivals_by_item = arrivals or {}
-    stock_by_product = stocks or {}
     items = sorted(
         plan.items,
         key=lambda row: (
@@ -478,10 +475,6 @@ def _items_out(
     for item in ordered:
         coverage = coverage_by_item.get(item.id, [])
         fact_months = fact_months_by_item[item.id]
-        stock = stock_by_product.get(item.product_id)
-        # Остаток на складе — только справка: покрытие считаем по нашим приходам.
-        stock_quantity = stock.closing if stock else ZERO
-        stock_date = stock.balance_date if stock else None
         result.append(
             PurchasePlanItemOut(
                 id=item.id,
@@ -505,8 +498,6 @@ def _items_out(
                     PurchasePlanMonthOut(month=month, quantity=quantity)
                     for month, quantity in sorted(fact_months.items())
                 ],
-                stock_quantity=stock_quantity,
-                stock_date=stock_date,
                 carry_forward=carry_by_item[item.id],
                 used_quantity=sum(
                     (value for value in used_by_alternative.get(item.id, {}).values()), ZERO
@@ -538,7 +529,6 @@ def _serialize(db: Session, plan: PurchasePlan) -> PurchasePlanOut:
     source = _source_positions(db, plan)
     item_ids = [item.id for item in plan.items]
     arrivals = _arrivals(db, item_ids)
-    stocks = latest_balances(db, [item.product_id for item in plan.items])
     return PurchasePlanOut(
         id=plan.id,
         year=plan.year,
@@ -553,7 +543,7 @@ def _serialize(db: Session, plan: PurchasePlan) -> PurchasePlanOut:
         editable_months=editable_months(plan.year),
         source=_source_out(db, plan),
         positions=_positions_out(db, plan, source),
-        items=_items_out(plan, source, arrivals, stocks),
+        items=_items_out(plan, source, arrivals),
     )
 
 

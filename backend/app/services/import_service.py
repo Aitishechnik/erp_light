@@ -29,8 +29,8 @@
 черновик из карточки поступления (`batch_import_service`). Отдельной карточки
 на странице «Загрузка данных» у позиций нет — поступление выбирается карточкой.
 
-«Продажи» и «Остатки» — отчёты, а не таблицы: у них своя шапка, поэтому разбор
-живёт в `sales_import_service` и `stock_import_service`.
+«Продажи» — отчёт, а не таблица: у него своя шапка, поэтому разбор живёт в
+`sales_import_service`.
 """
 
 from __future__ import annotations
@@ -63,7 +63,6 @@ KIND_NOMENCLATURE = "nomenclature"
 KIND_IMPORT_RECEIPTS = "import_receipts"
 KIND_BATCH_ITEMS = "batch_items"
 KIND_SALES = "sales"
-KIND_STOCK = "stock"
 
 MAX_FILE_SIZE = 10 * 1024 * 1024
 MAX_ROWS = 50_000
@@ -195,27 +194,6 @@ KINDS: dict[str, ImportKind] = {
             "Отчёт 1С «Продажи» за месяц — это факт продаж. Период берётся из шапки "
             "файла, возвраты идут минусом. Повторная загрузка заменяет месяц целиком, "
             "неопознанные позиции попадают в очередь сопоставления."
-        ),
-    ),
-    KIND_STOCK: ImportKind(
-        kind=KIND_STOCK,
-        title="Остатки на складе",
-        entity="stock",
-        # Отчёт «Товары на складах»: шапка и группировка, поэтому это подсказка.
-        columns=(
-            "Номенклатура",
-            "Код",
-            "Начальный остаток",
-            "Приход",
-            "Расход",
-            "Конечный остаток",
-        ),
-        roles=(ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER),
-        note=(
-            "Отчёт 1С «Товары на складах» за день. Берутся только строки с кодом "
-            "номенклатуры: серии и документы движения кода не имеют и пропускаются. "
-            "Позиции, которых нет в справочнике, не создаются — попадают в итог. "
-            "Повторная загрузка за ту же дату заменяет числа."
         ),
     ),
 }
@@ -544,12 +522,6 @@ def import_file(
         from app.services.sales_import_service import import_sales
 
         return import_sales(db, file_name, content, year=year, month=month)
-
-    if kind.entity == "stock":
-        # Остатки — отчёт с шапкой и группировкой, разбор свой.
-        from app.services.stock_import_service import import_stock
-
-        return import_stock(db, file_name, content)
 
     rows = _read_rows(content, kind)
     if kind.entity == "products":

@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.models.audit import AuditEvent
 from app.models.auth import User
 from app.services import audit_service
+from app.services.plan_freeze import editable_months
 from tests.test_month_results import month, sales_xlsx, upload_sales
 
 
@@ -31,11 +32,13 @@ def _approve_plan(client: TestClient, login, catalog: dict[str, Any], db: Sessio
     created = client.post("/api/v1/sales-plans", json={"year": 2026, "manager_id": str(manager_id)})
     assert created.status_code == 201, created.text
     plan_id = created.json()["id"]
+    # Месяц берём незамороженный: прошедшие месяцы 2026 года править нельзя.
+    editable = editable_months(2026)
     items = [
         {
             "client_id": str(catalog["customer"].id),
             "product_id": str(catalog["fin"].id),
-            "month": 10,
+            "month": editable[-1] if editable else 12,
             "quantity": "100",
         }
     ]

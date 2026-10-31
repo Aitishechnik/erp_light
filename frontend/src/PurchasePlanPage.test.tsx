@@ -119,8 +119,6 @@ function plan(overrides: Partial<PurchasePlan> = {}): PurchasePlan {
         fact_months: [{ month: 1, quantity: '10.000' }],
         used_quantity: '0',
         used_months: [],
-        stock_quantity: '0',
-        stock_date: null,
         carry_forward: '0',
         schedule: [
           {
@@ -256,15 +254,13 @@ describe('PurchasePlanPage', () => {
     expect(sent).toContain('"id":"item-1"')
   })
 
-  it('излишек на складе перекрывает следующие месяцы и не даёт больше 100 %', async () => {
+  it('приход перекрывает следующие месяцы и не даёт больше 100 %', async () => {
     mockApi(
       routes([
         plan({
           items: [
             planItem({
               fact_months: [{ month: 1, quantity: '25.000' }],
-              stock_quantity: '25.000',
-              stock_date: '2026-10-28',
             }),
           ],
         }),
@@ -272,7 +268,7 @@ describe('PurchasePlanPage', () => {
     )
     render(<PurchasePlanPage user={DIRECTOR} />)
 
-    expect(await screen.findByTestId('fact-item-1')).toHaveTextContent('на складе 25 · 28.10')
+    expect(await screen.findByTestId('fact-item-1')).toHaveTextContent('пришло 10')
     const table = screen.getByTestId('purchase-table')
     // Январь закрыт полностью, остаток 15 кг пошёл на февраль: докупить 5 кг.
     expect(table).toHaveTextContent(
@@ -294,8 +290,6 @@ describe('PurchasePlanPage', () => {
           items: [
             planItem({
               fact_months: [{ month: 1, quantity: '42.000' }],
-              stock_quantity: '42.000',
-              stock_date: '2026-10-28',
               carry_forward: '12.000',
             }),
           ],

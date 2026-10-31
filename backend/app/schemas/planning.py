@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, Field
@@ -152,11 +152,6 @@ class PurchasePlanItemOut(BaseModel):
         default_factory=list,
         description="Поступило по месяцам (месяц прихода партии): только месяцы с фактом",
     )
-    stock_quantity: Decimal = Field(
-        default=Decimal("0"),
-        description="Остаток сырья на складе по последнему отчёту — справочно",
-    )
-    stock_date: date | None = Field(default=None, description="Дата снимка остатков")
     used_quantity: Decimal = Field(
         default=Decimal("0"),
         description="Альтернатива: сколько её прихода ушло на покрытие основной потребности",

@@ -67,9 +67,6 @@ type DraftRow = {
   factShare: string
   /** Факт по месяцам прихода: месяц → количество. */
   factMonths: { month: number; quantity: string }[]
-  /** Остаток сырья на складе по последнему отчёту 1С. */
-  stockQuantity: string
-  stockDate: string | null
 }
 
 type PreviewEntry = {
@@ -619,8 +616,6 @@ function draftsFromPlan(plan: PurchasePlan): DraftRow[] {
     factQuantity: item.fact_quantity,
     factShare: item.fact_share,
     factMonths: item.fact_months ?? [],
-    stockQuantity: item.stock_quantity,
-    stockDate: item.stock_date,
   }))
 }
 
@@ -804,8 +799,6 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
         factQuantity: '0',
         factShare: '0',
         factMonths: [],
-        stockQuantity: '0',
-        stockDate: null,
       },
     ])
     setError(null)
@@ -831,8 +824,6 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
         factQuantity: '0',
         factShare: '0',
         factMonths: [],
-        stockQuantity: '0',
-        stockDate: null,
       },
     ])
     setError(null)
@@ -1293,8 +1284,8 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                           grouped ? (group?.fact ?? 0).toFixed(3) : row.factQuantity,
                         )}`
                         const factTitle = grouped
-                          ? 'Остаток по последнему отчёту 1С и общий приход по сырью — по всем строкам этого сырья'
-                          : 'Остаток по последнему отчёту 1С и приход по связанным поступлениям'
+                          ? 'Общий приход по сырью — по всем строкам этого сырья'
+                          : 'Приход по связанным поступлениям'
                         return (
                           <tr
                             key={row.key}
@@ -1411,15 +1402,6 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                   data-testid={`fact-${row.key}`}
                                   title={factTitle}
                                 >
-                                  {Number(row.stockQuantity) > 0 ? (
-                                    <>
-                                      на складе {formatQuantity(row.stockQuantity)}
-                                      {row.stockDate
-                                        ? ` · ${formatDate(row.stockDate).slice(0, 5)}`
-                                        : ''}{' '}
-                                      ·{' '}
-                                    </>
-                                  ) : null}
                                   {factText}
                                 </span>
                               ) : null}

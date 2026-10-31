@@ -204,9 +204,6 @@ export type PurchasePlanItem = {
   /** Альтернатива: сколько её прихода ушло на покрытие основной потребности. */
   used_quantity: string
   used_months: { month: number; quantity: string }[]
-  /** Остаток сырья на складе по последнему отчёту 1С — справочно, в покрытии не участвует. */
-  stock_quantity: string
-  stock_date: string | null
   /** Излишек после последнего месяца — переходит на следующий год. */
   carry_forward: string
   schedule: PurchasePlanScheduleEntry[]

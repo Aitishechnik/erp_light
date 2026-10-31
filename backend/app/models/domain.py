@@ -283,43 +283,6 @@ class StockSnapshot(Base):
     batch_item: Mapped[BatchItem] = relationship(back_populates="snapshots")
 
 
-class StockBalance(Base):
-    """Остаток номенклатуры на дату из отчёта 1С «Товары на складах».
-
-    Позиция опознаётся по коду 1С: строки серий и документов движения кода не
-    имеют и в загрузку не попадают. Отчёт даёт четыре числа — остаток на начало
-    дня, приход, расход и остаток на конец: по ним видно, сколько сырья лежит на
-    складе и сколько ушло в производство.
-    """
-
-    __tablename__ = "stock_balances"
-    __table_args__ = (UniqueConstraint("product_id", "balance_date", name="product_balance_date"),)
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    product_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    balance_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
-    opening: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3), nullable=False, default=Decimal("0"), comment="Остаток на начало дня"
-    )
-    income: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3), nullable=False, default=Decimal("0"), comment="Приход за день"
-    )
-    outcome: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3), nullable=False, default=Decimal("0"), comment="Расход за день"
-    )
-    closing: Mapped[Decimal] = mapped_column(
-        Numeric(15, 3), nullable=False, default=Decimal("0"), comment="Остаток на конец дня"
-    )
-    source: Mapped[str] = mapped_column(String(16), nullable=False, default="1c")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-
-    product: Mapped[Product] = relationship()
-
-
 class ImportSession(Base):
     """Журнал загрузки файлов выгрузки из 1С."""
 
