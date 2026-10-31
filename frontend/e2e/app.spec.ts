@@ -639,10 +639,12 @@ test('закупщик раскладывает потребность план�
           country_id: string
           quantity: string
           price_rub: string | null
+          alternative_of_id: string | null
         }[]
       }
       items = body.items.map((item, index) => ({
         id: `pi-${index}`,
+        alternative_of_id: item.alternative_of_id ?? null,
         sales_product_id: item.sales_product_id,
         product_id: item.product_id,
         product_code: 'RAW-1',
@@ -712,6 +714,16 @@ test('закупщик раскладывает потребность план�
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.getByTestId('purchase-table')).toContainText('Таиланд')
   await expect(page.getByTestId('position-FIN-1')).toContainText('разложено')
+
+  // Альтернатива — под основной строкой: у неё своё сырьё и своя страна.
+  await page.getByRole('button', { name: 'Добавить альтернативу FIN-1 1' }).click()
+  await page.getByLabel('Сырьё FIN-1 2').selectOption('raw-1')
+  await page.getByLabel('Страна FIN-1 2').selectOption('cn-1')
+  await page.getByLabel('Количество FIN-1 2').fill('10')
+  await page.getByLabel('Цена FIN-1 2').fill('450')
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(page.getByTestId('alt-badge-pi-1')).toContainText('альтернатива')
+  await expect(page.getByTestId('alt-pi-1')).toContainText('план 10')
 
   await page.getByRole('button', { name: 'Отправить на согласование' }).click()
   await expect(page.getByTestId('purchase-status')).toHaveText('На проверке')

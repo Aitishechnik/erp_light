@@ -190,6 +190,11 @@ class PurchasePlanItem(Base):
     ``product_id`` — закупаемое сырьё. Количество — годовое: по месяцам оно
     раскладывается расчётом (``services/purchase_need.py``) пропорционально
     продажам позиции, а месяц заказа сдвигается на срок доставки страны.
+
+    ``alternative_of_id`` — строка-замена: другое сырьё (сорт, калибр) или та же
+    позиция из другой страны, которая закрывает потребность основной строки,
+    когда основного сырья не хватает. Своей потребности у альтернативы нет:
+    её количество — план закупки, а её приходы идут в тот же котёл.
     """
 
     __tablename__ = "purchase_plan_items"
@@ -197,6 +202,13 @@ class PurchasePlanItem(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     plan_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("purchase_plans.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    alternative_of_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("purchase_plan_items.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        comment="Основная строка, которую закрывает эта альтернатива",
     )
     sales_product_id: Mapped[uuid.UUID] = mapped_column(
         Uuid,

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from collections.abc import Hashable
+from collections.abc import Hashable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
@@ -361,59 +361,83 @@ def _from_milli(value: int) -> Decimal:
     return Decimal(value).scaleb(-3).quantize(QTY, rounding=ROUND_HALF_UP)
 
 
-def _split_covered(needs: list[int], covered: int) -> list[int]:
-    """Поделить покрытие пропорционально потребности, остаток — большей доле.
+def _split_by_weights(weights: list[int], total: int) -> list[int]:
+    """Поделить сумму пропорционально весам, остаток округления — большей доле.
 
     Считаем в тысячных: целые части по пропорции, а единицы, потерянные на
     округлении, отдаём строкам с самым большим остатком. Сумма всегда равна
-    ``covered``, и ни одна строка не получает больше своей потребности.
+    ``total``, и ни одна строка не получает больше своего веса.
     """
-    total = sum(needs)
-    if total <= 0 or covered <= 0:
-        return [0] * len(needs)
-    parts = [covered * need // total for need in needs]
-    rest = covered - sum(parts)
+    size = sum(weights)
+    if size <= 0 or total <= 0:
+        return [0] * len(weights)
+    parts = [total * weight // size for weight in weights]
+    rest = total - sum(parts)
     if rest > 0:
         order = sorted(
-            range(len(needs)),
-            key=lambda index: (-((covered * needs[index]) % total), index),
+            range(len(weights)),
+            key=lambda index: (-((total * weights[index]) % size), index),
         )
         for index in order[:rest]:
             parts[index] += 1
     return parts
 
 
-def cover_group(
-    schedules: dict[Key, list[MonthPlan]],
-    arrivals: dict[int, Decimal] | None = None,
+def cover_family(
+    mains: dict[Key, list[MonthPlan]],
+    alternatives: Sequence[Key],
+    arrivals: dict[Key, dict[int, Decimal]],
     opening: Decimal = ZERO,
-) -> dict[Key, list[CoverageEntry]]:
-    """Покрытие по сырью: приходы и излишек общие для всех строк одного сырья.
+) -> tuple[dict[Key, list[CoverageEntry]], dict[Key, dict[int, Decimal]], Decimal]:
+    """Покрытие потребности: сначала основное сырьё, затем альтернативы.
 
-    Месяцы идут по порядку. В каждом месяце приход закрывает суммарную
-    потребность всех строк, а покрытие делится между строками пропорционально
-    их потребности в этом месяце: строка видит свой кусок, но приход у них
-    один. Излишек после месяца остаётся в общем котле и перекрывает следующие
-    месяцы любой из строк. Поэтому «перекрыто» по строкам в сумме даёт ровно
-    то, что пришло, и не бывает больше 100 %.
+    Месяцы идут по порядку. В каждом месяце приход основных строк закрывает их
+    потребность; если его не хватило, остаток закрывают альтернативы — иначе их
+    приход не попал бы в план. Если альтернатива в этом месяце не понадобилась,
+    её приход остаётся в запасе и ждёт следующих месяцев. Возвращаем покрытие
+    по основным строкам, расход альтернатив по месяцам и общий остаток.
     """
-    by_month = arrivals or {}
     month_rows: dict[int, list[tuple[Key, MonthPlan]]] = {}
-    for key, schedule in schedules.items():
+    for key, schedule in mains.items():
         for entry in schedule:
             month_rows.setdefault(entry.month, []).append((key, entry))
 
-    available = _milli(opening)
-    result: dict[Key, list[CoverageEntry]] = {key: [] for key in schedules}
+    available: dict[Key, int] = {key: 0 for key in mains}
+    for key in alternatives:
+        available.setdefault(key, 0)
+    if mains and opening:
+        available[next(iter(mains))] = _milli(opening)
+
+    result: dict[Key, list[CoverageEntry]] = {key: [] for key in mains}
+    used: dict[Key, dict[int, Decimal]] = {key: {} for key in alternatives}
     for month in sorted(month_rows):
-        available += _milli(by_month.get(month, ZERO))
+        for key in available:
+            available[key] += _milli(arrivals.get(key, {}).get(month, ZERO))
+
         rows = sorted(month_rows[month], key=lambda pair: (-pair[1].quantity, str(pair[0])))
-        needs = [_milli(entry.quantity) for _key, entry in rows]
-        covered = min(sum(needs), max(available, 0))
-        parts = _split_covered(needs, covered)
-        available -= covered
-        carry = _from_milli(max(available, 0))
-        for (key, entry), need, part in zip(rows, needs, parts, strict=True):
+        needs = {key: _milli(entry.quantity) for key, entry in rows}
+        need_total = sum(needs.values())
+
+        # Сначала основное сырьё: излишек альтернативы подключаем только на остаток.
+        taken = min(need_total, max(sum(available[key] for key, _entry in rows), 0))
+        for (key, _entry), part in zip(
+            rows, _split_by_weights([available[key] for key, _e in rows], taken), strict=True
+        ):
+            available[key] -= part
+
+        shortfall = need_total - taken
+        alternatives_taken = min(shortfall, max(sum(available[key] for key in alternatives), 0))
+        if alternatives and alternatives_taken > 0:
+            parts = _split_by_weights([available[key] for key in alternatives], alternatives_taken)
+            for key, part in zip(alternatives, parts, strict=True):
+                available[key] -= part
+                if part > 0:
+                    used[key][month] = _from_milli(part)
+
+        carry = _from_milli(max(sum(available.values()), 0))
+        covered_total = taken + alternatives_taken
+        covered = _split_by_weights(list(needs.values()), covered_total)
+        for (key, entry), need, part in zip(rows, list(needs.values()), covered, strict=True):
             result[key].append(
                 CoverageEntry(
                     month=month,
@@ -426,7 +450,28 @@ def cover_group(
                     overdue=entry.overdue,
                 )
             )
-    return result
+    left = _from_milli(max(sum(available.values()), 0)) if month_rows else ZERO
+    return result, used, left
+
+
+def cover_group(
+    schedules: dict[Key, list[MonthPlan]],
+    arrivals: dict[int, Decimal] | None = None,
+    opening: Decimal = ZERO,
+) -> dict[Key, list[CoverageEntry]]:
+    """Покрытие по сырью без альтернатив: общий котёл на все строки.
+
+    Частный случай ``cover_family``: потребность закрывают приходы всех строк
+    одного сырья, покрытие делится пропорционально потребности месяца.
+    """
+    by_month = dict(arrivals or {})
+    keys = list(schedules)
+    if not keys:
+        return {}
+    per_key: dict[Key, dict[int, Decimal]] = {key: {} for key in keys}
+    per_key[keys[0]] = by_month
+    entries, _used, _left = cover_family(schedules, [], per_key, opening)
+    return entries
 
 
 def cover_schedule(

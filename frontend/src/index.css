@@ -2249,6 +2249,29 @@ button.primary:disabled,
   border-color: #f3b4ae;
 }
 
+/* Альтернативное сырьё: строка-замена под основной, своей потребности у неё нет. */
+.badge-alt {
+  background: #e8f0fe;
+  color: #1f4b99;
+  border-color: #a9c1f0;
+}
+
+.alt-row td {
+  background: #fbfcff;
+}
+
+.alt-add {
+  display: block;
+  margin-top: 0.25rem;
+}
+
+.alt-note {
+  display: block;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.3;
+}
+
 /* Подсветка «открыто из сообщения» — синяя, чтобы не путаться с предупреждениями. */
 .focus-row td {
   background: #eef4ff;

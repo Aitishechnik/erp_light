@@ -76,6 +76,9 @@ class PurchasePlanItemIn(BaseModel):
     """
 
     id: uuid.UUID | None = Field(default=None, description="Строка плана при сохранении")
+    alternative_of_id: uuid.UUID | None = Field(
+        default=None, description="Основная строка, если это альтернативное сырьё"
+    )
     sales_product_id: uuid.UUID = Field(description="Позиция годового плана продаж")
     product_id: uuid.UUID = Field(description="Закупаемое сырьё")
     country_id: uuid.UUID = Field(description="Страна происхождения: срок доставки")
@@ -125,6 +128,7 @@ class PurchasePlanMonthOut(BaseModel):
 
 class PurchasePlanItemOut(BaseModel):
     id: uuid.UUID
+    alternative_of_id: uuid.UUID | None = None
     sales_product_id: uuid.UUID
     sales_product_name: str
     product_id: uuid.UUID
@@ -153,6 +157,14 @@ class PurchasePlanItemOut(BaseModel):
         description="Остаток сырья на складе по последнему отчёту — справочно",
     )
     stock_date: date | None = Field(default=None, description="Дата снимка остатков")
+    used_quantity: Decimal = Field(
+        default=Decimal("0"),
+        description="Альтернатива: сколько её прихода ушло на покрытие основной потребности",
+    )
+    used_months: list[PurchasePlanMonthOut] = Field(
+        default_factory=list,
+        description="Альтернатива: покрытие по месяцам, только месяцы с расходом",
+    )
     carry_forward: Decimal = Field(
         default=Decimal("0"),
         description="Излишек после последнего месяца — переходит на следующий год",

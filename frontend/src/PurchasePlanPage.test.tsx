@@ -100,6 +100,7 @@ function plan(overrides: Partial<PurchasePlan> = {}): PurchasePlan {
     items: [
       {
         id: 'item-1',
+        alternative_of_id: null,
         sales_product_id: 'fin-1',
         sales_product_name: 'Смесь ореховая',
         product_id: 'raw-1',
@@ -116,6 +117,8 @@ function plan(overrides: Partial<PurchasePlan> = {}): PurchasePlan {
         fact_quantity: '10.000',
         fact_share: '33.3',
         fact_months: [{ month: 1, quantity: '10.000' }],
+        used_quantity: '0',
+        used_months: [],
         stock_quantity: '0',
         stock_date: null,
         carry_forward: '0',
@@ -351,6 +354,45 @@ describe('PurchasePlanPage', () => {
     expect(table).toHaveTextContent('докупить 5 кг')
     expect(table).toHaveTextContent(
       'Ближайший заказ: к 01.11.2025 — 5 кг (потребность — февраль 2026)',
+    )
+  })
+
+  it('альтернативное сырьё закрывает потребность основной строки', async () => {
+    mockApi(
+      routes([
+        plan({
+          items: [
+            planItem({ fact_quantity: '0', fact_months: [] }),
+            planItem({
+              id: 'item-2',
+              alternative_of_id: 'item-1',
+              product_id: 'raw-2',
+              product_code: 'RAW-2',
+              product_name: 'Кокосовая стружка',
+              quantity: '15.000',
+              fact_quantity: '12.000',
+              fact_months: [{ month: 1, quantity: '12.000' }],
+            }),
+          ],
+        }),
+      ]),
+    )
+    render(<PurchasePlanPage user={DIRECTOR} />)
+
+    // Альтернатива — под основной строкой, со своей пометкой и расходом.
+    const badge = await screen.findByTestId('alt-badge-item-2')
+    expect(badge).toHaveTextContent('альтернатива')
+    expect(screen.getByTestId('alt-item-2')).toHaveTextContent('план 15 · пришло 12')
+    expect(screen.getByTestId('alt-item-2')).toHaveTextContent('на покрытие 12')
+    expect(
+      screen.getByRole('button', { name: 'Добавить альтернативу FIN-1 1' }),
+    ).toBeInTheDocument()
+
+    // Январь закрыт альтернативой, февраль — на 2 из 20: докупить 18.
+    const table = screen.getByTestId('purchase-table')
+    expect(table).toHaveTextContent('перекрыто 12 из 30 кг (40 %)')
+    expect(table).toHaveTextContent(
+      'Ближайший заказ: к 01.11.2025 — 18 кг (потребность — февраль 2026)',
     )
   })
 

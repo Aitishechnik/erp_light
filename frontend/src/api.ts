@@ -180,6 +180,8 @@ export type PurchasePlanScheduleEntry = {
 
 export type PurchasePlanItem = {
   id: string
+  /** Основная строка, если это альтернативное сырьё. */
+  alternative_of_id: string | null
   sales_product_id: string
   sales_product_name: string
   product_id: string
@@ -199,6 +201,9 @@ export type PurchasePlanItem = {
   fact_share: string
   /** Поступило по месяцам прихода партии: только месяцы с фактом. */
   fact_months: { month: number; quantity: string }[]
+  /** Альтернатива: сколько её прихода ушло на покрытие основной потребности. */
+  used_quantity: string
+  used_months: { month: number; quantity: string }[]
   /** Остаток сырья на складе по последнему отчёту 1С — справочно, в покрытии не участвует. */
   stock_quantity: string
   stock_date: string | null
@@ -271,6 +276,7 @@ export type PurchasePlan = {
 
 export type PurchasePlanItemIn = {
   id: string | null
+  alternative_of_id: string | null
   sales_product_id: string
   product_id: string
   country_id: string

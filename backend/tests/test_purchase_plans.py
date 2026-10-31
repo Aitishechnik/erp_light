@@ -96,14 +96,18 @@ def _item(
     country: str = "thailand",
     quantity: str = "30",
     price: str | None = "500.00",
+    alternative_of: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "sales_product_id": str(catalog[sales].id),
         "product_id": str(catalog[raw].id),
         "country_id": str(catalog[country].id),
         "quantity": quantity,
         "price_rub": price,
     }
+    if alternative_of is not None:
+        payload["alternative_of_id"] = alternative_of
+    return payload
 
 
 def _save(client: TestClient, plan_id: str, items: list[dict[str, Any]]) -> Any:
@@ -595,3 +599,171 @@ def test_import_manager_also_fills_plan(client: TestClient, login, catalog: dict
     plan_id = str(created.json()["id"])
     assert _save(client, plan_id, [_item(catalog)]).status_code == 200
     assert client.post(f"/api/v1/purchase-plans/{plan_id}/submit").status_code == 200
+
+
+def _with_alternative(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """План: основная строка и альтернатива из другой страны, без приходов."""
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    saved = _save(client, plan["id"], [_item(catalog, sales="fin", raw="raw", quantity="30")])
+    assert saved.status_code == 200, saved.text
+    main = saved.json()["items"][0]
+    main_item = _item(catalog, sales="fin", raw="raw", quantity="30")
+    main_item["id"] = main["id"]
+    saved = _save(
+        client,
+        plan["id"],
+        [
+            main_item,
+            _item(
+                catalog,
+                sales="fin",
+                raw="raw2",
+                country="china",
+                quantity="15",
+                alternative_of=main["id"],
+            ),
+        ],
+    )
+    assert saved.status_code == 200, saved.text
+    items = saved.json()["items"]
+    alternative = next(row for row in items if row["alternative_of_id"] == main["id"])
+    return plan, main, alternative
+
+
+def _arrive(
+    db_session: Session,
+    catalog: dict[str, Any],
+    plan_item_id: str,
+    quantity: str,
+    day: date,
+    product: str = "raw2",
+) -> None:
+    batch = Batch(
+        batch_number=f"ИТ-{plan_item_id[:8]}", batch_date=day, currency="RUB", source="1c"
+    )
+    db_session.add(batch)
+    db_session.flush()
+    db_session.add(
+        BatchItem(
+            batch_id=batch.id,
+            product_id=catalog[product].id,
+            quantity=Decimal(quantity),
+            purchase_plan_item_id=plan_item_id,
+        )
+    )
+    db_session.commit()
+
+
+def test_alternative_covers_main_shortfall(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    """Приход альтернативы закрывает потребность основной строки по месяцам."""
+    plan, main, alternative = _with_alternative(client, login, catalog, db_session)
+    assert alternative["schedule"] == []
+    assert alternative["quantity"] == "15.000"
+
+    _arrive(db_session, catalog, alternative["id"], "12", date(YEAR, 1, 15))
+    login("purchase")
+    body = client.get(f"/api/v1/purchase-plans/{plan['id']}").json()
+    items = {row["id"]: row for row in body["items"]}
+    main_row = items[main["id"]]
+    alt_row = items[alternative["id"]]
+
+    # Январь закрыт целиком, в феврале альтернативы хватило на 2 из 20.
+    assert [(row["month"], row["covered"]) for row in main_row["schedule"]] == [
+        (1, "10.000"),
+        (2, "2.000"),
+    ]
+    assert main_row["schedule"][1]["remaining"] == "18.000"
+    # Своей потребности у альтернативы нет, видно только её расход.
+    assert alt_row["fact_quantity"] == "12.000"
+    assert alt_row["used_quantity"] == "12.000"
+    assert [(row["month"], row["quantity"]) for row in alt_row["used_months"]] == [
+        (1, "10.000"),
+        (2, "2.000"),
+    ]
+
+
+def test_main_arrivals_are_spent_before_alternative(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    """Если основного хватает, альтернатива остаётся в запасе."""
+    plan, main, alternative = _with_alternative(client, login, catalog, db_session)
+    _arrive(db_session, catalog, main["id"], "30", date(YEAR, 1, 15), product="raw")
+    _arrive(db_session, catalog, alternative["id"], "15", date(YEAR, 1, 15))
+    login("purchase")
+
+    body = client.get(f"/api/v1/purchase-plans/{plan['id']}").json()
+    items = {row["id"]: row for row in body["items"]}
+    main_row = items[main["id"]]
+    alt_row = items[alternative["id"]]
+    assert [row["covered"] for row in main_row["schedule"]] == ["10.000", "20.000"]
+    assert [row["share"] for row in main_row["schedule"]] == ["100.0", "100.0"]
+    assert alt_row["used_quantity"] == "0"
+    assert alt_row["used_months"] == []
+    assert main_row["carry_forward"] == "15.000"  # альтернатива ждёт следующего месяца
+
+
+def test_alternative_must_be_for_the_same_position(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    saved = _save(client, plan["id"], [_item(catalog, sales="fin", raw="raw")])
+    main_id = saved.json()["items"][0]["id"]
+    main_item = _item(catalog, sales="fin", raw="raw")
+    main_item["id"] = main_id
+    wrong = _save(
+        client,
+        plan["id"],
+        [
+            main_item,
+            _item(catalog, sales="fin2", raw="raw2", alternative_of=main_id),
+        ],
+    )
+    assert wrong.status_code == 400, wrong.text
+    assert "той же позиции" in wrong.json()["detail"]
+
+    # Альтернатива не может ссылаться на альтернативу.
+    saved = _save(
+        client,
+        plan["id"],
+        [
+            main_item,
+            _item(catalog, sales="fin", raw="raw2", alternative_of=main_id),
+        ],
+    )
+    assert saved.status_code == 200, saved.text
+    alt_id = next(row["id"] for row in saved.json()["items"] if row["alternative_of_id"] == main_id)
+    nested = _save(
+        client,
+        plan["id"],
+        [
+            main_item,
+            {**_item(catalog, sales="fin", raw="raw2", alternative_of=main_id), "id": alt_id},
+            _item(catalog, sales="fin", raw="raw", alternative_of=alt_id),
+        ],
+    )
+    assert nested.status_code == 400, nested.text
+    assert "не может быть основной" in nested.json()["detail"]
+
+
+def test_alternative_goes_with_main(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    plan, main, alternative = _with_alternative(client, login, catalog, db_session)
+    # Основную строку нельзя убрать, оставив альтернативу без неё.
+    kept_alt = _save(
+        client,
+        plan["id"],
+        [_item(catalog, sales="fin", raw="raw2", alternative_of=main["id"])],
+    )
+    assert kept_alt.status_code == 400, kept_alt.text
+    assert "Основная строка" in kept_alt.json()["detail"]
+
+    assert _save(client, plan["id"], []).status_code == 200
+    body = client.get(f"/api/v1/purchase-plans/{plan['id']}").json()
+    assert body["items"] == []

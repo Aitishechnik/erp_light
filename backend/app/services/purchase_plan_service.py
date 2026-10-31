@@ -420,41 +420,63 @@ def _items_out(
     fact_months_by_item: dict[uuid.UUID, dict[int, Decimal]] = {}
     for item in items:
         position = source.get(item.sales_product_id)
-        schedules[item.id] = need.split_annual(
-            item.quantity,
-            position.months if position else {},
-            item.delivery_days,
-            plan.year,
-        )
+        if item.alternative_of_id is None:
+            schedules[item.id] = need.split_annual(
+                item.quantity,
+                position.months if position else {},
+                item.delivery_days,
+                plan.year,
+            )
         rows = arrivals_by_item.get(item.id, [])
         fact_by_item[item.id] = sum((value for _day, value in rows), ZERO)
         fact_months_by_item[item.id] = _months_of(rows, plan.year)
 
-    # Одно сырьё у нескольких позиций — один общий котёл приходов: партия,
-    # привязанная к любой из строк, перекрывает потребность всех.
-    groups: dict[uuid.UUID, list[PurchasePlanItem]] = {}
+    # Семейство: основное сырьё (одно и то же у нескольких позиций — общий
+    # котёл) и альтернативы, которые закрывают эту же потребность.
+    alternatives_by_main: dict[uuid.UUID, list[PurchasePlanItem]] = {}
+    mains: list[PurchasePlanItem] = []
     for item in items:
-        groups.setdefault(item.product_id, []).append(item)
+        if item.alternative_of_id is None:
+            mains.append(item)
+        else:
+            alternatives_by_main.setdefault(item.alternative_of_id, []).append(item)
+
+    families: dict[uuid.UUID, list[PurchasePlanItem]] = {}
+    for item in mains:
+        families.setdefault(item.product_id, []).append(item)
+
     coverage_by_item: dict[uuid.UUID, list[need.CoverageEntry]] = {}
+    used_by_alternative: dict[uuid.UUID, dict[int, Decimal]] = {}
     # Излишек — общий для сырья: он остаётся после последнего месяца любой строки.
     carry_by_item: dict[uuid.UUID, Decimal] = {}
-    for group in groups.values():
-        arrivals_by_month: dict[int, Decimal] = {}
-        for item in group:
-            for month, quantity in fact_months_by_item[item.id].items():
-                arrivals_by_month[month] = arrivals_by_month.get(month, ZERO) + quantity
-        calculated = need.cover_group(
-            {item.id: schedules[item.id] for item in group}, arrivals_by_month
+    for family in families.values():
+        family_alts = [alt for item in family for alt in alternatives_by_main.get(item.id, [])]
+        family_arrivals: dict[uuid.UUID, dict[int, Decimal]] = {}
+        for item in [*family, *family_alts]:
+            family_arrivals[item.id] = fact_months_by_item[item.id]
+        calculated, used, left = need.cover_family(
+            {item.id: schedules[item.id] for item in family},
+            [alt.id for alt in family_alts],
+            family_arrivals,
         )
         coverage_by_item.update(calculated)
-        entries = [entry for schedule in calculated.values() for entry in schedule]
-        last = max(entries, key=lambda entry: entry.month, default=None)
-        for item in group:
-            carry_by_item[item.id] = last.carry if last else ZERO
+        used_by_alternative.update(used)
+        for item in [*family, *family_alts]:
+            carry_by_item[item.id] = left
+
+    ordered: list[PurchasePlanItem] = []
+    for item in mains:
+        ordered.append(item)
+        ordered.extend(
+            sorted(
+                alternatives_by_main.get(item.id, []),
+                key=lambda row: (row.country.name, row.product.name),
+            )
+        )
 
     result: list[PurchasePlanItemOut] = []
-    for item in items:
-        coverage = coverage_by_item[item.id]
+    for item in ordered:
+        coverage = coverage_by_item.get(item.id, [])
         fact_months = fact_months_by_item[item.id]
         stock = stock_by_product.get(item.product_id)
         # Остаток на складе — только справка: покрытие считаем по нашим приходам.
@@ -463,6 +485,7 @@ def _items_out(
         result.append(
             PurchasePlanItemOut(
                 id=item.id,
+                alternative_of_id=item.alternative_of_id,
                 sales_product_id=item.sales_product_id,
                 sales_product_name=item.sales_product.name,
                 product_id=item.product_id,
@@ -485,6 +508,13 @@ def _items_out(
                 stock_quantity=stock_quantity,
                 stock_date=stock_date,
                 carry_forward=carry_by_item[item.id],
+                used_quantity=sum(
+                    (value for value in used_by_alternative.get(item.id, {}).values()), ZERO
+                ),
+                used_months=[
+                    PurchasePlanMonthOut(month=month, quantity=quantity)
+                    for month, quantity in sorted(used_by_alternative.get(item.id, {}).items())
+                ],
                 schedule=[
                     PurchasePlanScheduleEntryOut(
                         month=entry.month,
@@ -652,6 +682,21 @@ def update_items(
         country = _check_country(db, item.country_id)
         prepared.append((item, country.delivery_days, stored))
 
+    for item, _, _stored in prepared:
+        if item.alternative_of_id is None:
+            continue
+        main = existing.get(item.alternative_of_id)
+        if main is None or main.id not in seen:
+            raise PlanError(
+                "Основная строка для альтернативы не найдена — обновите план", status_code=400
+            )
+        if main.alternative_of_id is not None:
+            raise PlanError("Альтернатива не может быть основной строкой", status_code=400)
+        if main.sales_product_id != item.sales_product_id:
+            raise PlanError(
+                "Альтернатива добавляется к строке той же позиции плана продаж", status_code=400
+            )
+
     for item, _, stored in prepared:
         if stored is None or stored.id not in linked:
             continue
@@ -668,6 +713,13 @@ def update_items(
             )
 
     removed = [row for row_id, row in existing.items() if row_id not in seen]
+    # Альтернатива уходит вместе с основной строкой: сначала снимаем ссылки.
+    removed_alternatives = [row for row in removed if row.alternative_of_id is not None]
+    for row in removed_alternatives:
+        db.delete(row)
+    if removed_alternatives:
+        db.flush()
+    removed = [row for row in removed if row.alternative_of_id is None]
     if removed:
         counts = _linked_counts(db, [row.id for row in removed])
         if counts:
@@ -680,12 +732,14 @@ def update_items(
             )
         for row in removed:
             db.delete(row)
+        db.flush()
 
     for item, delivery_days, stored in prepared:
         if stored is None:
             db.add(
                 PurchasePlanItem(
                     plan_id=plan.id,
+                    alternative_of_id=item.alternative_of_id,
                     sales_product_id=item.sales_product_id,
                     product_id=item.product_id,
                     country_id=item.country_id,
@@ -696,6 +750,7 @@ def update_items(
                 )
             )
             continue
+        stored.alternative_of_id = item.alternative_of_id
         stored.sales_product_id = item.sales_product_id
         stored.product_id = item.product_id
         stored.country_id = item.country_id

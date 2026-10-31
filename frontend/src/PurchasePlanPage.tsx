@@ -51,6 +51,8 @@ type DraftRow = {
   key: string
   /** Строка плана на сервере; пусто у новой. */
   id: string | null
+  /** Основная строка для альтернативы; пусто у обычной строки. */
+  alternativeOfId: string | null
   salesProductId: string
   productId: string
   productName: string
@@ -146,6 +148,10 @@ type ScheduleRow = {
 type GroupTotals = {
   rows: number
   positions: number
+  /** Сколько альтернативных строк закрывают эту же потребность. */
+  alternatives: number
+  /** Сколько закрыли именно альтернативы. */
+  alternativeUsed: number
   need: number
   fact: number
   covered: number
@@ -157,6 +163,8 @@ type GroupTotals = {
 type Coverage = {
   byRow: Map<string, ScheduleRow[]>
   group: Map<string, GroupTotals>
+  /** Расход альтернативы по месяцам: сколько её прихода ушло на основную потребность. */
+  used: Map<string, { total: number; months: Map<number, number> }>
 }
 
 /** Строки с одним сырьём — один общий котёл; у новой строки без сырья свой. */
@@ -185,7 +193,7 @@ function allocateShare(needs: number[], covered: number): number[] {
   return parts
 }
 
-/** Тот же расчёт покрытия, что на сервере: приходы общие по сырью. */
+/** Тот же расчёт покрытия, что на сервере: сначала основное, затем альтернативы. */
 function coverDrafts(
   drafts: DraftRow[],
   positions: PurchasePlanPosition[],
@@ -193,19 +201,34 @@ function coverDrafts(
 ): Coverage {
   const byRow = new Map<string, ScheduleRow[]>()
   const group = new Map<string, GroupTotals>()
-  const buckets = new Map<string, DraftRow[]>()
+  const used = new Map<string, { total: number; months: Map<number, number> }>()
+
+  const mains = drafts.filter((row) => row.alternativeOfId === null)
+  const altsByMain = new Map<string, DraftRow[]>()
   for (const row of drafts) {
-    const key = groupKey(row)
-    const bucket = buckets.get(key) ?? []
+    if (row.alternativeOfId === null) continue
+    const bucket = altsByMain.get(row.alternativeOfId) ?? []
     bucket.push(row)
-    buckets.set(key, bucket)
+    altsByMain.set(row.alternativeOfId, bucket)
   }
+
+  const families = new Map<string, DraftRow[]>()
+  for (const row of mains) {
+    const key = groupKey(row)
+    const bucket = families.get(key) ?? []
+    bucket.push(row)
+    families.set(key, bucket)
+  }
+
   const today = new Date()
   const current = today.getFullYear() * 12 + today.getMonth()
 
-  buckets.forEach((rows, key) => {
+  families.forEach((family, familyKey) => {
+    const familyAlts = family.flatMap((row) => altsByMain.get(row.id ?? row.key) ?? [])
+    const rows = [...family, ...familyAlts]
     const entries = new Map<string, PreviewEntry[]>()
     const fact = new Map<string, Map<number, number>>()
+    const available = new Map<string, number>()
     for (const row of rows) {
       const position = positions.find((item) => item.product_id === row.salesProductId)
       entries.set(
@@ -217,65 +240,105 @@ function coverDrafts(
         months.set(month.month, (months.get(month.month) ?? 0) + toMilli(month.quantity))
       }
       fact.set(row.key, months)
+      available.set(row.key, 0)
       byRow.set(row.key, [])
     }
+    for (const row of familyAlts) used.set(row.key, { total: 0, months: new Map() })
 
     const monthSet = new Set<number>()
-    entries.forEach((list) => {
-      list.forEach((entry) => {
+    family.forEach((row) => {
+      entries.get(row.key)?.forEach((entry) => {
         monthSet.add(entry.month)
       })
     })
     const months = [...monthSet].sort((left, right) => left - right)
 
-    let available = 0
     let coveredMilli = 0
     for (const month of months) {
-      for (const row of rows) available += fact.get(row.key)?.get(month) ?? 0
-      const participants = rows
+      for (const row of rows) {
+        available.set(row.key, (available.get(row.key) ?? 0) + (fact.get(row.key)?.get(month) ?? 0))
+      }
+      const participants = family
         .map((row) => ({ row, entry: entries.get(row.key)?.find((item) => item.month === month) }))
         .filter((item): item is { row: DraftRow; entry: PreviewEntry } => item.entry !== undefined)
       const needs = participants.map((item) => item.entry.quantityMilli)
-      const covered = Math.min(
-        needs.reduce((sum, need) => sum + need, 0),
-        Math.max(available, 0),
+      const needTotal = needs.reduce((sum, need) => sum + need, 0)
+
+      // Сначала основное сырьё, затем альтернативы — только на остаток месяца.
+      const mainAvail = participants.map((item) => available.get(item.row.key) ?? 0)
+      const taken = Math.min(
+        needTotal,
+        mainAvail.reduce((sum, value) => sum + value, 0),
       )
-      const parts = allocateShare(needs, covered)
-      available -= covered
+      const spentMain = allocateShare(mainAvail, taken)
       participants.forEach((item, index) => {
-        const part = parts[index] ?? 0
+        available.set(item.row.key, (available.get(item.row.key) ?? 0) - (spentMain[index] ?? 0))
+      })
+
+      const shortfall = needTotal - taken
+      const altAvail = familyAlts.map((row) => available.get(row.key) ?? 0)
+      const altTaken = Math.min(
+        shortfall,
+        altAvail.reduce((sum, value) => sum + value, 0),
+      )
+      if (altTaken > 0) {
+        const spentAlt = allocateShare(altAvail, altTaken)
+        familyAlts.forEach((row, index) => {
+          const part = spentAlt[index] ?? 0
+          available.set(row.key, (available.get(row.key) ?? 0) - part)
+          if (part > 0) {
+            const entry = used.get(row.key)
+            if (entry) {
+              entry.months.set(month, (entry.months.get(month) ?? 0) + part)
+              entry.total += part
+            }
+          }
+        })
+      }
+
+      const covered = allocateShare(needs, taken + altTaken)
+      const carry = [...available.values()].reduce((sum, value) => sum + value, 0) / 1000
+      participants.forEach((item, index) => {
+        const part = covered[index] ?? 0
         byRow.get(item.row.key)?.push({
           entry: item.entry,
           need: item.entry.quantityMilli / 1000,
           covered: part / 1000,
           remaining: (item.entry.quantityMilli - part) / 1000,
-          carry: Math.max(available, 0) / 1000,
+          carry,
           share: item.entry.quantityMilli > 0 ? (part / item.entry.quantityMilli) * 100 : 0,
           soon:
             !item.entry.overdue &&
             item.entry.orderYear * 12 + item.entry.orderMonth - 1 === current,
         })
       })
-      coveredMilli += covered
+      coveredMilli += taken + altTaken
     }
 
-    const needMilli = rows.reduce((sum, row) => sum + toMilli(row.quantity), 0)
+    const needMilli = family.reduce((sum, row) => sum + toMilli(row.quantity), 0)
     const factMilli = rows.reduce(
       (sum, row) => sum + row.factMonths.reduce((acc, month) => acc + toMilli(month.quantity), 0),
       0,
     )
-    group.set(key, {
-      rows: rows.length,
-      positions: new Set(rows.map((row) => row.salesProductId)).size,
+    const alternativeUsed = familyAlts.reduce(
+      (sum, row) => sum + (used.get(row.key)?.total ?? 0),
+      0,
+    )
+    const totals: GroupTotals = {
+      rows: family.length,
+      positions: new Set(family.map((row) => row.salesProductId)).size,
+      alternatives: familyAlts.length,
+      alternativeUsed: alternativeUsed / 1000,
       need: needMilli / 1000,
       fact: factMilli / 1000,
       covered: coveredMilli / 1000,
       remaining: Math.max(needMilli - coveredMilli, 0) / 1000,
-      carry: Math.max(available, 0) / 1000,
+      carry: [...available.values()].reduce((sum, value) => sum + value, 0) / 1000,
       months: monthSet,
-    })
+    }
+    group.set(familyKey, totals)
   })
-  return { byRow, group }
+  return { byRow, group, used }
 }
 
 function orderDate(row: ScheduleRow): string {
@@ -309,13 +372,19 @@ function GroupNote({ group, year }: { group: GroupTotals; year: number }) {
     group.remaining > 0 ? `докупить ${formatQuantity(group.remaining.toFixed(3))} кг` : ''
   const carry =
     group.carry > 0 ? `излишек ${formatQuantity(group.carry.toFixed(3))} на ${year + 1}` : ''
+  const alternative =
+    group.alternativeUsed > 0
+      ? `в т. ч. альтернативой ${formatQuantity(group.alternativeUsed.toFixed(3))} кг`
+      : ''
   return (
     <span className="sched-group" data-testid="schedule-group">
       <span className="sched-group-line">
         по сырью ({group.positions} поз.): перекрыто {formatQuantity(group.covered.toFixed(3))} из{' '}
         {formatQuantity(group.need.toFixed(3))} кг ({formatQuantity(share.toFixed(1))} %)
       </span>
-      <span className="sched-group-line">{[rest, carry].filter(Boolean).join(' · ')}</span>
+      <span className="sched-group-line">
+        {[rest, carry, alternative].filter(Boolean).join(' · ')}
+      </span>
     </span>
   )
 }
@@ -537,6 +606,7 @@ function draftsFromPlan(plan: PurchasePlan): DraftRow[] {
   return plan.items.map((item) => ({
     key: item.id,
     id: item.id,
+    alternativeOfId: item.alternative_of_id,
     salesProductId: item.sales_product_id,
     productId: item.product_id,
     productName: item.product_name,
@@ -711,7 +781,8 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
   }
 
   const removeRow = (key: string) => {
-    setDrafts((current) => current.filter((row) => row.key !== key))
+    // Альтернативы уходят вместе с основной строкой: без неё они бессмысленны.
+    setDrafts((current) => current.filter((row) => row.key !== key && row.alternativeOfId !== key))
   }
 
   const addRow = (position: PurchasePlanPosition) => {
@@ -720,7 +791,35 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
       {
         key: `new-${position.product_id}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
         id: null,
+        alternativeOfId: null,
         salesProductId: position.product_id,
+        productId: '',
+        productName: '',
+        countryId: '',
+        countryName: '',
+        deliveryDays: 30,
+        quantity: '',
+        priceRub: '',
+        notes: '',
+        factQuantity: '0',
+        factShare: '0',
+        factMonths: [],
+        stockQuantity: '0',
+        stockDate: null,
+      },
+    ])
+    setError(null)
+  }
+
+  const addAlternative = (main: DraftRow) => {
+    if (main.id === null) return
+    setDrafts((current) => [
+      ...current,
+      {
+        key: `new-alt-${main.key}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        id: null,
+        alternativeOfId: main.id,
+        salesProductId: main.salesProductId,
         productId: '',
         productName: '',
         countryId: '',
@@ -762,6 +861,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
       }
       items.push({
         id: row.id,
+        alternative_of_id: row.alternativeOfId,
         sales_product_id: row.salesProductId,
         product_id: row.productId,
         country_id: row.countryId,
@@ -1107,6 +1207,14 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
               </thead>
               {plan.positions.map((position) => {
                 const rows = drafts.filter((row) => row.salesProductId === position.product_id)
+                // Альтернатива показывается сразу под своей основной строкой.
+                const ordered: DraftRow[] = []
+                for (const row of rows.filter((item) => item.alternativeOfId === null)) {
+                  ordered.push(row)
+                  if (row.id !== null) {
+                    ordered.push(...rows.filter((item) => item.alternativeOfId === row.id))
+                  }
+                }
                 return (
                   <tbody key={position.product_id}>
                     <tr
@@ -1162,7 +1270,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                         </td>
                       </tr>
                     ) : (
-                      rows.map((row, index) => {
+                      ordered.map((row, index) => {
                         const schedule = splitPreview(
                           toMilli(row.quantity),
                           position,
@@ -1176,9 +1284,11 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                             ? Number(price) * Number(quantity)
                             : null
                         const label = `${position.code} ${index + 1}`
+                        const isAlternative = row.alternativeOfId !== null
+                        const alternativeUsed = (coverage.used.get(row.key)?.total ?? 0) / 1000
                         const group = coverage.group.get(groupKey(row))
                         const rowSchedule = coverage.byRow.get(row.key) ?? []
-                        const grouped = (group?.rows ?? 1) > 1
+                        const grouped = (group?.rows ?? 1) > 1 || (group?.alternatives ?? 0) > 0
                         const factText = `пришло ${formatQuantity(
                           grouped ? (group?.fact ?? 0).toFixed(3) : row.factQuantity,
                         )}`
@@ -1186,7 +1296,11 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                           ? 'Остаток по последнему отчёту 1С и общий приход по сырью — по всем строкам этого сырья'
                           : 'Остаток по последнему отчёту 1С и приход по связанным поступлениям'
                         return (
-                          <tr key={row.key} data-testid={`purchase-row-${row.key}`}>
+                          <tr
+                            key={row.key}
+                            className={isAlternative ? 'alt-row' : undefined}
+                            data-testid={`purchase-row-${row.key}`}
+                          >
                             <td>
                               {canEdit ? (
                                 <select
@@ -1220,6 +1334,25 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                               ) : (
                                 row.productName
                               )}
+                              {isAlternative ? (
+                                <span
+                                  className="badge badge-alt"
+                                  data-testid={`alt-badge-${row.key}`}
+                                >
+                                  альтернатива
+                                </span>
+                              ) : null}
+                              {canEdit && !isAlternative && row.id ? (
+                                <button
+                                  type="button"
+                                  className="mini alt-add"
+                                  aria-label={`Добавить альтернативу ${label}`}
+                                  title="Альтернативное сырьё для этой строки: другой сорт, калибр или страна"
+                                  onClick={() => addAlternative(row)}
+                                >
+                                  + альтернатива
+                                </button>
+                              ) : null}
                             </td>
                             <td>
                               {canEdit ? (
@@ -1311,6 +1444,22 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                             <td>
                               {position.status === 'orphan' ? (
                                 '—'
+                              ) : isAlternative ? (
+                                <span className="sched-summary" data-testid={`alt-${row.key}`}>
+                                  <span className="sched-line">
+                                    план {formatQuantity(row.quantity || '0')} · пришло{' '}
+                                    {formatQuantity(row.factQuantity)}
+                                    {alternativeUsed > 0
+                                      ? ` · на покрытие ${formatQuantity(
+                                          alternativeUsed.toFixed(3),
+                                        )}`
+                                      : ''}
+                                  </span>
+                                  <span className="alt-note">
+                                    закрывает потребность основной строки, когда основного сырья не
+                                    хватает
+                                  </span>
+                                </span>
                               ) : scheduleMode === 'summary' ? (
                                 <>
                                   <ScheduleView
@@ -1347,7 +1496,8 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                         )
                       })
                     )}
-                    {rows.map((row) => {
+                    {ordered.map((row) => {
+                      if (row.alternativeOfId !== null) return null
                       const schedule = splitPreview(
                         toMilli(row.quantity),
                         position,
