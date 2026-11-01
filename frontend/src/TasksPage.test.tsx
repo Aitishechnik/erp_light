@@ -41,6 +41,8 @@ const TASK: Task = {
       due_date: '2026-11-03',
       is_done: true,
       position: 0,
+      has_report: true,
+      needs_report: false,
     },
   ],
   reports_count: 1,
@@ -55,6 +57,8 @@ const DETAIL: TaskDetail = {
       id: 'r1',
       kind: 'interim',
       kind_title: 'Промежуточный',
+      step_id: null,
+      step_title: null,
       progress: 40,
       text: 'Собрал половину данных',
       author_id: 'sm-1',
@@ -127,6 +131,8 @@ describe('TasksPage', () => {
             id: 'r2',
             kind: 'interim' as const,
             kind_title: 'Промежуточный',
+            step_id: null,
+            step_title: null,
             progress: payload.progress,
             text: payload.text,
             author_id: MANAGER.id,
@@ -154,5 +160,105 @@ describe('TasksPage', () => {
     await user.click(screen.getByRole('button', { name: 'Отправить отчёт' }))
 
     expect(await screen.findByText('Договорились о скидке')).toBeInTheDocument()
+  })
+})
+
+const COMMERCIAL: SessionUser = {
+  id: 'cd-1',
+  login: 'commercial',
+  full_name: 'Коммерческий директор',
+  role: 'commercial_director',
+  role_title: 'Коммерческий директор',
+}
+
+describe('TasksPage — права отдела', () => {
+  it('коммерческий директор видит кнопку новой задачи, менеджер — нет', async () => {
+    mockApi({
+      '/api/v1/tasks/assignees': {
+        body: [{ id: 'sm-1', full_name: 'Иван Петров', role_title: 'Менеджер по продажам' }],
+      },
+      '/api/v1/tasks': { body: [] },
+    })
+    const director = render(<TasksPage user={COMMERCIAL} focus={[]} />)
+    expect(await screen.findByRole('button', { name: '＋ Новая задача' })).toBeInTheDocument()
+    director.unmount()
+
+    render(<TasksPage user={MANAGER} focus={[]} />)
+    expect(await screen.findByText('Вам пока не поставили ни одной задачи.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '＋ Новая задача' })).not.toBeInTheDocument()
+  })
+})
+
+describe('TasksPage — этапы', () => {
+  it('этап закрывается промежуточным отчётом', async () => {
+    const user = userEvent.setup()
+    let current: TaskDetail = {
+      ...DETAIL,
+      reports: [],
+      steps: [
+        {
+          id: 's2',
+          title: 'Согласовать скидки',
+          start_date: '2026-11-04',
+          due_date: '2026-11-06',
+          is_done: false,
+          position: 0,
+          has_report: false,
+          needs_report: false,
+        },
+      ],
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        const method = (init?.method ?? 'GET').toUpperCase()
+        const json = (body: unknown) =>
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        if (url.includes('/api/v1/tasks/t1/reports') && method === 'POST') {
+          const payload = JSON.parse(String(init?.body)) as { text: string; step_id: string }
+          current = {
+            ...current,
+            progress: 100,
+            steps: current.steps.map((step) =>
+              step.id === payload.step_id
+                ? { ...step, is_done: true, has_report: true, needs_report: false }
+                : step,
+            ),
+            reports: [
+              {
+                id: 'r-step',
+                kind: 'interim',
+                kind_title: 'Промежуточный',
+                step_id: payload.step_id,
+                step_title: 'Согласовать скидки',
+                progress: 100,
+                text: payload.text,
+                author_id: MANAGER.id,
+                author_name: MANAGER.full_name,
+                created_at: '2026-11-05T10:00:00Z',
+                files: [],
+              },
+            ],
+          }
+          return json(current)
+        }
+        if (url.includes('/api/v1/tasks/t1') && method === 'GET') return json(current)
+        if (url.includes('/api/v1/tasks') && method === 'GET') return json([TASK])
+        return new Response(JSON.stringify({ detail: 'нет мока' }), { status: 404 })
+      }),
+    )
+
+    render(<TasksPage user={MANAGER} focus={['t1']} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Отчёт по этапу' }))
+    await user.type(screen.getByLabelText('Что сделано'), 'Скидки согласованы со всеми')
+    await user.click(screen.getByRole('button', { name: 'Закрыть этап отчётом' }))
+
+    expect(await screen.findByText('Отчёт получен')).toBeInTheDocument()
+    expect(screen.getByText('Скидки согласованы со всеми')).toBeInTheDocument()
   })
 })

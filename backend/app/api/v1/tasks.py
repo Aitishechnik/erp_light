@@ -34,8 +34,11 @@ def _fail(exc: TaskError) -> HTTPException:
 
 @router.get("/tasks/assignees", response_model=list[TaskAssigneeOut])
 def list_assignees(user: CurrentUser, db: DbSession) -> list[TaskAssigneeOut]:
-    """Сотрудники, которых можно назначить исполнителем."""
-    return service.list_assignees(db)
+    """Сотрудники, которых можно назначить исполнителем (для постановщика)."""
+    try:
+        return service.list_assignees(db, user)
+    except TaskError as exc:
+        raise _fail(exc) from exc
 
 
 @router.get("/tasks", response_model=list[TaskOut])

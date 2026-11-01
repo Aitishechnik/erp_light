@@ -124,6 +124,10 @@ class TaskReport(Base):
     task_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # Отчёт по этапу: закрывает его. У отчёта по задаче пусто.
+    step_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("task_steps.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     author_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )

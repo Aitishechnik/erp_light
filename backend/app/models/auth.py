@@ -16,6 +16,7 @@ from app.db import Base
 
 # Пять ролей erp_lite.
 ROLE_SALES_MANAGER = "sales_manager"
+ROLE_SALES_ASSISTANT = "sales_assistant"
 ROLE_COMMERCIAL_DIRECTOR = "commercial_director"
 ROLE_PURCHASE_DIRECTOR = "purchase_director"
 ROLE_IMPORT_MANAGER = "import_manager"
@@ -23,6 +24,7 @@ ROLE_EXECUTIVE_DIRECTOR = "executive_director"
 
 ROLES = (
     ROLE_SALES_MANAGER,
+    ROLE_SALES_ASSISTANT,
     ROLE_COMMERCIAL_DIRECTOR,
     ROLE_PURCHASE_DIRECTOR,
     ROLE_IMPORT_MANAGER,
@@ -31,6 +33,7 @@ ROLES = (
 
 ROLE_TITLES = {
     ROLE_SALES_MANAGER: "Менеджер по продажам",
+    ROLE_SALES_ASSISTANT: "Ассистент отдела продаж",
     ROLE_COMMERCIAL_DIRECTOR: "Коммерческий директор",
     ROLE_PURCHASE_DIRECTOR: "Директор по закупкам",
     ROLE_IMPORT_MANAGER: "Менеджер по закупкам (импорт)",

@@ -17,8 +17,9 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.audit import AuditEvent, AuditEventRead
 from app.models.auth import ROLE_EXECUTIVE_DIRECTOR, ROLE_TITLES, User
@@ -97,6 +98,23 @@ CATALOG: dict[str, EventSpec] = {
 # Кому на этом этапе уходят служебные сообщения (позже матрица расширится).
 MESSAGE_AUDIENCE: tuple[str, ...] = (ROLE_EXECUTIVE_DIRECTOR,)
 
+# Адресат-сотрудник внутри списка ролей: "user:<uuid>". Так задача находит своего
+# исполнителя, не расширяя схему журнала отдельной таблицей адресатов.
+USER_PREFIX = "user:"
+
+
+def user_marker(user: User | uuid.UUID) -> str:
+    """Метка адресата-сотрудника в поле audience."""
+    return f"{USER_PREFIX}{user.id if isinstance(user, User) else user}"
+
+
+def _audience_filter(user: User) -> ColumnElement[bool]:
+    """Сообщения видны роли целиком или конкретному сотруднику."""
+    return or_(
+        AuditEvent.audience.contains([user.role]),
+        AuditEvent.audience.contains([user_marker(user)]),
+    )
+
 
 def record(
     db: Session,
@@ -110,12 +128,22 @@ def record(
     year: int | None = None,
     month: int | None = None,
     actor_login: str | None = None,
+    audience: Sequence[str] | None = None,
 ) -> AuditEvent:
-    """Записать событие в журнал. Коммит делает вызывающий сервис."""
+    """Записать событие в журнал. Коммит делает вызывающий сервис.
+
+    ``audience`` — кому это ещё и служебное сообщение (роли и метки сотрудников);
+    без него служебным становится только критическое событие для ГД.
+    """
     spec = CATALOG.get(action)
     if spec is None:
         raise AuditError(f"Неизвестное событие журнала: {action}", status_code=500)
-    is_message = spec.level == "critical"
+    targets = (
+        list(audience)
+        if audience is not None
+        else (list(MESSAGE_AUDIENCE) if spec.level == "critical" else [])
+    )
+    is_message = bool(targets)
     event = AuditEvent(
         actor_id=actor.id if actor else None,
         actor_role=actor.role if actor else None,
@@ -129,7 +157,7 @@ def record(
         year=year,
         month=month,
         is_message=is_message,
-        audience=list(MESSAGE_AUDIENCE) if is_message else [],
+        audience=targets,
     )
     if actor is None and actor_login:
         event.payload = {**(payload or {}), "login": actor_login}
@@ -203,7 +231,7 @@ def messages(
         select(AuditEvent, read_alias.c.event_id.is_not(None))
         .outerjoin(read_alias, read_alias.c.event_id == AuditEvent.id)
         .where(AuditEvent.is_message.is_(True))
-        .where(AuditEvent.audience.contains([user.role]))
+        .where(_audience_filter(user))
         .order_by(AuditEvent.seq.desc())
         .limit(limit)
     )
@@ -326,7 +354,7 @@ def message_total(db: Session, user: User) -> int:
         select(func.count())
         .select_from(AuditEvent)
         .where(AuditEvent.is_message.is_(True))
-        .where(AuditEvent.audience.contains([user.role]))
+        .where(_audience_filter(user))
     )
     return int(db.execute(statement).scalar_one())
 
@@ -339,7 +367,7 @@ def unread_count(db: Session, user: User) -> int:
         .select_from(AuditEvent)
         .outerjoin(read_alias, read_alias.c.event_id == AuditEvent.id)
         .where(AuditEvent.is_message.is_(True))
-        .where(AuditEvent.audience.contains([user.role]))
+        .where(_audience_filter(user))
         .where(read_alias.c.event_id.is_(None))
     )
     return int(db.execute(statement).scalar_one())
@@ -354,7 +382,7 @@ def mark_read(db: Session, user: User, ids: Sequence[uuid.UUID]) -> int:
             select(AuditEvent.id).where(
                 AuditEvent.id.in_(list(ids)),
                 AuditEvent.is_message.is_(True),
-                AuditEvent.audience.contains([user.role]),
+                _audience_filter(user),
             )
         )
         .scalars()
@@ -386,7 +414,7 @@ def mark_all_read(db: Session, user: User) -> int:
             select(AuditEvent.id)
             .outerjoin(read_alias, read_alias.c.event_id == AuditEvent.id)
             .where(AuditEvent.is_message.is_(True))
-            .where(AuditEvent.audience.contains([user.role]))
+            .where(_audience_filter(user))
             .where(read_alias.c.event_id.is_(None))
         )
         .scalars()

@@ -140,6 +140,17 @@ describe('App', () => {
     expect(within(purchases).queryByRole('button', { name: 'План закупок сырья' })).toBeNull()
   })
 
+  it('«Задачи» не видит отдел закупок', async () => {
+    mockApi({
+      '/api/v1/auth/me': { body: PURCHASE_DIRECTOR },
+      '/api/v1/stock': { body: [] },
+    })
+    render(<App />)
+
+    expect(await screen.findByRole('button', { name: 'Справочники' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Задачи' })).not.toBeInTheDocument()
+  })
+
   it('категория меню раскрывается и сворачивается по стрелке', async () => {
     const user = userEvent.setup()
     mockApi({ '/api/v1/auth/me': { body: MANAGER }, '/api/v1/stock': { body: [] } })
@@ -172,7 +183,9 @@ describe('App', () => {
 
     await user.click(section)
     expect(await screen.findByRole('heading', { level: 1, name: 'Задачи' })).toBeInTheDocument()
-    expect(screen.getByText('Задач пока нет — поставьте первую.')).toBeInTheDocument()
+    // Менеджер задачи исполняет, а не ставит.
+    expect(screen.getByText('Вам пока не поставили ни одной задачи.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '＋ Новая задача' })).not.toBeInTheDocument()
   })
 
   it('показывает пустое состояние, когда остатков нет', async () => {

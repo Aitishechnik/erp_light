@@ -11,13 +11,14 @@ import {
   fetchTask,
   fetchTaskAssignees,
   fetchTasks,
+  type Role,
   type SessionUser,
   type Task,
   type TaskAssignee,
   type TaskDetail,
   type TaskPriority,
+  type TaskStep,
   taskFileUrl,
-  updateTaskStep,
   uploadTaskReportFile,
 } from './api'
 import {
@@ -33,11 +34,8 @@ import {
 const LABEL_WIDTH = 372
 const DAY_WIDTH = 26
 
-const DIRECTOR_ROLES: SessionUser['role'][] = [
-  'commercial_director',
-  'purchase_director',
-  'executive_director',
-]
+/** Кто ставит задачи: коммерческий и исполнительный директора. */
+const CREATOR_ROLES: Role[] = ['commercial_director', 'executive_director']
 
 const PRIORITIES: { value: TaskPriority; title: string }[] = [
   { value: 'green', title: 'Низкий' },
@@ -84,6 +82,13 @@ function fileSize(bytes: number): string {
   return `${Math.max(1, Math.round(bytes / 1024))} КБ`
 }
 
+/** С какого дня может начаться следующий этап и когда он должен закончиться. */
+function nextStepWindow(task: Task, steps: TaskStep[]): { start: string; due: string } {
+  const last = steps[steps.length - 1]
+  const start = last ? addDaysIso(last.due_date, 1) : task.start_date
+  return { start: start < task.start_date ? task.start_date : start, due: task.due_date }
+}
+
 export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] }) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
@@ -98,7 +103,7 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const centered = useRef(false)
 
-  const isDirector = DIRECTOR_ROLES.includes(user.role)
+  const canCreate = CREATOR_ROLES.includes(user.role)
 
   const loadTasks = useCallback(async () => {
     try {
@@ -156,8 +161,11 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
   useEffect(() => {
     const element = scrollRef.current
     if (!element || tasks.length === 0 || centered.current) return
-    element.scrollLeft = Math.max(0, dayOffset(today, gantt) * DAY_WIDTH - 160)
-    centered.current = true
+    const frame = requestAnimationFrame(() => {
+      element.scrollLeft = Math.max(0, dayOffset(today, gantt) * DAY_WIDTH - 160)
+      centered.current = true
+    })
+    return () => cancelAnimationFrame(frame)
   }, [tasks.length, today, gantt])
 
   if (openId) {
@@ -180,14 +188,17 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
         <div>
           <h1>Задачи</h1>
           <p className="hint">
-            План работ отдела: цвет — приоритет, заливка — готовность, красная рамка — просрочка.
+            Задачи коммерческого отдела: цвет — приоритет, заливка — готовность, красная рамка —
+            просрочка.
           </p>
         </div>
-        <div className="task-toolbar">
-          <button type="button" className="btn-primary" onClick={() => setCreating(true)}>
-            ＋ Новая задача
-          </button>
-        </div>
+        {canCreate ? (
+          <div className="task-toolbar">
+            <button type="button" className="btn-primary" onClick={() => setCreating(true)}>
+              ＋ Новая задача
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div className="task-filters">
@@ -250,7 +261,6 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
 
       {creating ? (
         <NewTaskForm
-          user={user}
           onCancel={() => setCreating(false)}
           onCreated={(task) => {
             setCreating(false)
@@ -265,10 +275,16 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
 
       {!loading && tasks.length === 0 ? (
         <div className="task-empty">
-          <p>Задач пока нет — поставьте первую.</p>
-          <button type="button" className="btn-primary" onClick={() => setCreating(true)}>
-            ＋ Новая задача
-          </button>
+          <p>
+            {canCreate
+              ? 'Задач пока нет — поставьте первую.'
+              : 'Вам пока не поставили ни одной задачи.'}
+          </p>
+          {canCreate ? (
+            <button type="button" className="btn-primary" onClick={() => setCreating(true)}>
+              ＋ Новая задача
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -321,8 +337,6 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
                 {tasks.map((task) => {
                   const bar = barGeometry(task.start_date, task.due_date, gantt, DAY_WIDTH)
                   const isOpen = expanded.includes(task.id)
-                  const canToggle =
-                    isDirector || task.assignee_id === user.id || task.created_by_id === user.id
                   return (
                     <div key={task.id}>
                       <div className={`gantt-row priority-${task.priority}`}>
@@ -398,23 +412,6 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
                                   style={{ width: LABEL_WIDTH }}
                                 >
                                   <span className="gantt-step-pad" />
-                                  <label className="gantt-step-check">
-                                    <input
-                                      type="checkbox"
-                                      checked={step.is_done}
-                                      disabled={!canToggle}
-                                      onChange={async (event) => {
-                                        try {
-                                          await updateTaskStep(task.id, step.id, {
-                                            is_done: event.target.checked,
-                                          })
-                                          reload()
-                                        } catch (err) {
-                                          setError(errorMessage(err))
-                                        }
-                                      }}
-                                    />
-                                  </label>
                                   <span
                                     className={
                                       step.is_done ? 'gantt-step-done' : 'gantt-step-title'
@@ -422,6 +419,9 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
                                   >
                                     {step.title}
                                   </span>
+                                  {step.needs_report ? (
+                                    <span className="gantt-overdue">нужен отчёт</span>
+                                  ) : null}
                                   <span className="gantt-meta">
                                     {shortDate(step.start_date)}–{shortDate(step.due_date)}
                                   </span>
@@ -432,6 +432,7 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
                                       'gantt-bar',
                                       'gantt-bar-step',
                                       step.is_done ? 'done' : '',
+                                      step.needs_report ? 'overdue' : '',
                                     ]
                                       .filter(Boolean)
                                       .join(' ')}
@@ -455,11 +456,9 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
 }
 
 function NewTaskForm({
-  user,
   onCancel,
   onCreated,
 }: {
-  user: SessionUser
   onCancel: () => void
   onCreated: (task: TaskDetail) => void
 }) {
@@ -477,15 +476,19 @@ function NewTaskForm({
     fetchTaskAssignees()
       .then((rows) => {
         setPeople(rows)
-        setAssigneeId((current) => current || user.id)
+        setAssigneeId((current) => current || rows[0]?.id || '')
       })
       .catch((err) => setError(errorMessage(err)))
-  }, [user.id])
+  }, [])
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!title.trim()) {
       setError('Название задачи обязательно')
+      return
+    }
+    if (!assigneeId) {
+      setError('Выберите исполнителя')
       return
     }
     if (dueDate < startDate) {
@@ -500,7 +503,7 @@ function NewTaskForm({
         priority,
         start_date: startDate,
         due_date: dueDate,
-        assignee_id: assigneeId || null,
+        assignee_id: assigneeId,
       })
       onCreated(created)
     } catch (err) {
@@ -603,6 +606,7 @@ function TaskCard({
   const [reportKind, setReportKind] = useState<'interim' | 'final'>('interim')
   const [reportText, setReportText] = useState('')
   const [reportProgress, setReportProgress] = useState('50')
+  const [reportStep, setReportStep] = useState('')
   const [reportFiles, setReportFiles] = useState<File[]>([])
   const [stepTitle, setStepTitle] = useState('')
   const [stepStart, setStepStart] = useState('')
@@ -612,8 +616,9 @@ function TaskCard({
     try {
       const row = await fetchTask(taskId)
       setTask(row)
-      setStepStart(row.start_date)
-      setStepDue(row.due_date)
+      const suggestion = nextStepWindow(row, row.steps)
+      setStepStart(suggestion.start)
+      setStepDue(suggestion.due)
     } catch (err) {
       setError(errorMessage(err))
     }
@@ -649,8 +654,19 @@ function TaskCard({
     )
   }
 
-  const steps = task.steps
   const isClosed = task.status === 'done' || task.status === 'cancelled'
+  const openSteps = task.steps.filter((step) => !step.is_done)
+  const chosenStep = task.steps.find((step) => step.id === reportStep) ?? null
+  const stepWindow = nextStepWindow(task, task.steps)
+  const canAddStep = stepWindow.start <= task.due_date
+
+  /** Быстрый отчёт по этапу: выбираем этап в форме и уводим к ней. */
+  const reportOnStep = (step: TaskStep) => {
+    setReportKind('interim')
+    setReportStep(step.id)
+    const form = document.querySelector('.task-report-form')
+    form?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
 
   const addReport = async (event: FormEvent) => {
     event.preventDefault()
@@ -662,9 +678,10 @@ function TaskCard({
     setError('')
     try {
       const updated = await addTaskReport(task.id, {
-        kind: reportKind,
+        kind: reportStep ? 'interim' : reportKind,
         text: reportText.trim(),
-        progress: reportKind === 'final' ? 100 : Number(reportProgress),
+        progress: reportStep ? 0 : reportKind === 'final' ? 100 : Number(reportProgress),
+        step_id: reportStep || null,
       })
       const fresh = updated.reports[updated.reports.length - 1]
       if (fresh) {
@@ -674,6 +691,7 @@ function TaskCard({
       }
       setReportText('')
       setReportFiles([])
+      setReportStep('')
       await load()
       onChanged()
     } catch (err) {
@@ -718,8 +736,7 @@ function TaskCard({
       {error ? <p className="error">{error}</p> : null}
 
       <div className="task-actions">
-        {task.actions.can_change_status &&
-        (task.status === 'new' || task.status === 'postponed') ? (
+        {task.actions.can_change_status && task.status === 'new' ? (
           <button
             type="button"
             className="btn-primary"
@@ -739,14 +756,24 @@ function TaskCard({
             Отложить
           </button>
         ) : null}
-        {task.actions.can_change_status ? (
+        {task.actions.can_change_status && task.status === 'postponed' ? (
           <button
             type="button"
-            className="btn-link"
+            className="btn-primary"
+            disabled={busy}
+            onClick={() => run(() => changeTaskStatus(task.id, 'resume'))}
+          >
+            Возобновить
+          </button>
+        ) : null}
+        {task.actions.can_edit ? (
+          <button
+            type="button"
+            className="btn-link danger"
             disabled={busy}
             onClick={() => run(() => changeTaskStatus(task.id, 'cancel'))}
           >
-            Отменить задачу
+            Отозвать задачу
           </button>
         ) : null}
         {task.actions.can_reopen ? (
@@ -778,25 +805,29 @@ function TaskCard({
       </div>
 
       <h2 className="section-title">Этапы</h2>
-      {steps.length === 0 ? <p className="hint">Этапов нет — задача идёт одной полосой.</p> : null}
+      {task.steps.length === 0 ? (
+        <p className="hint">Этапов нет — задача идёт одной полосой.</p>
+      ) : null}
       <ul className="task-steps">
-        {steps.map((step) => (
+        {task.steps.map((step) => (
           <li key={step.id} className="task-step">
-            <label className="inline-check">
-              <input
-                type="checkbox"
-                checked={step.is_done}
-                disabled={busy || isClosed}
-                onChange={(event) =>
-                  run(() => updateTaskStep(task.id, step.id, { is_done: event.target.checked }))
-                }
-              />
-              <span className={step.is_done ? 'gantt-step-done' : ''}>{step.title}</span>
-            </label>
+            <span className={step.is_done ? 'gantt-step-done' : ''}>{step.title}</span>
             <span className="hint">
               {ruDate(step.start_date)} — {ruDate(step.due_date)}
             </span>
-            {task.actions.can_edit ? (
+            {step.is_done ? <span className="task-kind final">Отчёт получен</span> : null}
+            {step.needs_report ? <span className="gantt-overdue">нужен отчёт</span> : null}
+            {task.actions.can_report && !step.is_done ? (
+              <button
+                type="button"
+                className="btn-link"
+                disabled={busy}
+                onClick={() => reportOnStep(step)}
+              >
+                Отчёт по этапу
+              </button>
+            ) : null}
+            {task.actions.can_edit && !step.has_report ? (
               <button
                 type="button"
                 className="btn-link danger"
@@ -810,7 +841,7 @@ function TaskCard({
         ))}
       </ul>
 
-      {task.actions.can_edit ? (
+      {task.actions.can_edit && canAddStep ? (
         <form
           className="task-step-form"
           onSubmit={(event) => {
@@ -838,13 +869,34 @@ function TaskCard({
           <input
             type="date"
             value={stepStart}
+            min={stepWindow.start}
+            max={task.due_date}
             onChange={(event) => setStepStart(event.target.value)}
           />
-          <input type="date" value={stepDue} onChange={(event) => setStepDue(event.target.value)} />
+          <input
+            type="date"
+            value={stepDue}
+            min={stepStart || stepWindow.start}
+            max={task.due_date}
+            onChange={(event) => setStepDue(event.target.value)}
+          />
           <button type="submit" className="btn-link" disabled={busy}>
             Добавить этап
           </button>
         </form>
+      ) : null}
+      {task.actions.can_edit && !canAddStep ? (
+        <p className="hint">
+          Свободных сроков в задаче не осталось: следующий этап не помещается до{' '}
+          {ruDate(task.due_date)}. Сдвиньте срок задачи или поправьте этапы.
+        </p>
+      ) : null}
+      {task.actions.can_edit && canAddStep ? (
+        <p className="hint">
+          Этапы идут по порядку: следующий начинается не раньше{' '}
+          {ruDate(addDaysIso(stepStart ?? task.start_date, 0))}, а последний заканчивается не позже{' '}
+          {ruDate(task.due_date)}. Этап закрывается промежуточным отчётом исполнителя.
+        </p>
       ) : null}
 
       <h2 className="section-title">Отчёты</h2>
@@ -854,6 +906,9 @@ function TaskCard({
           <li key={report.id} className="task-report">
             <div className="task-report-head">
               <span className={`task-kind ${report.kind}`}>{report.kind_title}</span>
+              {report.step_title ? (
+                <span className="task-kind">Этап: {report.step_title}</span>
+              ) : null}
               <span className="hint">
                 {report.author_name} · {ruTime(report.created_at)} · готовность {report.progress}%
               </span>
@@ -890,26 +945,51 @@ function TaskCard({
           <h3>Добавить отчёт</h3>
           <div className="task-form-row">
             <label>
+              Этап
+              <select
+                value={reportStep}
+                onChange={(event) => {
+                  setReportStep(event.target.value)
+                  if (event.target.value) setReportKind('interim')
+                }}
+              >
+                <option value="">Вся задача</option>
+                {openSteps.map((step) => (
+                  <option key={step.id} value={step.id}>
+                    {step.title} (до {shortDate(step.due_date)})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
               Вид отчёта
               <select
-                value={reportKind}
+                value={chosenStep ? 'interim' : reportKind}
+                disabled={Boolean(chosenStep)}
                 onChange={(event) => setReportKind(event.target.value as 'interim' | 'final')}
               >
                 <option value="interim">Промежуточный</option>
                 <option value="final">Финальный — закрыть задачу</option>
               </select>
             </label>
-            <label>
-              Готовность, %
-              <input
-                type="number"
-                min={0}
-                max={100}
-                value={reportProgress}
-                disabled={reportKind === 'final'}
-                onChange={(event) => setReportProgress(event.target.value)}
-              />
-            </label>
+            {chosenStep ? (
+              <div className="field">
+                <span>Готовность</span>
+                <span className="hint">посчитается по закрытым этапам</span>
+              </div>
+            ) : (
+              <label>
+                Готовность, %
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={reportProgress}
+                  disabled={reportKind === 'final'}
+                  onChange={(event) => setReportProgress(event.target.value)}
+                />
+              </label>
+            )}
           </div>
           <label>
             Что сделано
@@ -917,9 +997,18 @@ function TaskCard({
               value={reportText}
               onChange={(event) => setReportText(event.target.value)}
               rows={3}
-              placeholder="Результат, что сделано, что мешает"
+              placeholder={
+                chosenStep
+                  ? `Итог этапа «${chosenStep.title}»`
+                  : 'Результат, что сделано, что мешает'
+              }
             />
           </label>
+          {chosenStep ? (
+            <p className="hint">
+              Отчёт по этапу закроет его; следующий этап закрывается своим отчётом.
+            </p>
+          ) : null}
           <label>
             Файлы (до 10 МБ каждый)
             <input
@@ -930,11 +1019,17 @@ function TaskCard({
           </label>
           <div className="task-form-actions">
             <button type="submit" className="btn-primary" disabled={busy}>
-              {reportKind === 'final' ? 'Закрыть задачу' : 'Отправить отчёт'}
+              {chosenStep
+                ? 'Закрыть этап отчётом'
+                : reportKind === 'final'
+                  ? 'Закрыть задачу'
+                  : 'Отправить отчёт'}
             </button>
           </div>
         </form>
       ) : null}
+
+      {isClosed ? <p className="hint">Задача закрыта: отчёты и файлы только читаются.</p> : null}
     </section>
   )
 }

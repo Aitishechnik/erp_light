@@ -1,18 +1,21 @@
-"""Таск-трекер: правила задач, этапов, отчётов и файлов.
+"""Таск-трекер коммерческого отдела: задачи, этапы, отчёты и файлы.
 
-Правила собраны здесь, а не в API: экран и тесты должны видеть одно и то же.
-Ключевые решения — в ``docs/data-contract-tasks.md``:
+Правила — в ``docs/data-contract-tasks.md``:
 
-* видит задачу постановщик, исполнитель и три директора;
-* финальный отчёт закрывает задачу, промежуточный двигает процент;
-* файлы живут на диске, в базе — только описание;
-* просрочка не хранится, а считается от срока окончания.
+* ставит задачи коммерческий и исполнительный директора, исполняют менеджеры
+  по продажам, ассистент отдела продаж и коммерческий директор (если поставил ГД);
+* задача принимается автоматически: исполнитель не подтверждает её, а сразу
+  получает служебное сообщение;
+* этапы идут по порядку и не пересекаются, этап закрывается только промежуточным
+  отчётом исполнителя;
+* финальный отчёт закрывает задачу, постановщик получает сообщение об отчётах;
+* файлы живут на диске, в базе — только описание; просрочка не хранится.
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +27,8 @@ from app.config import ROOT_DIR
 from app.models.auth import (
     ROLE_COMMERCIAL_DIRECTOR,
     ROLE_EXECUTIVE_DIRECTOR,
-    ROLE_PURCHASE_DIRECTOR,
+    ROLE_SALES_ASSISTANT,
+    ROLE_SALES_MANAGER,
     ROLE_TITLES,
     User,
 )
@@ -61,12 +65,21 @@ from app.schemas.tasks import (
 )
 from app.services import audit_service
 
-# Кто видит и правит задачи сверх участников.
-DIRECTOR_ROLES = (
-    ROLE_COMMERCIAL_DIRECTOR,
-    ROLE_PURCHASE_DIRECTOR,
-    ROLE_EXECUTIVE_DIRECTOR,
-)
+# Кто ставит задачи: коммерческий отдел во главе с исполнительным директором.
+TASK_CREATOR_ROLES = (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR)
+
+# Кто видит все задачи отдела: коммерческий и исполнительный директора.
+TASK_OVERSEER_ROLES = (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR)
+
+# Кому можно ставить задачу — зависит от того, кто ставит.
+ASSIGNABLE_BY: dict[str, tuple[str, ...]] = {
+    ROLE_COMMERCIAL_DIRECTOR: (ROLE_SALES_MANAGER, ROLE_SALES_ASSISTANT),
+    ROLE_EXECUTIVE_DIRECTOR: (
+        ROLE_SALES_MANAGER,
+        ROLE_SALES_ASSISTANT,
+        ROLE_COMMERCIAL_DIRECTOR,
+    ),
+}
 
 # Куда складываем файлы отчётов. Каталог вне git (data/ в .gitignore).
 ATTACHMENTS_DIR = ROOT_DIR / "data" / "attachments"
@@ -89,8 +102,8 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _is_director(user: User) -> bool:
-    return user.role in DIRECTOR_ROLES
+def _is_overseer(user: User) -> bool:
+    return user.role in TASK_OVERSEER_ROLES
 
 
 def _is_participant(user: User, task: Task) -> bool:
@@ -98,7 +111,7 @@ def _is_participant(user: User, task: Task) -> bool:
 
 
 def _can_view(user: User, task: Task) -> bool:
-    return _is_director(user) or _is_participant(user, task)
+    return _is_overseer(user) or _is_participant(user, task)
 
 
 def _require_view(user: User, task: Task) -> None:
@@ -107,14 +120,16 @@ def _require_view(user: User, task: Task) -> None:
 
 
 def _require_manage(user: User, task: Task) -> None:
-    """Менять сроки, приоритет, исполнителя и описание может постановщик и директор."""
-    if user.id != task.created_by_id and not _is_director(user):
-        raise TaskError("Менять задачу может постановщик или директор", status_code=403)
+    """Менять задачу может постановщик и исполнительный директор."""
+    if user.id != task.created_by_id and user.role != ROLE_EXECUTIVE_DIRECTOR:
+        raise TaskError(
+            "Менять задачу может постановщик или исполнительный директор", status_code=403
+        )
 
 
-def _require_participant(user: User, task: Task) -> None:
-    if not _is_participant(user, task) and not _is_director(user):
-        raise TaskError("Действие доступно участникам задачи", status_code=403)
+def _require_creator(user: User) -> None:
+    if user.role not in TASK_CREATOR_ROLES:
+        raise TaskError("Задачи ставит коммерческий или исполнительный директор", status_code=403)
 
 
 def _check_dates(start: date, due: date, *, what: str = "Сроки задачи") -> None:
@@ -136,6 +151,47 @@ def _check_step_in_task(task: Task, start: date, due: date) -> None:
         )
 
 
+def _step_order(task: Task, skip_id: uuid.UUID | None = None) -> list[TaskStep]:
+    return sorted(
+        (step for step in task.steps if step.id != skip_id),
+        key=lambda row: (row.position, str(row.id)),
+    )
+
+
+def _check_step_sequence(
+    task: Task,
+    start: date,
+    due: date,
+    *,
+    position: int,
+    skip_id: uuid.UUID | None = None,
+) -> None:
+    """Этапы не пересекаются: следующий начинается после предыдущего."""
+    previous: TaskStep | None = None
+    following: TaskStep | None = None
+    for step in _step_order(task, skip_id):
+        if step.position < position:
+            previous = step
+        elif step.position > position and following is None:
+            following = step
+    if previous is not None and start <= previous.due_date:
+        earliest = previous.due_date + timedelta(days=1)
+        raise TaskError(
+            "Этап не может начаться раньше "
+            f"{earliest:%d.%m.%Y}: предыдущий этап «{previous.title}» "
+            f"заканчивается {previous.due_date:%d.%m.%Y}",
+            status_code=422,
+        )
+    if following is not None and due >= following.start_date:
+        latest = following.start_date - timedelta(days=1)
+        raise TaskError(
+            "Этап не может закончиться позже "
+            f"{latest:%d.%m.%Y}: следующий этап «{following.title}» "
+            f"начинается {following.start_date:%d.%m.%Y}",
+            status_code=422,
+        )
+
+
 def _load(db: Session, task_id: uuid.UUID) -> Task:
     task = db.execute(
         select(Task)
@@ -150,10 +206,14 @@ def _load(db: Session, task_id: uuid.UUID) -> Task:
 
 def _assignee(db: Session, assignee_id: uuid.UUID | None, author: User) -> User:
     if assignee_id is None:
-        return author
+        raise TaskError("Выберите исполнителя задачи", status_code=422)
     person = db.get(User, assignee_id)
     if person is None or not person.is_active:
         raise TaskError("Исполнитель не найден или отключён", status_code=422)
+    allowed = ASSIGNABLE_BY.get(author.role, ())
+    if person.role not in allowed:
+        titles = ", ".join(ROLE_TITLES.get(role, role) for role in allowed)
+        raise TaskError(f"Эту задачу может исполнять: {titles}", status_code=422)
     return person
 
 
@@ -184,9 +244,33 @@ def _overdue(task: Task) -> tuple[bool, int]:
     return True, (today - task.due_date).days
 
 
+def _step_reported(task: Task, step: TaskStep) -> bool:
+    return any(report.step_id == step.id for report in task.reports)
+
+
 def _base(task: Task) -> dict[str, Any]:
     is_overdue, days = _overdue(task)
     reports = _reports(task)
+    today = _today()
+    closed = task.status in CLOSED_TASK_STATUSES
+    steps: list[TaskStepOut] = []
+    for step in sorted(task.steps, key=lambda row: (row.position, str(row.id))):
+        has_report = _step_reported(task, step)
+        steps.append(
+            TaskStepOut(
+                id=step.id,
+                title=step.title,
+                start_date=step.start_date,
+                due_date=step.due_date,
+                is_done=step.is_done,
+                position=step.position,
+                has_report=has_report,
+                needs_report=not has_report
+                and not step.is_done
+                and step.due_date < today
+                and not closed,
+            )
+        )
     return {
         "id": task.id,
         "title": task.title,
@@ -207,17 +291,7 @@ def _base(task: Task) -> dict[str, Any]:
         "updated_at": task.updated_at,
         "is_overdue": is_overdue,
         "days_overdue": days,
-        "steps": [
-            TaskStepOut(
-                id=step.id,
-                title=step.title,
-                start_date=step.start_date,
-                due_date=step.due_date,
-                is_done=step.is_done,
-                position=step.position,
-            )
-            for step in sorted(task.steps, key=lambda row: (row.position, str(row.id)))
-        ],
+        "steps": steps,
         "reports_count": len(reports),
         "files_count": sum(len(report.files) for report in reports),
         "last_report": _last_report(task),
@@ -230,24 +304,26 @@ def _to_out(task: Task) -> TaskOut:
 
 def _actions(user: User, task: Task) -> TaskActionsOut:
     """Что можно делать с задачей — по этому экран рисует кнопки."""
-    manage = user.id == task.created_by_id or _is_director(user)
-    participant = _is_participant(user, task) or _is_director(user)
+    manage = user.id == task.created_by_id or user.role == ROLE_EXECUTIVE_DIRECTOR
     closed = task.status in CLOSED_TASK_STATUSES
     return TaskActionsOut(
         can_edit=manage and not closed,
-        can_change_status=participant and not closed,
-        can_report=participant and not closed,
+        can_change_status=(manage or user.id == task.assignee_id) and not closed,
+        can_report=user.id == task.assignee_id and not closed,
         can_delete=manage and not task.reports,
         can_reopen=manage and closed,
     )
 
 
 def _to_detail(task: Task, user: User) -> TaskDetailOut:
+    step_titles = {step.id: step.title for step in task.steps}
     reports = [
         TaskReportOut(
             id=report.id,
             kind=report.kind,
             kind_title=REPORT_KIND_TITLES.get(report.kind, report.kind),
+            step_id=report.step_id,
+            step_title=step_titles.get(report.step_id) if report.step_id else None,
             progress=report.progress,
             text=report.text,
             author_id=report.author_id,
@@ -270,23 +346,41 @@ def _to_detail(task: Task, user: User) -> TaskDetailOut:
     return TaskDetailOut(**_base(task), reports=reports, actions=_actions(user, task))
 
 
-def _audit(
+def _record(
     db: Session,
     user: User,
     action: str,
     task: Task,
     summary: str,
+    *,
+    audience: list[str],
     payload: dict[str, Any] | None = None,
+    task_link: bool = True,
 ) -> None:
+    """Событие журнала; ``audience`` делает его ещё и служебным сообщением."""
     audit_service.record(
         db,
         actor=user,
         action=action,
         summary=summary,
-        entity_id=task.id,
+        entity_id=task.id if task_link else None,
         entity_label=task.title,
         payload=payload,
+        audience=audience,
     )
+
+
+def _audience(*users: User | None, roles: tuple[str, ...] = ()) -> list[str]:
+    """Адресаты сообщения: сотрудники без повторов плюс роли."""
+    markers: list[str] = []
+    for person in users:
+        if person is None:
+            continue
+        marker = audit_service.user_marker(person)
+        if marker not in markers:
+            markers.append(marker)
+    markers.extend(role for role in roles if role not in markers)
+    return markers
 
 
 def list_tasks(
@@ -301,13 +395,13 @@ def list_tasks(
     date_from: date | None = None,
     date_to: date | None = None,
 ) -> list[TaskOut]:
-    """Список задач: директора видят все, остальные — только свои."""
+    """Директора видят все задачи отдела, остальные — только свои."""
     statement = (
         select(Task)
         .options(selectinload(Task.steps))
         .options(selectinload(Task.reports).selectinload(TaskReport.files))
     )
-    if mine or not _is_director(user):
+    if mine or not _is_overseer(user):
         statement = statement.where((Task.assignee_id == user.id) | (Task.created_by_id == user.id))
     if status:
         statement = statement.where(Task.status == status)
@@ -335,21 +429,26 @@ def get_task(db: Session, user: User, task_id: uuid.UUID) -> TaskDetailOut:
     return _to_detail(task, user)
 
 
-def list_assignees(db: Session) -> list[TaskAssigneeOut]:
-    """Кого можно назначить исполнителем: все активные сотрудники."""
-    users = db.execute(select(User).where(User.is_active.is_(True)).order_by(User.full_name))
+def list_assignees(db: Session, user: User) -> list[TaskAssigneeOut]:
+    """Кого можно назначить: список зависит от роли постановщика."""
+    _require_creator(user)
+    roles = ASSIGNABLE_BY.get(user.role, ())
+    users = db.execute(
+        select(User).where(User.is_active.is_(True), User.role.in_(roles)).order_by(User.full_name)
+    )
     return [
         TaskAssigneeOut(
-            id=user.id,
-            full_name=user.full_name,
-            role_title=ROLE_TITLES.get(user.role, user.role),
+            id=person.id,
+            full_name=person.full_name,
+            role_title=ROLE_TITLES.get(person.role, person.role),
         )
-        for user in users.scalars().all()
+        for person in users.scalars().all()
     ]
 
 
 def create_task(db: Session, user: User, payload: TaskCreate) -> TaskDetailOut:
-    """Поставить задачу: по умолчанию на себя, сроки и этапы проверяются сразу."""
+    """Поставить задачу: она сразу в работе, исполнитель не подтверждает её."""
+    _require_creator(user)
     _check_dates(payload.start_date, payload.due_date)
     _check_priority(payload.priority)
     assignee = _assignee(db, payload.assignee_id, user)
@@ -357,37 +456,34 @@ def create_task(db: Session, user: User, payload: TaskCreate) -> TaskDetailOut:
         title=payload.title.strip(),
         description=(payload.description or "").strip() or None,
         priority=payload.priority,
-        status="new",
+        status="in_progress",
         progress=0,
         start_date=payload.start_date,
         due_date=payload.due_date,
         assignee_id=assignee.id,
         created_by_id=user.id,
     )
-    for index, step in enumerate(payload.steps):
-        _check_dates(step.start_date, step.due_date, what="Сроки этапа")
-        if step.start_date < payload.start_date or step.due_date > payload.due_date:
-            raise TaskError(
-                "Этап выходит за сроки задачи: расширьте сроки задачи или сузьте этап",
-                status_code=422,
-            )
+    for position, step in enumerate(payload.steps):
+        _check_step_in_task(task, step.start_date, step.due_date)
+        _check_step_sequence(task, step.start_date, step.due_date, position=position)
         task.steps.append(
             TaskStep(
                 title=step.title.strip(),
                 start_date=step.start_date,
                 due_date=step.due_date,
                 is_done=False,
-                position=index,
+                position=position,
             )
         )
     db.add(task)
     db.flush()
-    _audit(
+    _record(
         db,
         user,
         "task.created",
         task,
-        f"Поставлена задача «{task.title}» на {assignee.full_name}",
+        f"Поставлена задача «{task.title}» — срок до {task.due_date:%d.%m.%Y}",
+        audience=_audience(assignee),
     )
     db.commit()
     return _to_detail(_load(db, task.id), user)
@@ -400,6 +496,7 @@ def update_task(db: Session, user: User, task_id: uuid.UUID, payload: TaskUpdate
     if task.status in CLOSED_TASK_STATUSES:
         raise TaskError("Задача закрыта — сначала верните её в работу", status_code=409)
     changes: list[str] = []
+    previous_assignee = task.assignee
     if payload.title is not None:
         task.title = payload.title.strip()
         changes.append("название")
@@ -419,10 +516,7 @@ def update_task(db: Session, user: User, task_id: uuid.UUID, payload: TaskUpdate
     due = payload.due_date or task.due_date
     if start != task.start_date or due != task.due_date:
         _check_dates(start, due)
-        overdue_steps = [
-            step for step in task.steps if step.start_date < start or step.due_date > due
-        ]
-        if overdue_steps:
+        if any(step.start_date < start or step.due_date > due for step in task.steps):
             raise TaskError(
                 "Новые сроки задачи не вмещают этапы: сначала поправьте этапы",
                 status_code=422,
@@ -433,20 +527,20 @@ def update_task(db: Session, user: User, task_id: uuid.UUID, payload: TaskUpdate
     if not changes:
         return _to_detail(task, user)
     task.updated_at = _now()
-    _audit(
+    _record(
         db,
         user,
         "task.updated",
         task,
         f"Изменена задача «{task.title}»: {', '.join(changes)}",
-        payload={"changes": changes},
+        audience=_audience(task.assignee, previous_assignee),
     )
     db.commit()
     return _to_detail(_load(db, task_id), user)
 
 
 _STATUS_FLOW: dict[str, tuple[str, ...]] = {
-    "start": ("new", "postponed"),
+    "start": ("new",),
     "resume": ("postponed",),
     "postpone": ("new", "in_progress"),
     "cancel": ("new", "in_progress", "postponed"),
@@ -455,9 +549,9 @@ _STATUS_FLOW: dict[str, tuple[str, ...]] = {
 
 _STATUS_ACTION_TITLES = {
     "start": "взята в работу",
-    "resume": "возвращена в работу",
+    "resume": "возобновлена",
     "postpone": "отложена",
-    "cancel": "отменена",
+    "cancel": "отозвана",
     "reopen": "возвращена в работу",
 }
 
@@ -471,10 +565,13 @@ def change_status(
     action = payload.action
     if action not in _STATUS_FLOW:
         raise TaskError("Неизвестное действие со статусом", status_code=422)
-    if action == "reopen":
+    if action in ("reopen", "cancel"):
         _require_manage(user, task)
-    else:
-        _require_participant(user, task)
+    elif (
+        user.id not in (task.assignee_id, task.created_by_id)
+        and user.role != ROLE_EXECUTIVE_DIRECTOR
+    ):
+        raise TaskError("Действие доступно участникам задачи", status_code=403)
     allowed_from = _STATUS_FLOW[action]
     if task.status not in allowed_from:
         raise TaskError(
@@ -494,15 +591,24 @@ def change_status(
     else:
         task.status = "in_progress"
     task.updated_at = _now()
+    summary = f"Задача «{task.title}» {_STATUS_ACTION_TITLES[action]}"
     if action == "reopen":
-        _audit(db, user, "task.reopened", task, f"Задача «{task.title}» возвращена в работу")
+        _record(
+            db,
+            user,
+            "task.reopened",
+            task,
+            summary,
+            audience=_audience(task.assignee, roles=(ROLE_EXECUTIVE_DIRECTOR,)),
+        )
     else:
-        _audit(
+        _record(
             db,
             user,
             "task.status_changed",
             task,
-            f"Задача «{task.title}» {_STATUS_ACTION_TITLES[action]}",
+            summary,
+            audience=_audience(task.assignee),
             payload={"status": task.status},
         )
     db.commit()
@@ -515,8 +621,9 @@ def add_step(db: Session, user: User, task_id: uuid.UUID, payload: TaskStepIn) -
     _require_manage(user, task)
     if task.status in CLOSED_TASK_STATUSES:
         raise TaskError("Задача закрыта — сначала верните её в работу", status_code=409)
-    _check_step_in_task(task, payload.start_date, payload.due_date)
     position = max((step.position for step in task.steps), default=-1) + 1
+    _check_step_in_task(task, payload.start_date, payload.due_date)
+    _check_step_sequence(task, payload.start_date, payload.due_date, position=position)
     task.steps.append(
         TaskStep(
             title=payload.title.strip(),
@@ -527,6 +634,15 @@ def add_step(db: Session, user: User, task_id: uuid.UUID, payload: TaskStepIn) -
         )
     )
     task.updated_at = _now()
+    summary = f"В задаче «{task.title}» новый этап «{payload.title.strip()}»"
+    _record(
+        db,
+        user,
+        "task.updated",
+        task,
+        summary,
+        audience=_audience(task.assignee),
+    )
     db.commit()
     return _to_detail(_load(db, task_id), user)
 
@@ -545,33 +661,25 @@ def update_step(
     step_id: uuid.UUID,
     payload: TaskStepUpdate,
 ) -> TaskDetailOut:
-    """Этап правит постановщик; галочку «выполнен» может ставить и исполнитель."""
+    """Этап правит постановщик; закрывается этап только отчётом исполнителя."""
     task = _load(db, task_id)
     _require_view(user, task)
+    _require_manage(user, task)
     if task.status in CLOSED_TASK_STATUSES:
         raise TaskError("Задача закрыта — сначала верните её в работу", status_code=409)
     step = _find_step(task, step_id)
-    only_done = (
-        payload.title is None
-        and payload.start_date is None
-        and payload.due_date is None
-        and payload.is_done is not None
-    )
-    if not only_done:
-        _require_manage(user, task)
-    else:
-        _require_participant(user, task)
     start = payload.start_date or step.start_date
     due = payload.due_date or step.due_date
     if payload.title is not None:
         step.title = payload.title.strip()
     if payload.start_date is not None or payload.due_date is not None:
         _check_step_in_task(task, start, due)
+        _check_step_sequence(task, start, due, position=step.position, skip_id=step.id)
         step.start_date = start
         step.due_date = due
-    if payload.is_done is not None:
-        step.is_done = payload.is_done
     task.updated_at = _now()
+    summary = f"Изменён этап «{step.title}» задачи «{task.title}»"
+    _record(db, user, "task.updated", task, summary, audience=_audience(task.assignee))
     db.commit()
     return _to_detail(_load(db, task_id), user)
 
@@ -583,17 +691,25 @@ def delete_step(db: Session, user: User, task_id: uuid.UUID, step_id: uuid.UUID)
     if task.status in CLOSED_TASK_STATUSES:
         raise TaskError("Задача закрыта — сначала верните её в работу", status_code=409)
     step = _find_step(task, step_id)
+    if _step_reported(task, step):
+        raise TaskError(
+            "По этапу уже есть отчёт — этап не удаляем, чтобы не терять историю",
+            status_code=409,
+        )
     task.steps.remove(step)
     task.updated_at = _now()
+    summary = f"Удалён этап «{step.title}» задачи «{task.title}»"
+    _record(db, user, "task.updated", task, summary, audience=_audience(task.assignee))
     db.commit()
     return _to_detail(_load(db, task_id), user)
 
 
 def add_report(db: Session, user: User, task_id: uuid.UUID, payload: TaskReportIn) -> TaskDetailOut:
-    """Промежуточный отчёт двигает процент, финальный закрывает задачу."""
+    """Отчёт присылает исполнитель: промежуточный закрывает этап, финальный — задачу."""
     task = _load(db, task_id)
     _require_view(user, task)
-    _require_participant(user, task)
+    if user.id != task.assignee_id:
+        raise TaskError("Отчёт по задаче присылает исполнитель", status_code=403)
     if payload.kind not in REPORT_KINDS:
         raise TaskError("Отчёт: промежуточный или финальный", status_code=422)
     if task.status in CLOSED_TASK_STATUSES:
@@ -601,41 +717,69 @@ def add_report(db: Session, user: User, task_id: uuid.UUID, payload: TaskReportI
     text = payload.text.strip()
     if len(text) < 3:
         raise TaskError("Опишите, что сделано: не короче 3 символов", status_code=422)
+    step: TaskStep | None = None
+    if payload.step_id is not None:
+        if payload.kind != "interim":
+            raise TaskError("Финальный отчёт — по задаче целиком, без этапа", status_code=422)
+        step = _find_step(task, payload.step_id)
+        if step.is_done or _step_reported(task, step):
+            raise TaskError("Этап уже закрыт отчётом", status_code=409)
+
     if payload.kind == "final":
         report = TaskReport(author_id=user.id, kind="final", progress=100, text=text)
         task.progress = 100
         task.status = "done"
         task.closed_at = _now()
     else:
-        if payload.progress > 100:
-            raise TaskError("Готовность: от 0 до 100 %", status_code=422)
         report = TaskReport(
             author_id=user.id,
             kind="interim",
+            step_id=step.id if step else None,
             progress=payload.progress,
             text=text,
         )
-        task.progress = payload.progress
+        if step is not None:
+            step.is_done = True
+            # Готовность задачи по этапам — доля закрытых, а не процент из отчёта.
+            total = len(task.steps) or 1
+            closed = sum(1 for row in task.steps if row.is_done)
+            task.progress = round(closed / total * 100)
+            report.progress = task.progress
+        else:
+            task.progress = payload.progress
         if task.status in ("new", "postponed"):
             task.status = "in_progress"
     task.updated_at = _now()
     task.reports.append(report)
+    db.flush()
+
+    creator = task.created_by
     if payload.kind == "final":
-        _audit(
+        summary = f"Задача «{task.title}» выполнена — финальный отчёт"
+        _record(
             db,
             user,
             "task.done",
             task,
-            f"Задача «{task.title}» выполнена — финальный отчёт",
+            summary,
+            audience=_audience(creator, roles=(ROLE_EXECUTIVE_DIRECTOR,)),
         )
     else:
-        _audit(
+        if step is not None:
+            summary = (
+                f"Этап «{step.title}» задачи «{task.title}» закрыт — "
+                f"промежуточный отчёт, готовность {payload.progress} %"
+            )
+        else:
+            summary = f"Отчёт по задаче «{task.title}»: готовность {payload.progress} %"
+        _record(
             db,
             user,
             "task.report_added",
             task,
-            f"Отчёт по задаче «{task.title}»: готовность {payload.progress} %",
-            payload={"progress": payload.progress},
+            summary,
+            audience=_audience(creator),
+            payload={"progress": payload.progress, "step_id": str(step.id) if step else None},
         )
     db.commit()
     return _to_detail(_load(db, task_id), user)
@@ -658,7 +802,11 @@ def upload_report_file(
     """Прикрепить файл к отчёту: проверяем права, размер, тип и количество."""
     task = _load(db, task_id)
     _require_view(user, task)
-    _require_participant(user, task)
+    if (
+        user.id not in (task.assignee_id, task.created_by_id)
+        and user.role != ROLE_EXECUTIVE_DIRECTOR
+    ):
+        raise TaskError("Приложить файл может исполнитель или постановщик", status_code=403)
     report = _report_of(task, report_id)
     if len(report.files) >= FILES_PER_REPORT:
         raise TaskError(f"К отчёту можно приложить не больше {FILES_PER_REPORT} файлов")
@@ -706,33 +854,33 @@ def report_file_path(
     """Путь к файлу и имя для скачивания; права проверяются по задаче."""
     task = _load(db, task_id)
     _require_view(user, task)
-    record = db.get(TaskReportFile, file_id)
-    if record is None or record.task_id != task.id:
+    file = db.get(TaskReportFile, file_id)
+    if file is None or file.task_id != task.id:
         raise TaskError("Файл не найден", status_code=404)
-    path = ATTACHMENTS_DIR / str(task.id) / record.stored_name
+    path = ATTACHMENTS_DIR / str(task.id) / file.stored_name
     if not path.is_file():
         raise TaskError("Файл потерян на диске", status_code=404)
-    return path, record.original_name, record.content_type
+    return path, file.original_name, file.content_type
 
 
 def delete_report_file(db: Session, user: User, task_id: uuid.UUID, file_id: uuid.UUID) -> None:
     task = _load(db, task_id)
     _require_view(user, task)
-    record = db.get(TaskReportFile, file_id)
-    if record is None or record.task_id != task.id:
+    file = db.get(TaskReportFile, file_id)
+    if file is None or file.task_id != task.id:
         raise TaskError("Файл не найден", status_code=404)
-    report_author = db.get(TaskReport, record.report_id)
+    report = db.get(TaskReport, file.report_id)
     allowed = (
-        _is_director(user)
-        or user.id == record.uploaded_by_id
-        or (report_author is not None and report_author.author_id == user.id)
+        user.role == ROLE_EXECUTIVE_DIRECTOR
+        or user.id == file.uploaded_by_id
+        or (report is not None and report.author_id == user.id)
     )
     if not allowed:
         raise TaskError("Удалить файл может автор отчёта или директор", status_code=403)
     if task.status in CLOSED_TASK_STATUSES:
         raise TaskError("Задача закрыта — файлы менять нельзя", status_code=409)
-    (ATTACHMENTS_DIR / str(task.id) / record.stored_name).unlink(missing_ok=True)
-    db.delete(record)
+    (ATTACHMENTS_DIR / str(task.id) / file.stored_name).unlink(missing_ok=True)
+    db.delete(file)
     db.commit()
 
 
@@ -751,6 +899,14 @@ def delete_task(db: Session, user: User, task_id: uuid.UUID) -> None:
         for file in folder.iterdir():
             file.unlink(missing_ok=True)
         folder.rmdir()
-    _audit(db, user, "task.deleted", task, f"Задача «{task.title}» удалена")
+    _record(
+        db,
+        user,
+        "task.deleted",
+        task,
+        f"Задача «{task.title}» удалена",
+        audience=_audience(task.assignee, roles=(ROLE_EXECUTIVE_DIRECTOR,)),
+        task_link=False,
+    )
     db.delete(task)
     db.commit()

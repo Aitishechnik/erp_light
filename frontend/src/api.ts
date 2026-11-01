@@ -16,6 +16,7 @@ export type StockRow = {
 
 export type Role =
   | 'sales_manager'
+  | 'sales_assistant'
   | 'commercial_director'
   | 'purchase_director'
   | 'import_manager'
@@ -1259,6 +1260,8 @@ export type TaskStep = {
   due_date: string
   is_done: boolean
   position: number
+  has_report: boolean
+  needs_report: boolean
 }
 
 export type TaskReportFile = {
@@ -1274,6 +1277,8 @@ export type TaskReport = {
   id: string
   kind: 'interim' | 'final'
   kind_title: string
+  step_id: string | null
+  step_title: string | null
   progress: number
   text: string
   author_id: string
@@ -1416,7 +1421,12 @@ export function deleteTaskStep(taskId: string, stepId: string): Promise<TaskDeta
 
 export function addTaskReport(
   taskId: string,
-  payload: { kind: 'interim' | 'final'; text: string; progress: number },
+  payload: {
+    kind: 'interim' | 'final'
+    text: string
+    progress: number
+    step_id?: string | null
+  },
 ): Promise<TaskDetail> {
   return request<TaskDetail>(`/api/v1/tasks/${taskId}/reports`, {
     method: 'POST',

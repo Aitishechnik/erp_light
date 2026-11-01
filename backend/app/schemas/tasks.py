@@ -18,7 +18,6 @@ class TaskStepUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     start_date: date | None = None
     due_date: date | None = None
-    is_done: bool | None = None
 
 
 class TaskCreate(BaseModel):
@@ -50,6 +49,9 @@ class TaskReportIn(BaseModel):
     kind: str = Field(description="interim — промежуточный, final — финальный")
     text: str = Field(min_length=3, max_length=4000, description="Что сделано / итог")
     progress: int = Field(default=100, ge=0, le=100, description="Готовность, %")
+    step_id: uuid.UUID | None = Field(
+        default=None, description="Этап, который закрывает отчёт; пусто — отчёт по задаче"
+    )
 
 
 class TaskStepOut(BaseModel):
@@ -59,6 +61,8 @@ class TaskStepOut(BaseModel):
     due_date: date
     is_done: bool
     position: int
+    has_report: bool = Field(description="По этапу уже есть промежуточный отчёт")
+    needs_report: bool = Field(description="Срок этапа наступил, а отчёта ещё нет")
 
 
 class TaskReportFileOut(BaseModel):
@@ -74,6 +78,8 @@ class TaskReportOut(BaseModel):
     id: uuid.UUID
     kind: str
     kind_title: str
+    step_id: uuid.UUID | None
+    step_title: str | None
     progress: int
     text: str
     author_id: uuid.UUID

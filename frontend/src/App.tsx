@@ -59,6 +59,14 @@ type Group = {
 
 const PURCHASE_ROLES: Role[] = ['purchase_director', 'import_manager', 'executive_director']
 
+/** Задачи видит коммерческий отдел: продажи, ассистент и оба директора. */
+const TASK_ROLES: Role[] = [
+  'sales_manager',
+  'sales_assistant',
+  'commercial_director',
+  'executive_director',
+]
+
 /** Итоги месяца: продажи против плана. Импорт и закупки смотрят, продажи и директора — все. */
 const MONTH_ROLES: Role[] = [
   'sales_manager',
@@ -110,7 +118,7 @@ const GROUPS: Group[] = [
     id: 'tasks',
     title: 'Задачи',
     direct: true,
-    sections: [{ id: 'tasks', title: 'Таск-трекер', ready: true }],
+    sections: [{ id: 'tasks', title: 'Таск-трекер', ready: true, roles: TASK_ROLES }],
   },
   {
     id: 'admin',
