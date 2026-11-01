@@ -217,7 +217,7 @@ describe('PurchasePlanPage', () => {
       'Ближайший заказ: к 01.11.2025 — 20 кг (потребность — февраль 2026)',
     )
 
-    // Одна кнопка на страницу раскрывает таблицу месяцев с заказом и фактом.
+    // Кнопка у позиции одна: раскрывает таблицу месяцев с заказом и фактом.
     expect(screen.getAllByRole('button', { name: 'Показать таблицей' })).toHaveLength(1)
     await user.click(screen.getByRole('button', { name: 'Показать таблицей' }))
     const detail = await screen.findByTestId('schedule-table')
@@ -289,6 +289,38 @@ describe('PurchasePlanPage', () => {
     // Та же кнопка скрывает таблицу: отдельной «Скрыть график» больше нет.
     await userEvent.setup().click(screen.getByRole('button', { name: 'Скрыть таблицу' }))
     expect(screen.queryByTestId('schedule-table')).not.toBeInTheDocument()
+  })
+
+  it('таблица раскрывается у выбранной позиции и не трогает соседние', async () => {
+    const user = userEvent.setup()
+    mockApi(
+      routes([
+        plan({
+          items: [
+            planItem(),
+            planItem({
+              id: 'item-2',
+              product_id: 'raw-2',
+              product_code: 'RAW-2',
+              product_name: 'Кокосовая стружка',
+            }),
+          ],
+        }),
+      ]),
+    )
+    render(<PurchasePlanPage user={DIRECTOR} />)
+
+    await screen.findByTestId('purchase-row-item-1')
+    const toggles = screen.getAllByRole('button', { name: 'Показать таблицей' })
+    expect(toggles).toHaveLength(2)
+
+    const [firstToggle] = toggles
+    if (!firstToggle) throw new Error('нет кнопки таблицы у первой позиции')
+    await user.click(firstToggle)
+    expect(screen.getAllByTestId('schedule-table')).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Скрыть таблицу' })).toHaveLength(1)
+    // У второй позиции кнопка по-прежнему «Показать таблицей» — своя на строку.
+    expect(screen.getAllByRole('button', { name: 'Показать таблицей' })).toHaveLength(1)
   })
 
   it('когда потребность закрыта целиком, показывает перенос излишка на следующий год', async () => {

@@ -641,8 +641,13 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
   const thisYear = new Date().getFullYear()
   const [year, setYear] = useState(focus?.[0] ? Number(focus[0]) : thisYear)
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>('summary')
-  /** Одна кнопка на всю страницу: показать помесячную таблицу под графиком. */
-  const [showTables, setShowTables] = useState(false)
+  /** У каждой позиции своя таблица: раскрытые строки помним по ключу. */
+  const [openSchedule, setOpenSchedule] = useState<string[]>([])
+
+  const toggleSchedule = (key: string) =>
+    setOpenSchedule((current) =>
+      current.includes(key) ? current.filter((row) => row !== key) : [...current, key],
+    )
   const [plans, setPlans] = useState<PurchasePlan[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [countries, setCountries] = useState<Country[]>([])
@@ -1111,14 +1116,6 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                 {mode.title}
               </button>
             ))}
-            <button
-              type="button"
-              className={showTables ? 'mini sched-toggle active' : 'mini sched-toggle'}
-              aria-pressed={showTables}
-              onClick={() => setShowTables((current) => !current)}
-            >
-              {showTables ? 'Скрыть таблицу' : 'Показать таблицей'}
-            </button>
           </fieldset>
 
           <div className="purchase-table">
@@ -1382,8 +1379,22 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                       showCarry={!grouped}
                                     />
                                   ) : (
-                                    <span className="hint">график ниже</span>
+                                    <span className="hint sched-below">график ниже</span>
                                   )}
+                                  <button
+                                    type="button"
+                                    className={
+                                      openSchedule.includes(row.key)
+                                        ? 'mini sched-toggle active'
+                                        : 'mini sched-toggle'
+                                    }
+                                    aria-expanded={openSchedule.includes(row.key)}
+                                    onClick={() => toggleSchedule(row.key)}
+                                  >
+                                    {openSchedule.includes(row.key)
+                                      ? 'Скрыть таблицу'
+                                      : 'Показать таблицей'}
+                                  </button>
                                   {scheduleMode === 'summary' && grouped && group ? (
                                     <GroupNote group={group} year={plan.year} />
                                   ) : null}
@@ -1418,8 +1429,9 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                       const group = coverage.group.get(groupKey(row))
                       const rowSchedule = coverage.byRow.get(row.key) ?? []
                       const grouped = (group?.rows ?? 1) > 1
+                      const expanded = openSchedule.includes(row.key)
                       if (schedule.length === 0) return null
-                      if (scheduleMode === 'summary' && !showTables) return null
+                      if (scheduleMode === 'summary' && !expanded) return null
                       return (
                         <tr key={`${row.key}-schedule`} className="schedule-wide">
                           <td colSpan={7}>
@@ -1441,7 +1453,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                 />
                               </>
                             ) : null}
-                            {showTables ? (
+                            {expanded ? (
                               <ScheduleTable rows={rowSchedule} year={plan.year} extra="" />
                             ) : null}
                           </td>

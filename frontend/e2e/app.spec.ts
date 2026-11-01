@@ -704,11 +704,15 @@ test('закупщик раскладывает потребность план�
   await page.getByRole('button', { name: 'кварталы' }).click()
   await expect(page.getByTestId('schedule-quarters')).toContainText('I квартал')
   await expect(page.getByTestId('schedule-bars')).toHaveCount(0)
-  // Одна кнопка на всю страницу, в строке «График заказа:»: она же в «кратко», она же в кварталах.
-  await expect(page.getByRole('button', { name: 'Показать таблицей' })).toHaveCount(1)
+  // Кнопка таблицы — своя у каждой позиции и всегда в ячейке «График заказа».
+  const toggles = page.getByRole('button', { name: 'Показать таблицей' })
+  const toggleCount = await toggles.count()
+  expect(toggleCount).toBeGreaterThan(0)
   await page.getByRole('button', { name: 'кратко' }).click()
-  await page.getByRole('button', { name: 'Показать таблицей' }).click()
+  await toggles.first().click()
+  // Раскрылась одна позиция: у остальных кнопка по-прежнему «Показать таблицей».
   await expect(page.getByRole('button', { name: 'Скрыть таблицу' })).toHaveCount(1)
+  await expect(page.getByRole('button', { name: 'Показать таблицей' })).toHaveCount(toggleCount - 1)
   const detail = page.getByTestId('schedule-table').first()
   await expect(detail).toBeVisible()
   await expect(detail).toContainText('Месяц потребности')
