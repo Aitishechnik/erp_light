@@ -2835,6 +2835,13 @@ button.primary:disabled,
   border: 0;
 }
 
+/* Подпись «График заказа:» — та же строка, что и кнопки: нижний отступ
+   подсказки в flex-строке поднимал текст выше кнопок. */
+/* biome-ignore lint/style/noDescendingSpecificity: правило стоит рядом со своим блоком */
+.sched-switch .hint {
+  margin: 0;
+}
+
 .sched-switch legend {
   position: absolute;
   width: 1px;
