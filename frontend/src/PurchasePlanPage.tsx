@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import {
   acknowledgePurchasePlanSource,
   approvePurchasePlan,
@@ -1221,245 +1221,240 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                         const group = coverage.group.get(groupKey(row))
                         const rowSchedule = coverage.byRow.get(row.key) ?? []
                         const grouped = (group?.rows ?? 1) > 1 || (group?.alternatives ?? 0) > 0
-                        return (
-                          <tr
-                            key={row.key}
-                            className={isAlternative ? 'alt-row' : undefined}
-                            data-testid={`purchase-row-${row.key}`}
-                          >
-                            <td>
-                              {canEdit ? (
-                                <select
-                                  className="plan-select"
-                                  aria-label={`Сырьё ${label}`}
-                                  title={row.productName || undefined}
-                                  value={row.productId}
-                                  onChange={(event) => {
-                                    const chosen = products.find(
-                                      (item) => item.id === event.target.value,
-                                    )
-                                    updateRow(row.key, {
-                                      productId: event.target.value,
-                                      productName: chosen?.name ?? '',
-                                    })
-                                  }}
-                                >
-                                  <option value="">— сырьё —</option>
-                                  {row.productId &&
-                                  !products.some((item) => item.id === row.productId) ? (
-                                    <option value={row.productId}>
-                                      {row.productName} (отключён)
-                                    </option>
-                                  ) : null}
-                                  {products.map((product) => (
-                                    <option key={product.id} value={product.id}>
-                                      {product.code} · {product.name} ({product.unit})
-                                    </option>
-                                  ))}
-                                </select>
-                              ) : (
-                                row.productName
-                              )}
-                              {isAlternative ? (
-                                <span
-                                  className="badge badge-alt"
-                                  data-testid={`alt-badge-${row.key}`}
-                                >
-                                  альтернатива
-                                </span>
-                              ) : null}
-                              {canEdit && !isAlternative && row.id ? (
-                                <button
-                                  type="button"
-                                  className="mini alt-add"
-                                  aria-label={`Добавить альтернативу ${label}`}
-                                  title="Альтернативное сырьё для этой строки: другой сорт, калибр или страна"
-                                  onClick={() => addAlternative(row)}
-                                >
-                                  + альтернатива
-                                </button>
-                              ) : null}
-                            </td>
-                            <td>
-                              {canEdit ? (
-                                <select
-                                  aria-label={`Страна ${label}`}
-                                  value={row.countryId}
-                                  onChange={(event) => {
-                                    const chosen = countries.find(
-                                      (item) => item.id === event.target.value,
-                                    )
-                                    updateRow(row.key, {
-                                      countryId: event.target.value,
-                                      countryName: chosen?.name ?? '',
-                                      deliveryDays: chosen?.delivery_days ?? 30,
-                                    })
-                                  }}
-                                >
-                                  <option value="">— страна —</option>
-                                  {row.countryId &&
-                                  !countries.some((item) => item.id === row.countryId) ? (
-                                    <option value={row.countryId}>
-                                      {row.countryName} (отключена)
-                                    </option>
-                                  ) : null}
-                                  {countries.map((item) => (
-                                    <option key={item.id} value={item.id}>
-                                      {item.name} · {item.delivery_days} дн
-                                    </option>
-                                  ))}
-                                </select>
-                              ) : (
+                        const expanded = openSchedule.includes(row.key)
+                        // График «ниже» — сразу под своей строкой, а не в конце позиции.
+                        const wideGrouped = (group?.rows ?? 1) > 1
+                        // Таблица и кварталы — сразу под своей строкой, а не в конце позиции.
+                        const showWide =
+                          !isAlternative &&
+                          schedule.length > 0 &&
+                          (scheduleMode === 'quarters' || expanded)
+                        const wideRow = showWide ? (
+                          <tr className="schedule-wide">
+                            <td colSpan={7}>
+                              {scheduleMode === 'quarters' ? (
                                 <>
-                                  {row.countryName || '—'}
-                                  {row.deliveryDays ? (
-                                    <span className="unit"> · {row.deliveryDays} дн</span>
-                                  ) : null}
+                                  <div className="sched-wide-head">
+                                    <b>{row.productName || 'Сырьё'}</b>
+                                    {row.countryName ? ` · ${row.countryName}` : ''}
+                                    {wideGrouped && group ? (
+                                      <GroupNote group={group} year={plan.year} />
+                                    ) : null}
+                                  </div>
+                                  <ScheduleView
+                                    rows={rowSchedule}
+                                    mode="quarters"
+                                    year={plan.year}
+                                    extra={extraFacts(row, group?.months ?? monthsOf(schedule))}
+                                    showCarry={!wideGrouped}
+                                  />
                                 </>
-                              )}
-                            </td>
-                            <td className="num">
-                              {canEdit ? (
-                                <input
-                                  className="cell"
-                                  aria-label={`Количество ${label}`}
-                                  value={row.quantity}
-                                  onChange={(event) =>
-                                    updateRow(row.key, { quantity: event.target.value })
-                                  }
-                                />
-                              ) : (
-                                formatQuantity(row.quantity)
-                              )}
-                            </td>
-                            <td className="num">
-                              {canEdit ? (
-                                <input
-                                  className="cell"
-                                  aria-label={`Цена ${label}`}
-                                  value={row.priceRub}
-                                  onChange={(event) =>
-                                    updateRow(row.key, { priceRub: event.target.value })
-                                  }
-                                />
-                              ) : (
-                                formatMoney(row.priceRub || null)
-                              )}
-                            </td>
-                            <td className="num">
-                              {sum === null ? '—' : formatMoney(sum.toFixed(2))}
-                            </td>
-                            <td>
-                              {position.status === 'orphan' ? (
-                                '—'
-                              ) : isAlternative ? (
-                                <span className="sched-summary" data-testid={`alt-${row.key}`}>
-                                  <span className="sched-line">
-                                    план {formatQuantity(row.quantity || '0')} · пришло{' '}
-                                    {formatQuantity(row.factQuantity)}
-                                    {alternativeUsed > 0
-                                      ? ` · на покрытие ${formatQuantity(
-                                          alternativeUsed.toFixed(3),
-                                        )}`
-                                      : ''}
-                                  </span>
-                                  <span className="alt-note">
-                                    закрывает потребность основной строки, когда основного сырья не
-                                    хватает
-                                  </span>
-                                </span>
-                              ) : (
-                                <>
-                                  {scheduleMode === 'summary' ? (
-                                    <ScheduleView
-                                      rows={rowSchedule}
-                                      mode="summary"
-                                      year={plan.year}
-                                      extra={extraFacts(row, group?.months ?? monthsOf(schedule))}
-                                      showCarry={!grouped}
-                                    />
-                                  ) : (
-                                    <span className="hint sched-below">график ниже</span>
-                                  )}
-                                  <button
-                                    type="button"
-                                    className={
-                                      openSchedule.includes(row.key)
-                                        ? 'mini sched-toggle active'
-                                        : 'mini sched-toggle'
-                                    }
-                                    aria-expanded={openSchedule.includes(row.key)}
-                                    onClick={() => toggleSchedule(row.key)}
-                                  >
-                                    {openSchedule.includes(row.key)
-                                      ? 'Скрыть таблицу'
-                                      : 'Показать таблицей'}
-                                  </button>
-                                  {scheduleMode === 'summary' && grouped && group ? (
-                                    <GroupNote group={group} year={plan.year} />
-                                  ) : null}
-                                </>
-                              )}
-                            </td>
-                            <td>
-                              {canEdit ? (
-                                <button
-                                  type="button"
-                                  className="row-remove"
-                                  aria-label={`Убрать ${label}`}
-                                  title="Убрать строку"
-                                  onClick={() => removeRow(row.key)}
-                                >
-                                  ×
-                                </button>
+                              ) : null}
+                              {expanded ? (
+                                <ScheduleTable rows={rowSchedule} year={plan.year} extra="" />
                               ) : null}
                             </td>
                           </tr>
+                        ) : null
+                        return (
+                          <Fragment key={row.key}>
+                            <tr
+                              className={isAlternative ? 'alt-row' : undefined}
+                              data-testid={`purchase-row-${row.key}`}
+                            >
+                              <td>
+                                {canEdit ? (
+                                  <select
+                                    className="plan-select"
+                                    aria-label={`Сырьё ${label}`}
+                                    title={row.productName || undefined}
+                                    value={row.productId}
+                                    onChange={(event) => {
+                                      const chosen = products.find(
+                                        (item) => item.id === event.target.value,
+                                      )
+                                      updateRow(row.key, {
+                                        productId: event.target.value,
+                                        productName: chosen?.name ?? '',
+                                      })
+                                    }}
+                                  >
+                                    <option value="">— сырьё —</option>
+                                    {row.productId &&
+                                    !products.some((item) => item.id === row.productId) ? (
+                                      <option value={row.productId}>
+                                        {row.productName} (отключён)
+                                      </option>
+                                    ) : null}
+                                    {products.map((product) => (
+                                      <option key={product.id} value={product.id}>
+                                        {product.code} · {product.name} ({product.unit})
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  row.productName
+                                )}
+                                {isAlternative ? (
+                                  <span
+                                    className="badge badge-alt"
+                                    data-testid={`alt-badge-${row.key}`}
+                                  >
+                                    альтернатива
+                                  </span>
+                                ) : null}
+                                {canEdit && !isAlternative && row.id ? (
+                                  <button
+                                    type="button"
+                                    className="mini alt-add"
+                                    aria-label={`Добавить альтернативу ${label}`}
+                                    title="Альтернативное сырьё для этой строки: другой сорт, калибр или страна"
+                                    onClick={() => addAlternative(row)}
+                                  >
+                                    + альтернатива
+                                  </button>
+                                ) : null}
+                              </td>
+                              <td>
+                                {canEdit ? (
+                                  <select
+                                    aria-label={`Страна ${label}`}
+                                    value={row.countryId}
+                                    onChange={(event) => {
+                                      const chosen = countries.find(
+                                        (item) => item.id === event.target.value,
+                                      )
+                                      updateRow(row.key, {
+                                        countryId: event.target.value,
+                                        countryName: chosen?.name ?? '',
+                                        deliveryDays: chosen?.delivery_days ?? 30,
+                                      })
+                                    }}
+                                  >
+                                    <option value="">— страна —</option>
+                                    {row.countryId &&
+                                    !countries.some((item) => item.id === row.countryId) ? (
+                                      <option value={row.countryId}>
+                                        {row.countryName} (отключена)
+                                      </option>
+                                    ) : null}
+                                    {countries.map((item) => (
+                                      <option key={item.id} value={item.id}>
+                                        {item.name} · {item.delivery_days} дн
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <>
+                                    {row.countryName || '—'}
+                                    {row.deliveryDays ? (
+                                      <span className="unit"> · {row.deliveryDays} дн</span>
+                                    ) : null}
+                                  </>
+                                )}
+                              </td>
+                              <td className="num">
+                                {canEdit ? (
+                                  <input
+                                    className="cell"
+                                    aria-label={`Количество ${label}`}
+                                    value={row.quantity}
+                                    onChange={(event) =>
+                                      updateRow(row.key, { quantity: event.target.value })
+                                    }
+                                  />
+                                ) : (
+                                  formatQuantity(row.quantity)
+                                )}
+                              </td>
+                              <td className="num">
+                                {canEdit ? (
+                                  <input
+                                    className="cell"
+                                    aria-label={`Цена ${label}`}
+                                    value={row.priceRub}
+                                    onChange={(event) =>
+                                      updateRow(row.key, { priceRub: event.target.value })
+                                    }
+                                  />
+                                ) : (
+                                  formatMoney(row.priceRub || null)
+                                )}
+                              </td>
+                              <td className="num">
+                                {sum === null ? '—' : formatMoney(sum.toFixed(2))}
+                              </td>
+                              <td>
+                                {position.status === 'orphan' ? (
+                                  '—'
+                                ) : isAlternative ? (
+                                  <span className="sched-summary" data-testid={`alt-${row.key}`}>
+                                    <span className="sched-line">
+                                      план {formatQuantity(row.quantity || '0')} · пришло{' '}
+                                      {formatQuantity(row.factQuantity)}
+                                      {alternativeUsed > 0
+                                        ? ` · на покрытие ${formatQuantity(
+                                            alternativeUsed.toFixed(3),
+                                          )}`
+                                        : ''}
+                                    </span>
+                                    <span className="alt-note">
+                                      закрывает потребность основной строки, когда основного сырья
+                                      не хватает
+                                    </span>
+                                  </span>
+                                ) : (
+                                  <>
+                                    {scheduleMode === 'summary' ? (
+                                      <ScheduleView
+                                        rows={rowSchedule}
+                                        mode="summary"
+                                        year={plan.year}
+                                        extra={extraFacts(row, group?.months ?? monthsOf(schedule))}
+                                        showCarry={!grouped}
+                                      />
+                                    ) : (
+                                      <span className="hint sched-below">график ниже</span>
+                                    )}
+                                    {scheduleMode === 'summary' && grouped && group ? (
+                                      <GroupNote group={group} year={plan.year} />
+                                    ) : null}
+                                    <button
+                                      type="button"
+                                      className={
+                                        openSchedule.includes(row.key)
+                                          ? 'mini sched-toggle active'
+                                          : 'mini sched-toggle'
+                                      }
+                                      aria-expanded={openSchedule.includes(row.key)}
+                                      onClick={() => toggleSchedule(row.key)}
+                                    >
+                                      {openSchedule.includes(row.key)
+                                        ? 'Скрыть таблицу'
+                                        : 'Показать таблицей'}
+                                    </button>
+                                  </>
+                                )}
+                              </td>
+                              <td>
+                                {canEdit ? (
+                                  <button
+                                    type="button"
+                                    className="row-remove"
+                                    aria-label={`Убрать ${label}`}
+                                    title="Убрать строку"
+                                    onClick={() => removeRow(row.key)}
+                                  >
+                                    ×
+                                  </button>
+                                ) : null}
+                              </td>
+                            </tr>
+                            {wideRow}
+                          </Fragment>
                         )
                       })
                     )}
-                    {ordered.map((row) => {
-                      if (row.alternativeOfId !== null) return null
-                      const schedule = splitPreview(
-                        toMilli(row.quantity),
-                        position,
-                        row.deliveryDays,
-                        plan.year,
-                      )
-                      const group = coverage.group.get(groupKey(row))
-                      const rowSchedule = coverage.byRow.get(row.key) ?? []
-                      const grouped = (group?.rows ?? 1) > 1
-                      const expanded = openSchedule.includes(row.key)
-                      if (schedule.length === 0) return null
-                      if (scheduleMode === 'summary' && !expanded) return null
-                      return (
-                        <tr key={`${row.key}-schedule`} className="schedule-wide">
-                          <td colSpan={7}>
-                            {scheduleMode === 'quarters' ? (
-                              <>
-                                <div className="sched-wide-head">
-                                  <b>{row.productName || 'Сырьё'}</b>
-                                  {row.countryName ? ` · ${row.countryName}` : ''}
-                                  {grouped && group ? (
-                                    <GroupNote group={group} year={plan.year} />
-                                  ) : null}
-                                </div>
-                                <ScheduleView
-                                  rows={rowSchedule}
-                                  mode="quarters"
-                                  year={plan.year}
-                                  extra={extraFacts(row, group?.months ?? monthsOf(schedule))}
-                                  showCarry={!grouped}
-                                />
-                              </>
-                            ) : null}
-                            {expanded ? (
-                              <ScheduleTable rows={rowSchedule} year={plan.year} extra="" />
-                            ) : null}
-                          </td>
-                        </tr>
-                      )
-                    })}
                   </tbody>
                 )
               })}

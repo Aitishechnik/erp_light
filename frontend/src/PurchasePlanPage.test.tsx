@@ -318,6 +318,10 @@ describe('PurchasePlanPage', () => {
     if (!firstToggle) throw new Error('нет кнопки таблицы у первой позиции')
     await user.click(firstToggle)
     expect(screen.getAllByTestId('schedule-table')).toHaveLength(1)
+    // Таблица идёт сразу за своей строкой, а не в конце позиции.
+    expect(screen.getByTestId('purchase-row-item-1').nextElementSibling).toContainElement(
+      screen.getByTestId('schedule-table'),
+    )
     expect(screen.getAllByRole('button', { name: 'Скрыть таблицу' })).toHaveLength(1)
     // У второй позиции кнопка по-прежнему «Показать таблицей» — своя на строку.
     expect(screen.getAllByRole('button', { name: 'Показать таблицей' })).toHaveLength(1)

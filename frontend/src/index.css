@@ -2535,12 +2535,14 @@ button.primary:disabled,
   width: 12%;
 }
 
+/* «График заказа» — самый широкий столбец: в нём сводка, приход по сырью и
+   кнопка таблицы; колонка действий справа узкая, там только «×». */
 .plan-grid th:nth-child(6) {
-  width: 11%;
+  width: 37%;
 }
 
 .plan-grid th:nth-child(7) {
-  width: 24%;
+  width: 4%;
 }
 
 .plan-grid th:nth-child(8) {
