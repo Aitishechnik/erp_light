@@ -706,8 +706,9 @@ def test_dependent_start_slides_until_master_done(client: TestClient, login: Lin
     login("sales2")
     row = client.get(f"/api/v1/tasks/{dependent['id']}").json()
     assert row["dynamic_start"] is True
-    assert row["start_date"] == day(0)
-    assert row["due_date"] == day(7)
+    # Не раньше планового окончания мастера (day(40)) плюс день.
+    assert row["start_date"] == day(41)
+    assert row["due_date"] == day(48)
 
     # Мастер закрыт — старт фиксируется на сегодня и больше не сдвигается.
     login("sales")
@@ -750,7 +751,8 @@ def test_removing_dependency_freezes_start(client: TestClient, login: Link) -> N
     )
     login("commercial")
     blocked = add_dependency(client, dependent["id"], {"depends_on_task_id": master["id"]})
-    assert blocked["start_date"] == day(0)
+    # Мастер по умолчанию заканчивается на day(5), значит старт — day(6).
+    assert blocked["start_date"] == day(6)
 
     dependency_id = blocked["dependencies"][0]["id"]
     removed = client.delete(f"/api/v1/tasks/{dependent['id']}/dependencies/{dependency_id}")
@@ -759,3 +761,28 @@ def test_removing_dependency_freezes_start(client: TestClient, login: Link) -> N
     assert body["is_blocked"] is False
     assert body["start_date"] == day(0)
     assert body["due_date"] == day(7)
+
+
+def test_dependent_plan_moves_after_master_due(client: TestClient, login: Link) -> None:
+    """Даже если план зависимой был раньше мастера, даты встают после него."""
+    master = new_task(
+        client,
+        login,
+        title="Согласовать матрицу",
+        assignee=SALES,
+        start_date=day(40),
+        due_date=day(70),
+    )
+    dependent = new_task(
+        client,
+        login,
+        title="Сделать отгрузку",
+        assignee=SALES2,
+        start_date=day(0),
+        due_date=day(7),
+    )
+    login("commercial")
+    add_dependency(client, dependent["id"], {"depends_on_task_id": master["id"]})
+    row = client.get(f"/api/v1/tasks/{dependent['id']}").json()
+    assert row["start_date"] == day(71)
+    assert row["due_date"] == day(78)

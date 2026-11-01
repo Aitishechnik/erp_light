@@ -239,18 +239,27 @@ def _overdue(task: Task, due: date) -> tuple[bool, int]:
 
 
 def _effective_dates(task: Task, blocked: bool) -> tuple[date, date, int]:
-    """Пока задача ждёт мастера, её старт плавает: не раньше сегодняшнего дня.
+    """Пока задача ждёт мастера, её старт плавает.
 
+    Начало — не раньше сегодняшнего дня и не раньше планового окончания
+    самого позднего незавершённого мастера. Пока мастер в работе, «сегодня»
+    каждый день догоняет этот срок, поэтому дата и сдвигается вперёд.
     Возвращает начало, окончание и сдвиг в днях относительно плана.
     """
     start, due = task.start_date, task.due_date
     if not blocked:
         return start, due, 0
-    today = _today()
-    if start >= today:
+    earliest = _today()
+    for dep in task.dependencies:
+        if _dep_satisfied(dep) or dep.depends_on is None:
+            continue
+        after = dep.depends_on.due_date + timedelta(days=1)
+        if after > earliest:
+            earliest = after
+    if earliest <= start:
         return start, due, 0
-    shift = (today - start).days
-    return today, due + timedelta(days=shift), shift
+    shift = (earliest - start).days
+    return earliest, due + timedelta(days=shift), shift
 
 
 def _dep_satisfied(dep: TaskDependency) -> bool:
