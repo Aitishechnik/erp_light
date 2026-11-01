@@ -408,22 +408,35 @@ def cover_family(
     if mains and opening:
         available[next(iter(mains))] = _milli(opening)
 
+    # Приход может прийти в месяц, которого нет в графике потребности: до сезона,
+    # между месяцами или после последнего. Такой приход не теряем — он ждёт
+    # ближайшей потребности и попадает в общий остаток.
+    months = set(month_rows)
+    for key in available:
+        months.update(arrivals.get(key, {}))
+    main_keys = list(mains)
+
     result: dict[Key, list[CoverageEntry]] = {key: [] for key in mains}
     used: dict[Key, dict[int, Decimal]] = {key: {} for key in alternatives}
-    for month in sorted(month_rows):
+    for month in sorted(months):
         for key in available:
             available[key] += _milli(arrivals.get(key, {}).get(month, ZERO))
 
-        rows = sorted(month_rows[month], key=lambda pair: (-pair[1].quantity, str(pair[0])))
+        rows = sorted(month_rows.get(month, []), key=lambda pair: (-pair[1].quantity, str(pair[0])))
+        if not rows:
+            continue
+
         needs = {key: _milli(entry.quantity) for key, entry in rows}
         need_total = sum(needs.values())
 
-        # Сначала основное сырьё: излишек альтернативы подключаем только на остаток.
-        taken = min(need_total, max(sum(available[key] for key, _entry in rows), 0))
-        for (key, _entry), part in zip(
-            rows, _split_by_weights([available[key] for key, _e in rows], taken), strict=True
-        ):
-            available[key] -= part
+        # Сначала основное сырьё. Котёл общий: запас любой основной строки может
+        # закрыть потребность другой, даже если у неё самой в этом месяце
+        # потребности нет. Поэтому берём наличие всех основных строк.
+        taken = min(need_total, max(sum(available[key] for key in main_keys), 0))
+        if taken > 0:
+            parts = _split_by_weights([available[key] for key in main_keys], taken)
+            for key, part in zip(main_keys, parts, strict=True):
+                available[key] -= part
 
         shortfall = need_total - taken
         alternatives_taken = min(shortfall, max(sum(available[key] for key in alternatives), 0))
@@ -450,7 +463,7 @@ def cover_family(
                     overdue=entry.overdue,
                 )
             )
-    left = _from_milli(max(sum(available.values()), 0)) if month_rows else ZERO
+    left = _from_milli(max(sum(available.values()), 0)) if months else ZERO
     return result, used, left
 
 

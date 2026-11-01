@@ -20,7 +20,9 @@
   * единица измерения из файла сверяется со справочником: количество в другой
     единице испортило бы себестоимость единицы;
   * повторная загрузка заменяет позиции партии; если у партии уже есть платежи,
-    замена отклоняется — суммы платежей считались бы от другого инвойса.
+    замена отклоняется — суммы платежей считались бы от другого инвойса;
+  * строка сама привязывается к первой строке утверждённого плана того же сырья
+    за год поступления; снять или сменить привязку можно в карточке.
 """
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ from app.services.import_service import (
     ImportDataError,
     read_rows,
 )
+from app.services.purchase_plan_service import auto_plan_item_id
 
 
 def name_key(name: str) -> str:
@@ -191,6 +194,7 @@ def import_items(db: Session, batch: Batch, file_name: str, content: bytes) -> I
                 batch_id=batch.id,
                 product_id=row.product.id,
                 quantity=row.quantity,
+                purchase_plan_item_id=auto_plan_item_id(db, row.product.id, batch.batch_date),
             )
         )
 

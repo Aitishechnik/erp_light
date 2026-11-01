@@ -6,17 +6,20 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.models.counterparties import Counterparty
 from app.models.domain import Batch, BatchItem, Product
-from app.models.planning import PurchasePlan
+from app.models.planning import PurchasePlan, SalesPlanApproval, SalesPlanItem
 from app.services.purchase_need import (
+    cover_family,
     cover_group,
     cover_schedule,
     order_year_month,
     split_annual,
 )
+from app.services.sales_plan_approval_service import current_hash
 
 TODAY = date.today()
 YEAR = TODAY.year + 1
@@ -71,6 +74,21 @@ def _make_annual(client: TestClient, login, catalog: dict[str, Any]) -> dict[str
     login("executive")
     assert client.post(f"/api/v1/annual-sales-plans/{YEAR}/approve").status_code == 200
     return plan_ids
+
+
+def _make_annual_rows(
+    client: TestClient,
+    login,
+    catalog: dict[str, Any],
+    rows: list[tuple[str, str, int, str]],
+) -> None:
+    """Годовой план из явных строк (менеджер, товар, месяц, количество)."""
+    for manager, product, month, quantity in rows:
+        _sales_plan(client, login, manager, catalog[product], catalog["customer"], month, quantity)
+    login("commercial")
+    assert client.post(f"/api/v1/annual-sales-plans/{YEAR}/submit").status_code == 200
+    login("executive")
+    assert client.post(f"/api/v1/annual-sales-plans/{YEAR}/approve").status_code == 200
 
 
 def _resubmit_annual(client: TestClient, login) -> None:
@@ -381,6 +399,78 @@ def test_cover_group_shares_the_arrival_between_rows() -> None:
     assert sum(row[0].covered for row in tight.values()) == Decimal("10.000")
 
 
+def test_coverage_uses_arrival_in_month_without_need() -> None:
+    """Приход в месяц без потребности ждёт ближайшую потребность, а не теряется."""
+    schedule = split_annual(
+        Decimal("30"), {1: Decimal("100"), 3: Decimal("200")}, 0, 2027, today=date(2026, 10, 21)
+    )
+    rows = cover_schedule(schedule, {2: Decimal("15")})
+
+    # Январь без прихода, февральский приход закрывает март.
+    assert [(row.month, row.covered, row.remaining) for row in rows] == [
+        (1, Decimal("0.000"), Decimal("10.000")),
+        (3, Decimal("15.000"), Decimal("5.000")),
+    ]
+    assert rows[-1].carry == Decimal("0")
+
+
+def test_coverage_uses_arrival_before_first_need() -> None:
+    """Январский приход закрывает потребность марта."""
+    schedule = split_annual(Decimal("10"), {3: Decimal("100")}, 0, 2027, today=date(2026, 10, 21))
+    rows = cover_schedule(schedule, {1: Decimal("6")})
+
+    assert rows[0].month == 3
+    assert rows[0].covered == Decimal("6.000")
+    assert rows[0].remaining == Decimal("4.000")
+
+
+def test_coverage_keeps_arrival_after_last_need_in_carry() -> None:
+    """Приход после последнего месяца потребности — излишек, а не потеря."""
+    schedule = split_annual(
+        Decimal("30"), {1: Decimal("100"), 2: Decimal("200")}, 0, 2027, today=date(2026, 10, 21)
+    )
+    entries, _used, left = cover_family({"main": schedule}, [], {"main": {3: Decimal("12")}})
+
+    assert [row.covered for row in entries["main"]] == [Decimal("0"), Decimal("0")]
+    assert left == Decimal("12.000")
+
+
+def test_leftover_of_one_row_covers_another_row_later() -> None:
+    """Излишек января на позиции A закрывает февраль позиции B."""
+    first = split_annual(Decimal("10"), {1: Decimal("100")}, 0, 2027, today=date(2026, 10, 21))
+    second = split_annual(Decimal("10"), {2: Decimal("100")}, 0, 2027, today=date(2026, 10, 21))
+
+    entries, _used, left = cover_family(
+        {"first": first, "second": second}, [], {"first": {1: Decimal("20")}}
+    )
+
+    assert entries["first"][0].covered == Decimal("10.000")
+    assert entries["first"][0].carry == Decimal("10.000")
+    assert entries["second"][0].month == 2
+    assert entries["second"][0].covered == Decimal("10.000")
+    assert entries["second"][0].remaining == Decimal("0")
+    assert left == Decimal("0")
+
+
+def test_other_row_stock_is_used_before_alternative() -> None:
+    """Запас основной строки без потребности месяца тратится раньше альтернативы."""
+    late = split_annual(Decimal("10"), {3: Decimal("100")}, 0, 2027, today=date(2026, 10, 21))
+    early = split_annual(Decimal("10"), {1: Decimal("100")}, 0, 2027, today=date(2026, 10, 21))
+
+    entries, used, left = cover_family(
+        {"late": late, "early": early},
+        ["alt"],
+        {"late": {1: Decimal("20")}, "alt": {1: Decimal("10")}},
+    )
+
+    # Январь закрыт запасом строки «late», альтернатива не тронута.
+    assert entries["early"][0].covered == Decimal("10.000")
+    assert used["alt"] == {}
+    # В марте своя потребность «late» тоже закрыта тем же запасом.
+    assert entries["late"][0].covered == Decimal("10.000")
+    assert left == Decimal("10.000")
+
+
 def test_coverage_is_shared_by_raw_material(
     client: TestClient, login, catalog: dict[str, Any], db_session: Session
 ) -> None:
@@ -441,6 +531,89 @@ def test_coverage_is_shared_by_raw_material(
     assert covered == Decimal("40.000")
 
 
+def test_receipt_in_gap_month_covers_later_need(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    """Февральский приход закрывает мартовскую потребность, а не теряется."""
+    _make_annual_rows(
+        client,
+        login,
+        catalog,
+        [("sales", "fin", 1, "100"), ("sales2", "fin", 3, "100"), ("sales3", "fin2", 1, "50")],
+    )
+    plan = _create_plan(client, login)
+    saved = _save(
+        client,
+        plan["id"],
+        [
+            _item(catalog, sales="fin", raw="raw", quantity="30"),
+            _item(catalog, sales="fin2", raw="raw2", quantity="10"),
+        ],
+    )
+    assert saved.status_code == 200, saved.text
+    fin = next(
+        row for row in saved.json()["items"] if row["sales_product_id"] == str(catalog["fin"].id)
+    )
+
+    _arrive(db_session, catalog, fin["id"], "20", date(YEAR, 2, 15), product="raw")
+
+    login("purchase")
+    body = client.get(f"/api/v1/purchase-plans/{plan['id']}").json()
+    row = next(item for item in body["items"] if item["id"] == fin["id"])
+    assert row["fact_quantity"] == "20.000"
+    assert [
+        (entry["month"], entry["covered"], entry["remaining"]) for entry in row["schedule"]
+    ] == [(1, "0.000", "15.000"), (3, "15.000", "0.000")]
+    assert row["carry_forward"] == "5.000"
+
+
+def test_leftover_of_one_position_covers_another_position(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    """Излишек января на одной позиции закрывает февраль другой."""
+    _make_annual_rows(
+        client,
+        login,
+        catalog,
+        [
+            ("sales", "fin", 1, "100"),
+            ("sales2", "fin2", 2, "100"),
+            ("sales3", "fin2", 2, "100"),
+        ],
+    )
+    plan = _create_plan(client, login)
+    saved = _save(
+        client,
+        plan["id"],
+        [
+            _item(catalog, sales="fin", raw="raw", quantity="10"),
+            _item(catalog, sales="fin2", raw="raw", quantity="10"),
+        ],
+    )
+    assert saved.status_code == 200, saved.text
+    first = next(
+        row for row in saved.json()["items"] if row["sales_product_id"] == str(catalog["fin"].id)
+    )
+
+    _arrive(db_session, catalog, first["id"], "20", date(YEAR, 1, 15), product="raw")
+
+    login("purchase")
+    body = client.get(f"/api/v1/purchase-plans/{plan['id']}").json()
+    first_row = next(item for item in body["items"] if item["id"] == first["id"])
+    second_row = next(item for item in body["items"] if item["id"] != first["id"])
+
+    assert [(entry["month"], entry["covered"]) for entry in first_row["schedule"]] == [
+        (1, "10.000")
+    ]
+    assert first_row["schedule"][0]["carry"] == "10.000"
+    assert [(entry["month"], entry["covered"]) for entry in second_row["schedule"]] == [
+        (2, "10.000")
+    ]
+    assert second_row["schedule"][0]["remaining"] == "0.000"
+    assert first_row["carry_forward"] == "0.000"
+    assert second_row["carry_forward"] == "0.000"
+
+
 def test_validation_keeps_previous_rows(client: TestClient, login, catalog: dict[str, Any]) -> None:
     _make_annual(client, login, catalog)
     plan = _create_plan(client, login)
@@ -465,6 +638,106 @@ def test_validation_keeps_previous_rows(client: TestClient, login, catalog: dict
     # Отклонённые правки не стёрли прежнюю строку.
     current = client.get(f"/api/v1/purchase-plans/{plan['id']}").json()
     assert len(current["items"]) == 1
+
+
+def test_stale_plan_version_is_rejected(client: TestClient, login, catalog: dict[str, Any]) -> None:
+    """Старая форма не должна затирать правки, сохранённые после её открытия."""
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    saved = _save(client, plan["id"], [_item(catalog, quantity="30")])
+    assert saved.status_code == 200, saved.text
+    version = saved.json()["updated_at"]
+    item = saved.json()["items"][0]
+
+    current = _item(catalog, quantity="40")
+    current["id"] = item["id"]
+    ok = client.put(
+        f"/api/v1/purchase-plans/{plan['id']}/items",
+        json={"items": [current], "version": version},
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["updated_at"] != version
+
+    stale = _item(catalog, quantity="50")
+    stale["id"] = item["id"]
+    rejected = client.put(
+        f"/api/v1/purchase-plans/{plan['id']}/items",
+        json={"items": [stale], "version": version},
+    )
+    assert rejected.status_code == 409, rejected.text
+    assert "обновите страницу" in rejected.json()["detail"]
+    # Строка осталась той, что сохранил первый запрос.
+    body = client.get(f"/api/v1/purchase-plans/{plan['id']}").json()
+    assert body["items"][0]["quantity"] == "40.000"
+
+
+def test_identical_rows_are_rejected(client: TestClient, login, catalog: dict[str, Any]) -> None:
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    duplicated = _save(
+        client, plan["id"], [_item(catalog, quantity="30"), _item(catalog, quantity="30")]
+    )
+    assert duplicated.status_code == 400, duplicated.text
+    assert "уже есть" in duplicated.json()["detail"]
+
+
+def test_plan_has_max_quantity_and_price(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    huge_qty = _save(client, plan["id"], [_item(catalog, quantity="1000000000000000")])
+    assert huge_qty.status_code == 422, huge_qty.text
+    huge_price = _save(client, plan["id"], [_item(catalog, price="1000000000000000")])
+    assert huge_price.status_code == 422, huge_price.text
+
+
+def test_delivery_days_is_a_snapshot_until_country_changes(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    saved = _save(client, plan["id"], [_item(catalog, quantity="30")])
+    item = saved.json()["items"][0]
+    assert item["delivery_days"] == 90
+
+    login("purchase")
+    patched = client.patch(
+        f"/api/v1/countries/{catalog['thailand'].id}", json={"delivery_days": 10}
+    )
+    assert patched.status_code == 200, patched.text
+
+    same_country = _save(
+        client,
+        plan["id"],
+        [{**_item(catalog, quantity="40"), "id": item["id"]}],
+    )
+    assert same_country.status_code == 200, same_country.text
+    assert same_country.json()["items"][0]["delivery_days"] == 90
+
+    other_country = _save(
+        client,
+        plan["id"],
+        [{**_item(catalog, country="china", quantity="40"), "id": item["id"]}],
+    )
+    assert other_country.status_code == 200, other_country.text
+    assert other_country.json()["items"][0]["delivery_days"] == 65
+
+
+def test_acknowledge_source_is_forbidden_for_approved_plan(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    assert _save(client, plan["id"], [_item(catalog, quantity="30")]).status_code == 200
+    login("purchase")
+    assert client.post(f"/api/v1/purchase-plans/{plan['id']}/submit").status_code == 200
+    login("executive")
+    assert client.post(f"/api/v1/purchase-plans/{plan['id']}/approve").status_code == 200
+    login("purchase")
+    rejected = client.post(f"/api/v1/purchase-plans/{plan['id']}/acknowledge-source")
+    assert rejected.status_code == 409, rejected.text
+    assert "запросите пересмотр" in rejected.json()["detail"]
 
 
 def test_roles_approval_and_revision_request(
@@ -565,6 +838,40 @@ def test_source_revision_diff_and_acknowledge(
     assert body["source"]["history"][0]["changes"][0]["now"] == "150.000"
 
     assert client.post(f"/api/v1/purchase-plans/{plan['id']}/submit").status_code == 200
+
+
+def test_removed_position_keeps_snapshot_schedule(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    """Сервер и интерфейс показывают для исчезнувшей позиции одно и то же."""
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    saved = _save(
+        client,
+        plan["id"],
+        [
+            _item(catalog, sales="fin", raw="raw", quantity="30"),
+            _item(catalog, sales="fin2", raw="raw2", quantity="10"),
+        ],
+    )
+    assert saved.status_code == 200, saved.text
+
+    db_session.execute(delete(SalesPlanItem).where(SalesPlanItem.product_id == catalog["fin"].id))
+    approval = db_session.execute(
+        select(SalesPlanApproval).where(SalesPlanApproval.year == YEAR)
+    ).scalar_one()
+    approval.source_hash = current_hash(db_session, YEAR)
+    db_session.commit()
+
+    login("purchase")
+    body = client.get(f"/api/v1/purchase-plans/{plan['id']}").json()
+    fin = next(row for row in body["items"] if row["sales_product_id"] == str(catalog["fin"].id))
+    position = next(row for row in body["positions"] if row["product_id"] == str(catalog["fin"].id))
+    assert position["status"] == "removed"
+    assert [(row["month"], row["quantity"]) for row in fin["schedule"]] == [
+        (1, "10.000"),
+        (2, "20.000"),
+    ]
 
 
 def test_previous_year_is_read_only(
@@ -742,11 +1049,170 @@ def test_alternative_must_be_for_the_same_position(
     assert "не может быть основной" in nested.json()["detail"]
 
 
-def test_alternative_goes_with_main(
+def test_alternative_units_must_match(
+    client: TestClient,
+    login,
+    catalog: dict[str, Any],
+    db_session: Session,
+) -> None:
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    saved = _save(client, plan["id"], [_item(catalog, sales="fin", raw="raw", quantity="30")])
+    main = saved.json()["items"][0]
+    main_item = _item(catalog, sales="fin", raw="raw", quantity="30")
+    main_item["id"] = main["id"]
+
+    pieces = Product(code="RAW-PCS", name="Кокос, шт", kind="raw", unit="шт")
+    db_session.add(pieces)
+    db_session.commit()
+    catalog["raw_pcs"] = pieces
+
+    wrong = _save(
+        client,
+        plan["id"],
+        [
+            main_item,
+            _item(
+                catalog,
+                sales="fin",
+                raw="raw_pcs",
+                country="china",
+                quantity="15",
+                alternative_of=main["id"],
+            ),
+        ],
+    )
+    assert wrong.status_code == 400, wrong.text
+    assert "разные единицы" in wrong.json()["detail"]
+
+
+def test_linked_alternative_cannot_be_removed(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    """У альтернативы с поступлением привязка не должна пропадать молча."""
+    plan, main, alternative = _with_alternative(client, login, catalog, db_session)
+    _arrive(db_session, catalog, alternative["id"], "12", date(YEAR, 1, 15))
+    login("purchase")
+
+    main_item = _item(catalog, sales="fin", raw="raw", quantity="30")
+    main_item["id"] = main["id"]
+    removed = _save(client, plan["id"], [main_item])
+    assert removed.status_code == 409, removed.text
+    assert "нельзя убрать" in removed.json()["detail"]
+
+    body = client.get(f"/api/v1/purchase-plans/{plan['id']}").json()
+    alt_row = next(row for row in body["items"] if row["id"] == alternative["id"])
+    assert alt_row["fact_quantity"] == "12.000"
+
+
+def test_alternative_cycle_is_rejected(client: TestClient, login, catalog: dict[str, Any]) -> None:
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    saved = _save(
+        client,
+        plan["id"],
+        [
+            _item(catalog, sales="fin", raw="raw", quantity="30"),
+            _item(catalog, sales="fin", raw="raw2", country="china", quantity="20"),
+        ],
+    )
+    assert saved.status_code == 200, saved.text
+    first, second = saved.json()["items"]
+
+    cycle = _save(
+        client,
+        plan["id"],
+        [
+            {
+                **_item(catalog, sales="fin", raw="raw", quantity="30"),
+                "id": first["id"],
+                "alternative_of_id": second["id"],
+            },
+            {
+                **_item(catalog, sales="fin", raw="raw2", country="china", quantity="20"),
+                "id": second["id"],
+                "alternative_of_id": first["id"],
+            },
+        ],
+    )
+    assert cycle.status_code == 400, cycle.text
+    assert "не может быть основной" in cycle.json()["detail"]
+
+
+def test_alternative_cannot_reference_itself(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    saved = _save(client, plan["id"], [_item(catalog, sales="fin", raw="raw", quantity="30")])
+    item = saved.json()["items"][0]
+    self_ref = _save(
+        client,
+        plan["id"],
+        [
+            {
+                **_item(catalog, sales="fin", raw="raw", quantity="30"),
+                "id": item["id"],
+                "alternative_of_id": item["id"],
+            }
+        ],
+    )
+    assert self_ref.status_code == 400, self_ref.text
+    assert "саму себя" in self_ref.json()["detail"]
+
+
+def test_alternative_target_cannot_move_to_another_position(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    saved = _save(client, plan["id"], [_item(catalog, sales="fin", raw="raw", quantity="30")])
+    main = saved.json()["items"][0]
+    with_alt = _save(
+        client,
+        plan["id"],
+        [
+            {**_item(catalog, sales="fin", raw="raw", quantity="30"), "id": main["id"]},
+            _item(
+                catalog,
+                sales="fin",
+                raw="raw2",
+                country="china",
+                quantity="15",
+                alternative_of=main["id"],
+            ),
+        ],
+    )
+    assert with_alt.status_code == 200, with_alt.text
+    alt = next(row for row in with_alt.json()["items"] if row["alternative_of_id"] == main["id"])
+
+    moved = _save(
+        client,
+        plan["id"],
+        [
+            {**_item(catalog, sales="fin2", raw="raw", quantity="30"), "id": main["id"]},
+            {
+                **_item(
+                    catalog,
+                    sales="fin",
+                    raw="raw2",
+                    country="china",
+                    quantity="15",
+                    alternative_of=main["id"],
+                ),
+                "id": alt["id"],
+            },
+        ],
+    )
+    assert moved.status_code == 400, moved.text
+    assert "той же позиции" in moved.json()["detail"]
+
+
+def test_removing_main_promotes_alternative(
     client: TestClient, login, catalog: dict[str, Any], db_session: Session
 ) -> None:
     plan, main, alternative = _with_alternative(client, login, catalog, db_session)
-    # Основную строку нельзя убрать, оставив альтернативу без неё.
+    # Прислать альтернативу без основной строки нельзя: её сначала надо повысить.
     kept_alt = _save(
         client,
         plan["id"],
@@ -755,6 +1221,13 @@ def test_alternative_goes_with_main(
     assert kept_alt.status_code == 400, kept_alt.text
     assert "Основная строка" in kept_alt.json()["detail"]
 
+    # Убираем основную строку целиком (альтернативы не присылаем) — одна из них
+    # становится основной и сохраняет позицию.
     assert _save(client, plan["id"], []).status_code == 200
     body = client.get(f"/api/v1/purchase-plans/{plan['id']}").json()
-    assert body["items"] == []
+    assert len(body["items"]) == 1
+    promoted = body["items"][0]
+    assert promoted["id"] == alternative["id"]
+    assert promoted["alternative_of_id"] is None
+    assert promoted["quantity"] == "30.000"
+    assert promoted["product_id"] == str(catalog["raw2"].id)

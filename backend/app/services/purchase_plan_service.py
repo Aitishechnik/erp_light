@@ -401,6 +401,7 @@ def _items_out(
     plan: PurchasePlan,
     source: dict[uuid.UUID, NeedPosition],
     arrivals: dict[uuid.UUID, list[tuple[date, Decimal]]] | None = None,
+    snapshot: dict[uuid.UUID, NeedPosition] | None = None,
 ) -> list[PurchasePlanItemOut]:
     arrivals_by_item = arrivals or {}
     items = sorted(
@@ -411,22 +412,6 @@ def _items_out(
             row.product.name,
         ),
     )
-
-    schedules: dict[uuid.UUID, list[need.MonthPlan]] = {}
-    fact_by_item: dict[uuid.UUID, Decimal] = {}
-    fact_months_by_item: dict[uuid.UUID, dict[int, Decimal]] = {}
-    for item in items:
-        position = source.get(item.sales_product_id)
-        if item.alternative_of_id is None:
-            schedules[item.id] = need.split_annual(
-                item.quantity,
-                position.months if position else {},
-                item.delivery_days,
-                plan.year,
-            )
-        rows = arrivals_by_item.get(item.id, [])
-        fact_by_item[item.id] = sum((value for _day, value in rows), ZERO)
-        fact_months_by_item[item.id] = _months_of(rows, plan.year)
 
     # Семейство: основное сырьё (одно и то же у нескольких позиций — общий
     # котёл) и альтернативы, которые закрывают эту же потребность.
@@ -441,6 +426,22 @@ def _items_out(
     families: dict[uuid.UUID, list[PurchasePlanItem]] = {}
     for item in mains:
         families.setdefault(item.product_id, []).append(item)
+
+    schedules: dict[uuid.UUID, list[need.MonthPlan]] = {}
+    fact_by_item: dict[uuid.UUID, Decimal] = {}
+    fact_months_by_item: dict[uuid.UUID, dict[int, Decimal]] = {}
+    for item in items:
+        position = source.get(item.sales_product_id) or (snapshot or {}).get(item.sales_product_id)
+        if item.alternative_of_id is None:
+            schedules[item.id] = need.split_annual(
+                item.quantity,
+                position.months if position else {},
+                item.delivery_days,
+                plan.year,
+            )
+        rows = arrivals_by_item.get(item.id, [])
+        fact_by_item[item.id] = sum((value for _day, value in rows), ZERO)
+        fact_months_by_item[item.id] = _months_of(rows, plan.year)
 
     coverage_by_item: dict[uuid.UUID, list[need.CoverageEntry]] = {}
     used_by_alternative: dict[uuid.UUID, dict[int, Decimal]] = {}
@@ -527,6 +528,7 @@ def _items_out(
 
 def _serialize(db: Session, plan: PurchasePlan) -> PurchasePlanOut:
     source = _source_positions(db, plan)
+    snapshot = need.snapshot_positions(plan.source_snapshot)
     item_ids = [item.id for item in plan.items]
     arrivals = _arrivals(db, item_ids)
     return PurchasePlanOut(
@@ -543,7 +545,7 @@ def _serialize(db: Session, plan: PurchasePlan) -> PurchasePlanOut:
         editable_months=editable_months(plan.year),
         source=_source_out(db, plan),
         positions=_positions_out(db, plan, source),
-        items=_items_out(plan, source, arrivals),
+        items=_items_out(plan, source, arrivals, snapshot),
     )
 
 
@@ -589,6 +591,37 @@ def _require_annual(db: Session, year: int) -> SalesPlanApproval:
     return approval
 
 
+def auto_plan_item_id(db: Session, product_id: uuid.UUID, day: date) -> uuid.UUID | None:
+    """Строка утверждённого плана того же сырья и года — для авто-привязки.
+
+    Новое поступление не должно ждать ручной привязки: при загрузке позиций
+    файлом «Партия» строка сама встаёт на первую строку плана этого сырья за
+    год поступления (основную, если она есть). Привязку можно снять или
+    сменить в карточке — тогда она больше не ставится автоматически.
+    """
+    plan_id = db.execute(
+        select(PurchasePlan.id)
+        .where(PurchasePlan.year == day.year, PurchasePlan.status == "approved")
+        .with_for_update()
+    ).scalar_one_or_none()
+    if plan_id is None:
+        return None
+    plan = (
+        db.execute(
+            select(PurchasePlan)
+            .where(PurchasePlan.id == plan_id)
+            .options(selectinload(PurchasePlan.items))
+        )
+        .scalars()
+        .one()
+    )
+    candidates = [item for item in plan.items if item.product_id == product_id]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item.alternative_of_id is not None, str(item.id)))
+    return candidates[0].id
+
+
 def create_plan(db: Session, user: User, payload: PurchasePlanCreate) -> PurchasePlanOut:
     _check_editor(user)
     approval = _require_annual(db, payload.year)
@@ -631,6 +664,7 @@ def update_items(
     user: User,
     plan_id: uuid.UUID,
     items: list[PurchasePlanItemIn],
+    version: datetime | None = None,
 ) -> PurchasePlanOut:
     """Сохранить строки: существующие обновляются на месте, новые добавляются.
 
@@ -645,12 +679,22 @@ def update_items(
     if plan.status != "draft":
         raise PlanError("План на проверке или утверждён — правки недоступны", status_code=409)
     _check_year_editable(plan)
+    if version is not None:
+        current = plan.updated_at
+        seen_version = version if version.tzinfo is not None else version.replace(tzinfo=UTC)
+        if current is not None and current.astimezone(UTC) != seen_version.astimezone(UTC):
+            raise PlanError(
+                "План изменился, пока вы его правили — обновите страницу и повторите",
+                status_code=409,
+            )
 
     allowed = _allowed_positions(db, plan)
     existing = {row.id: row for row in plan.items}
     linked = set(_linked_counts(db, list(existing)))
     prepared: list[tuple[PurchasePlanItemIn, int, PurchasePlanItem | None]] = []
     seen: set[uuid.UUID] = set()
+    product_units: dict[uuid.UUID, str] = {}
+    content: set[tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID | None]] = set()
     for item in items:
         stored: PurchasePlanItem | None = None
         if item.id is not None:
@@ -668,23 +712,47 @@ def update_items(
             raise PlanError("Количество должно быть больше нуля")
         if item.price_rub is not None and item.price_rub < 0:
             raise PlanError("Цена не может быть отрицательной")
-        _check_product(db, item.product_id)
+        product = _check_product(db, item.product_id)
+        product_units[item.product_id] = product.unit
         country = _check_country(db, item.country_id)
+        content_key = (
+            item.sales_product_id,
+            item.product_id,
+            item.country_id,
+            item.alternative_of_id,
+        )
+        if content_key in content:
+            raise PlanError(
+                "Такая строка уже есть — объедините количество в одной строке", status_code=400
+            )
+        content.add(content_key)
         prepared.append((item, country.delivery_days, stored))
 
+    # Проверяем альтернативы по тому состоянию, которое сохраняем, а не по
+    # старому из БД: иначе в одном запросе можно сделать цикл, вложенность или
+    # перенести основную строку в другую позицию, оставив альтернативу.
+    requested_by_id = {item.id: item for item, _days, _stored in prepared if item.id is not None}
     for item, _, _stored in prepared:
         if item.alternative_of_id is None:
             continue
-        main = existing.get(item.alternative_of_id)
-        if main is None or main.id not in seen:
+        main = requested_by_id.get(item.alternative_of_id)
+        if main is None:
             raise PlanError(
                 "Основная строка для альтернативы не найдена — обновите план", status_code=400
             )
+        if main.id == item.id:
+            raise PlanError("Альтернатива не может ссылаться на саму себя", status_code=400)
         if main.alternative_of_id is not None:
             raise PlanError("Альтернатива не может быть основной строкой", status_code=400)
         if main.sales_product_id != item.sales_product_id:
             raise PlanError(
                 "Альтернатива добавляется к строке той же позиции плана продаж", status_code=400
+            )
+        if product_units.get(main.product_id) != product_units.get(item.product_id):
+            raise PlanError(
+                "У основной строки и альтернативы разные единицы измерения — "
+                "складывать их в один котёл нельзя",
+                status_code=400,
             )
 
     for item, _, stored in prepared:
@@ -703,13 +771,9 @@ def update_items(
             )
 
     removed = [row for row_id, row in existing.items() if row_id not in seen]
-    # Альтернатива уходит вместе с основной строкой: сначала снимаем ссылки.
-    removed_alternatives = [row for row in removed if row.alternative_of_id is not None]
-    for row in removed_alternatives:
-        db.delete(row)
-    if removed_alternatives:
-        db.flush()
-    removed = [row for row in removed if row.alternative_of_id is None]
+    # Убирать можно только строки без привязок — и основные, и альтернативы.
+    # Раньше альтернативы удалялись без проверки, и ссылка поступления молча
+    # обнулялась (ON DELETE SET NULL), а факт исчезал из плана.
     if removed:
         counts = _linked_counts(db, [row.id for row in removed])
         if counts:
@@ -720,8 +784,39 @@ def update_items(
                 "в карточках поступлений",
                 status_code=409,
             )
-        for row in removed:
-            db.delete(row)
+    # Основную строку убрали, а альтернативы остались — одна из них становится
+    # основной, остальные переходят под неё. Так потребность не исчезает вместе
+    # с убранным сырьём; объём убранной строки переходит к замене (если единицы
+    # совпадают), иначе остаётся объём альтернативы.
+    promoted_ids: set[uuid.UUID] = set()
+    for removed_main in [row for row in removed if row.alternative_of_id is None]:
+        alternatives = [row for row in plan.items if row.alternative_of_id == removed_main.id]
+        if not alternatives or any(row.id in seen for row in alternatives):
+            continue
+        promoted = sorted(
+            alternatives, key=lambda row: (row.country.name, row.product.name, str(row.id))
+        )[0]
+        promoted.alternative_of_id = None
+        # Заменяем потребность, а не только ярлык: объём убранной основной строки
+        # переходит к альтернативе. Если единицы разные, объём не переносим.
+        if promoted.product.unit == removed_main.product.unit:
+            promoted.quantity = removed_main.quantity
+        for row in alternatives:
+            if row.id != promoted.id:
+                row.alternative_of_id = promoted.id
+        promoted_ids.update(row.id for row in alternatives)
+
+    removed = [row for row in removed if row.id not in promoted_ids]
+    # Альтернатива уходит вместе с основной строкой: сначала снимаем ссылки.
+    removed_alternatives = [row for row in removed if row.alternative_of_id is not None]
+    for row in removed_alternatives:
+        db.delete(row)
+    if removed_alternatives:
+        db.flush()
+    removed = [row for row in removed if row.alternative_of_id is None]
+    for row in removed:
+        db.delete(row)
+    if removed:
         db.flush()
 
     for item, delivery_days, stored in prepared:
@@ -743,12 +838,17 @@ def update_items(
         stored.alternative_of_id = item.alternative_of_id
         stored.sales_product_id = item.sales_product_id
         stored.product_id = item.product_id
+        country_changed = stored.country_id != item.country_id
         stored.country_id = item.country_id
         stored.quantity = item.quantity
         stored.price_rub = item.price_rub
-        stored.delivery_days = delivery_days
+        # Срок доставки — снимок: правка справочника не переписывает строку.
+        # Меняем его только вместе со страной.
+        if country_changed:
+            stored.delivery_days = delivery_days
         stored.notes = item.notes
 
+    plan.updated_at = _now()
     audit_service.record(
         db,
         actor=user,
@@ -867,6 +967,11 @@ def acknowledge_source(db: Session, user: User, plan_id: uuid.UUID) -> PurchaseP
     _lock(db, plan_id)
     plan = _require(db, plan_id)
     _check_editor(user)
+    if plan.status == "approved":
+        raise PlanError(
+            "План утверждён — сначала запросите пересмотр и верните его в работу",
+            status_code=409,
+        )
     state, approval = need.annual_state(db, plan.year)
     if state != "ok":
         raise PlanError(

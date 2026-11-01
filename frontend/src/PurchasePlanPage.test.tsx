@@ -395,6 +395,87 @@ describe('PurchasePlanPage', () => {
     )
   })
 
+  it('излишек одной позиции закрывает потребность другой позиции', async () => {
+    const january: PurchasePlanPosition = {
+      ...POSITION,
+      total: '100.000',
+      months: [{ month: 1, quantity: '100.000' }],
+    }
+    const february: PurchasePlanPosition = {
+      ...POSITION,
+      product_id: 'fin-2',
+      code: 'FIN-2',
+      name: 'Финики',
+      total: '100.000',
+      months: [{ month: 2, quantity: '100.000' }],
+    }
+    mockApi(
+      routes([
+        plan({
+          positions: [january, february],
+          items: [
+            planItem({
+              id: 'item-1',
+              quantity: '10.000',
+              fact_quantity: '20.000',
+              fact_months: [{ month: 1, quantity: '20.000' }],
+            }),
+            planItem({
+              id: 'item-2',
+              sales_product_id: 'fin-2',
+              sales_product_name: 'Финики',
+              quantity: '10.000',
+              fact_quantity: '0',
+              fact_months: [],
+            }),
+          ],
+        }),
+      ]),
+    )
+    render(<PurchasePlanPage user={DIRECTOR} />)
+
+    await screen.findByTestId('purchase-row-item-1')
+    const table = screen.getByTestId('purchase-table')
+    // Январский приход закрыл январь и оставил 10 кг на февраль второй позиции.
+    expect(screen.getAllByTestId('schedule-group')).toHaveLength(2)
+    expect(table).toHaveTextContent('перекрыто 20 из 20')
+    expect(table).not.toHaveTextContent('докупить')
+  })
+
+  it('приход в месяц без потребности закрывает следующий месяц', async () => {
+    const user = userEvent.setup()
+    const position: PurchasePlanPosition = {
+      ...POSITION,
+      total: '300.000',
+      months: [
+        { month: 1, quantity: '100.000' },
+        { month: 3, quantity: '200.000' },
+      ],
+    }
+    mockApi(
+      routes([
+        plan({
+          positions: [position],
+          items: [
+            planItem({
+              fact_quantity: '15.000',
+              fact_months: [{ month: 2, quantity: '15.000' }],
+            }),
+          ],
+        }),
+      ]),
+    )
+    render(<PurchasePlanPage user={DIRECTOR} />)
+
+    await screen.findByTestId('purchase-row-item-1')
+    await user.click(screen.getByRole('button', { name: 'Показать таблицей' }))
+    const detail = await screen.findByTestId('schedule-table')
+    // Февральский приход не закрыл январь, но уменьшил март: 15 из 20.
+    expect(detail).toHaveTextContent('январь')
+    expect(detail).toHaveTextContent('март')
+    expect(detail).toHaveTextContent('75 %')
+  })
+
   it('альтернативное сырьё закрывает потребность основной строки', async () => {
     mockApi(
       routes([
@@ -615,6 +696,28 @@ describe('PurchasePlanPage', () => {
     await user.click(screen.getByTestId('source-request-revision'))
     await waitFor(() => {
       expect(calls().some((url) => url.includes('/request-revision'))).toBe(true)
+    })
+  })
+
+  it('перед отправкой сохраняет правки с экрана', async () => {
+    const user = userEvent.setup()
+    const submitted = plan({ status: 'on_review', status_title: 'На проверке' })
+    mockApi(
+      routes([plan()], {
+        'PUT /api/v1/purchase-plans/plan-1/items': { body: plan() },
+        'POST /api/v1/purchase-plans/plan-1/submit': { body: submitted },
+      }),
+    )
+    render(<PurchasePlanPage user={DIRECTOR} />)
+
+    const quantity = await screen.findByLabelText('Количество FIN-1 1')
+    await user.clear(quantity)
+    await user.type(quantity, '35')
+    await user.click(screen.getByRole('button', { name: 'Отправить на согласование' }))
+
+    await waitFor(() => {
+      expect(putBodies().some((body) => body.includes('"quantity":"35"'))).toBe(true)
+      expect(calls().some((url) => url.endsWith('/submit'))).toBe(true)
     })
   })
 

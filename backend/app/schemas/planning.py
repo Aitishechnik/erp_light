@@ -82,8 +82,15 @@ class PurchasePlanItemIn(BaseModel):
     sales_product_id: uuid.UUID = Field(description="Позиция годового плана продаж")
     product_id: uuid.UUID = Field(description="Закупаемое сырьё")
     country_id: uuid.UUID = Field(description="Страна происхождения: срок доставки")
-    quantity: Decimal = Field(gt=0, description="Годовое количество")
-    price_rub: Decimal | None = Field(default=None, ge=0, description="Цена за единицу, ₽")
+    quantity: Decimal = Field(
+        gt=0, le=Decimal("999999999999.999"), description="Годовое количество"
+    )
+    price_rub: Decimal | None = Field(
+        default=None,
+        ge=0,
+        le=Decimal("9999999999999.99"),
+        description="Цена за единицу, ₽",
+    )
     notes: str | None = Field(default=None, max_length=255)
 
 
@@ -94,6 +101,10 @@ class PurchasePlanCreate(BaseModel):
 
 class PurchasePlanItemsIn(BaseModel):
     items: list[PurchasePlanItemIn] = []
+    version: datetime | None = Field(
+        default=None,
+        description="updated_at плана, который видел клиент: защита от потери правок",
+    )
 
 
 class PurchasePlanRejectIn(BaseModel):

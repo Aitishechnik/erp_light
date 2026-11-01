@@ -59,7 +59,7 @@ def update_items(
 ) -> PurchasePlanOut:
     """Полная замена строк плана: позиция продаж, сырьё, страна и годовое количество."""
     try:
-        return service.update_items(db, user, plan_id, payload.items)
+        return service.update_items(db, user, plan_id, payload.items, version=payload.version)
     except PlanError as exc:
         raise _fail(exc) from exc
 

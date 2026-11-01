@@ -112,15 +112,152 @@ def test_link_requires_the_same_raw_material(
     assert "другое сырьё" in response.json()["detail"]
 
 
-def test_import_of_items_drops_the_link(client: TestClient, login, catalog: dict[str, Any]) -> None:
+def test_import_of_items_links_the_line_automatically(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
     data = _approved_plan(client, login, catalog)
-    body = put_batch(client, _receipt("ИТ-1", plan_item_id=str(data["line"]["id"])))
+    body = put_batch(
+        client,
+        _receipt("ИТ-1", plan_item_id=str(data["line"]["id"]), when=f"{YEAR}-01-15"),
+    )
     assert body["items"][0]["purchase_plan_item_id"]
 
     response = upload_items(client, body["id"], part_row(1, "Арахис", "20"))
     assert response.status_code == 200, response.text
-    # Строки поступления пересозданы — привязку нужно поставить заново.
+    # Строки пересозданы, но привязка восстановлена автоматически по сырью и году.
+    assert response.json()["batch"]["items"][0]["purchase_plan_item_id"] == data["line"]["id"]
+
+    # И этот приход сразу участвует в покрытии, без ручной привязки.
+    fact = _plan(client, data["plan"]["id"])["items"][0]
+    assert Decimal(fact["fact_quantity"]) == Decimal("20.000")
+    assert [(row["month"], row["covered"]) for row in fact["schedule"]] == [
+        (1, "10.000"),
+        (2, "10.000"),
+    ]
+    assert fact["schedule"][1]["remaining"] == "10.000"
+
+
+def test_import_does_not_link_without_approved_plan(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    saved = _save(client, plan["id"], [_item(catalog, quantity="30")])
+    assert saved.status_code == 200, saved.text
+
+    body = put_batch(client, _receipt("ИТ-1", when=f"{YEAR}-01-15"))
+    response = upload_items(client, body["id"], part_row(1, "Арахис", "20"))
+    assert response.status_code == 200, response.text
+    # План ещё черновик — автоматически не привязываем.
     assert response.json()["batch"]["items"][0]["purchase_plan_item_id"] is None
+
+
+def test_import_does_not_link_other_raw(client: TestClient, login, catalog: dict[str, Any]) -> None:
+    data = _approved_plan(client, login, catalog)
+    body = put_batch(client, _receipt("ИТ-1", when=f"{YEAR}-01-15"))
+    response = upload_items(client, body["id"], part_row(1, "Кокос", "20"))
+    assert response.status_code == 200, response.text
+    assert response.json()["batch"]["items"][0]["purchase_plan_item_id"] is None
+    assert _plan(client, data["plan"]["id"])["items"][0]["fact_quantity"] == "0"
+
+
+def test_import_prefers_main_line_for_the_raw(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    saved = _save(
+        client,
+        plan["id"],
+        [
+            _item(catalog, sales="fin", raw="raw", quantity="30", price="500.00"),
+            _item(
+                catalog,
+                sales="fin",
+                raw="raw2",
+                country="china",
+                quantity="20",
+                price="500.00",
+            ),
+        ],
+    )
+    assert saved.status_code == 200, saved.text
+    first, second = saved.json()["items"]
+    main_id = next(
+        row["id"] for row in (first, second) if row["product_id"] == str(catalog["raw"].id)
+    )
+    other_id = next(row["id"] for row in (first, second) if row["id"] != main_id)
+    with_alt = _save(
+        client,
+        plan["id"],
+        [
+            {
+                **_item(catalog, sales="fin", raw="raw", quantity="30", price="500.00"),
+                "id": main_id,
+            },
+            {
+                **_item(
+                    catalog,
+                    sales="fin",
+                    raw="raw2",
+                    country="china",
+                    quantity="20",
+                    price="500.00",
+                ),
+                "id": other_id,
+            },
+            _item(
+                catalog,
+                sales="fin",
+                raw="raw",
+                country="china",
+                quantity="10",
+                price="500.00",
+                alternative_of=other_id,
+            ),
+        ],
+    )
+    assert with_alt.status_code == 200, with_alt.text
+    login("purchase")
+    assert client.post(f"/api/v1/purchase-plans/{plan['id']}/submit").status_code == 200
+    login("executive")
+    assert client.post(f"/api/v1/purchase-plans/{plan['id']}/approve").status_code == 200
+    login("purchase")
+
+    body = put_batch(client, _receipt("ИТ-1", when=f"{YEAR}-01-15"))
+    response = upload_items(client, body["id"], part_row(1, "Арахис", "20"))
+    assert response.status_code == 200, response.text
+    # Для RAW-1 есть основная строка и альтернатива на ту же позицию: берём основную.
+    assert response.json()["batch"]["items"][0]["purchase_plan_item_id"] == main_id
+
+
+def test_link_rejects_plan_of_another_year(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    data = _approved_plan(client, login, catalog)
+    response = put_batch(
+        client,
+        _receipt("ИТ-1", plan_item_id=str(data["line"]["id"]), when=f"{YEAR - 1}-03-01"),
+        expect=400,
+    )
+    assert "другого года" in response.json()["detail"]
+
+
+def test_link_allows_boundary_december_and_january(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    data = _approved_plan(client, login, catalog)
+    line_id = str(data["line"]["id"])
+    december = put_batch(
+        client,
+        _receipt("ИТ-1", plan_item_id=line_id, when=f"{YEAR - 1}-12-20"),
+    )
+    assert december["items"][0]["purchase_plan_item_id"] == line_id
+    january = put_batch(
+        client,
+        _receipt("ИТ-2", plan_item_id=line_id, when=f"{YEAR + 1}-01-15"),
+    )
+    assert january["items"][0]["purchase_plan_item_id"] == line_id
 
 
 def test_link_can_be_changed_after_customs(

@@ -942,10 +942,11 @@ export function createPurchasePlan(year: number): Promise<PurchasePlan> {
 export function savePurchasePlanItems(
   planId: string,
   items: PurchasePlanItemIn[],
+  version: string | null = null,
 ): Promise<PurchasePlan> {
   return request<PurchasePlan>(`/api/v1/purchase-plans/${planId}/items`, {
     method: 'PUT',
-    body: JSON.stringify({ items }),
+    body: JSON.stringify({ items, version }),
   })
 }
 

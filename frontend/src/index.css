@@ -3042,3 +3042,7 @@ button.primary:disabled,
 .purchase-table .sched-table tr.soon td {
   background: #fffaf2;
 }
+
+.plan-notes {
+  white-space: pre-line;
+}

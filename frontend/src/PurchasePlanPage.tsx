@@ -62,6 +62,7 @@ type DraftRow = {
   quantity: string
   priceRub: string
   notes: string
+  unit: string
   /** Поступило по связанным поступлениям и процент исполнения. */
   factQuantity: string
   factShare: string
@@ -241,10 +242,18 @@ function coverDrafts(
     }
     for (const row of familyAlts) used.set(row.key, { total: 0, months: new Map() })
 
-    const monthSet = new Set<number>()
+    const needMonths = new Set<number>()
     family.forEach((row) => {
       entries.get(row.key)?.forEach((entry) => {
-        monthSet.add(entry.month)
+        needMonths.add(entry.month)
+      })
+    })
+    // Приход может прийти в месяц без потребности: он ждёт ближайшую потребность,
+    // поэтому такие месяцы тоже участвуют в расчёте.
+    const monthSet = new Set(needMonths)
+    rows.forEach((row) => {
+      fact.get(row.key)?.forEach((_quantity, month) => {
+        monthSet.add(month)
       })
     })
     const months = [...monthSet].sort((left, right) => left - right)
@@ -260,15 +269,17 @@ function coverDrafts(
       const needs = participants.map((item) => item.entry.quantityMilli)
       const needTotal = needs.reduce((sum, need) => sum + need, 0)
 
-      // Сначала основное сырьё, затем альтернативы — только на остаток месяца.
-      const mainAvail = participants.map((item) => available.get(item.row.key) ?? 0)
+      // Сначала основное сырьё. Котёл общий: запас любой основной строки может
+      // закрыть потребность другой, даже если у неё самой в этом месяце
+      // потребности нет.
+      const mainAvail = family.map((row) => available.get(row.key) ?? 0)
       const taken = Math.min(
         needTotal,
         mainAvail.reduce((sum, value) => sum + value, 0),
       )
       const spentMain = allocateShare(mainAvail, taken)
-      participants.forEach((item, index) => {
-        available.set(item.row.key, (available.get(item.row.key) ?? 0) - (spentMain[index] ?? 0))
+      family.forEach((row, index) => {
+        available.set(row.key, (available.get(row.key) ?? 0) - (spentMain[index] ?? 0))
       })
 
       const shortfall = needTotal - taken
@@ -362,21 +373,23 @@ function extraFacts(row: DraftRow, months: Set<number>): string {
 }
 
 /** Строка «по сырью»: приход общий, поэтому показываем котёл целиком. */
-function GroupNote({ group, year }: { group: GroupTotals; year: number }) {
+function GroupNote({ group, year, unit }: { group: GroupTotals; year: number; unit: string }) {
   const share = group.need > 0 ? (group.covered / group.need) * 100 : 0
   const rest =
-    group.remaining > 0 ? `докупить ${formatQuantity(group.remaining.toFixed(3))} кг` : ''
+    group.remaining > 0 ? `докупить ${formatQuantity(group.remaining.toFixed(3))} ${unit}` : ''
   const carry =
-    group.carry > 0 ? `излишек ${formatQuantity(group.carry.toFixed(3))} на ${year + 1}` : ''
+    group.carry > 0
+      ? `излишек ${formatQuantity(group.carry.toFixed(3))} ${unit} на ${year + 1}`
+      : ''
   const alternative =
     group.alternativeUsed > 0
-      ? `в т. ч. альтернативой ${formatQuantity(group.alternativeUsed.toFixed(3))} кг`
+      ? `в т. ч. альтернативой ${formatQuantity(group.alternativeUsed.toFixed(3))} ${unit}`
       : ''
   return (
     <span className="sched-group" data-testid="schedule-group">
       <span className="sched-group-line">
         по сырью ({group.positions} поз.): перекрыто {formatQuantity(group.covered.toFixed(3))} из{' '}
-        {formatQuantity(group.need.toFixed(3))} кг ({formatQuantity(share.toFixed(1))} %)
+        {formatQuantity(group.need.toFixed(3))} {unit} ({formatQuantity(share.toFixed(1))} %)
       </span>
       <span className="sched-group-line">
         {[rest, carry, alternative].filter(Boolean).join(' · ')}
@@ -390,20 +403,22 @@ function ScheduleTable({
   rows,
   year,
   extra,
+  unit,
 }: {
   rows: ScheduleRow[]
   year: number
   extra: string
+  unit: string
 }) {
   return (
     <table className="sched-table" data-testid="schedule-table">
       <thead>
         <tr>
           <th>Месяц потребности</th>
-          <th>Нужно, кг</th>
+          <th>Нужно, {unit}</th>
           <th>Заказать к</th>
           <th>Перекрыто</th>
-          <th>Докупить, кг</th>
+          <th>Докупить, {unit}</th>
         </tr>
       </thead>
       <tbody>
@@ -422,7 +437,7 @@ function ScheduleTable({
               {row.covered > 0 ? (
                 <span
                   className={row.share >= 100 ? 'cover-line done' : 'cover-line'}
-                  title={`Перекрыто ${formatQuantity(row.covered.toFixed(3))} кг`}
+                  title={`Перекрыто ${formatQuantity(row.covered.toFixed(3))} ${unit}`}
                 >
                   {formatQuantity(row.share.toFixed(1))} %
                 </span>
@@ -455,12 +470,14 @@ function ScheduleView({
   mode,
   year,
   extra,
+  unit,
   showCarry = true,
 }: {
   rows: ScheduleRow[]
   mode: ScheduleMode
   year: number
   extra: string
+  unit: string
   /** Излишек одной строки не показываем: по сырью он общий, его видно в сводке. */
   showCarry?: boolean
 }) {
@@ -489,7 +506,9 @@ function ScheduleView({
               <span className="q-title">
                 {QUARTER_TITLES[index]} {year}
               </span>
-              <span className="q-sum">{formatQuantity(need.toFixed(3))} кг</span>
+              <span className="q-sum">
+                {formatQuantity(need.toFixed(3))} {unit}
+              </span>
               <span
                 className={
                   first.entry.overdue ? 'q-order overdue' : first.soon ? 'q-order soon' : 'q-order'
@@ -506,8 +525,8 @@ function ScheduleView({
                 {remaining > 0
                   ? `перекрыто ${formatQuantity(covered.toFixed(3))} · докупить ${formatQuantity(
                       remaining.toFixed(3),
-                    )} кг`
-                  : `перекрыто полностью (${formatQuantity(covered.toFixed(3))} кг)`}
+                    )} ${unit}`
+                  : `перекрыто полностью (${formatQuantity(covered.toFixed(3))} ${unit})`}
               </span>
             </span>
           )
@@ -522,7 +541,7 @@ function ScheduleView({
       {nearest ? (
         <span className="sched-line">
           Ближайший заказ: <b>к {orderDate(nearest)}</b> —{' '}
-          {formatQuantity(nearest.remaining.toFixed(3))} кг
+          {formatQuantity(nearest.remaining.toFixed(3))} {unit}
           <span className="sched-need"> (потребность — {needMonth(nearest, year)})</span>
         </span>
       ) : (
@@ -530,8 +549,8 @@ function ScheduleView({
       )}
       {showCarry && carry > 0 && last ? (
         <span className="sched-carry">
-          излишек после {needMonth(last, year)} — {formatQuantity(carry.toFixed(3))} кг, переносим
-          на {year + 1} год
+          излишек после {needMonth(last, year)} — {formatQuantity(carry.toFixed(3))} {unit},
+          переносим на {year + 1} год
         </span>
       ) : null}
       {extraLine}
@@ -553,6 +572,7 @@ function draftsFromPlan(plan: PurchasePlan): DraftRow[] {
     quantity: trimZeros(item.quantity),
     priceRub: item.price_rub === null ? '' : trimZeros(item.price_rub),
     notes: item.notes ?? '',
+    unit: item.unit,
     factQuantity: item.fact_quantity,
     factShare: item.fact_share,
     factMonths: item.fact_months ?? [],
@@ -717,7 +737,8 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
   }
 
   const removeRow = (key: string) => {
-    // Альтернативы уходят вместе с основной строкой: без неё они бессмысленны.
+    // Альтернативы не отправляем вместе с основной: сервер повысит одну из них
+    // до основной, чтобы потребность не исчезла вместе с убранным сырьём.
     setDrafts((current) => current.filter((row) => row.key !== key && row.alternativeOfId !== key))
   }
 
@@ -737,6 +758,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
         quantity: '',
         priceRub: '',
         notes: '',
+        unit: '',
         factQuantity: '0',
         factShare: '0',
         factMonths: [],
@@ -762,6 +784,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
         quantity: '',
         priceRub: '',
         notes: '',
+        unit: main.unit,
         factQuantity: '0',
         factShare: '0',
         factMonths: [],
@@ -808,7 +831,8 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
   const save = () => {
     if (!plan) return
     const items = collectItems()
-    if (items) void run(() => savePurchasePlanItems(plan.id, items), 'План сохранён')
+    if (items)
+      void run(() => savePurchasePlanItems(plan.id, items, plan.updated_at), 'План сохранён')
   }
 
   const submit = () => {
@@ -825,7 +849,14 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
       setError('Сначала примите изменения плана продаж к сведению')
       return
     }
-    void run(() => submitPurchasePlan(plan.id), 'План отправлен на согласование')
+    const items = collectItems()
+    if (!items) return
+    // Отправляем то, что на экране: сначала сохраняем строки, потом отправляем.
+    // Иначе несохранённые правки молча терялись, а отправлялась старая версия.
+    void run(async () => {
+      await savePurchasePlanItems(plan.id, items, plan.updated_at)
+      await submitPurchasePlan(plan.id)
+    }, 'План отправлен на согласование')
   }
 
   const goTo = (productId: string) => {
@@ -921,6 +952,12 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
             <span className="total">сумма: {formatMoney(totalAmount.toFixed(2))} ₽</span>
             {plan.approved_by_name ? <span>утвердил: {plan.approved_by_name}</span> : null}
           </div>
+
+          {plan.notes ? (
+            <p className="hint plan-notes" data-testid="plan-notes">
+              {plan.notes}
+            </p>
+          ) : null}
 
           {source ? (
             <>
@@ -1238,7 +1275,11 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                     <b>{row.productName || 'Сырьё'}</b>
                                     {row.countryName ? ` · ${row.countryName}` : ''}
                                     {wideGrouped && group ? (
-                                      <GroupNote group={group} year={plan.year} />
+                                      <GroupNote
+                                        group={group}
+                                        year={plan.year}
+                                        unit={row.unit || 'ед.'}
+                                      />
                                     ) : null}
                                   </div>
                                   <ScheduleView
@@ -1246,12 +1287,18 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                     mode="quarters"
                                     year={plan.year}
                                     extra={extraFacts(row, group?.months ?? monthsOf(schedule))}
+                                    unit={row.unit || 'ед.'}
                                     showCarry={!wideGrouped}
                                   />
                                 </>
                               ) : null}
                               {expanded ? (
-                                <ScheduleTable rows={rowSchedule} year={plan.year} extra="" />
+                                <ScheduleTable
+                                  rows={rowSchedule}
+                                  year={plan.year}
+                                  extra=""
+                                  unit={row.unit || 'ед.'}
+                                />
                               ) : null}
                             </td>
                           </tr>
@@ -1276,6 +1323,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                       updateRow(row.key, {
                                         productId: event.target.value,
                                         productName: chosen?.name ?? '',
+                                        unit: chosen?.unit ?? '',
                                       })
                                     }}
                                   >
@@ -1411,13 +1459,18 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                         mode="summary"
                                         year={plan.year}
                                         extra={extraFacts(row, group?.months ?? monthsOf(schedule))}
+                                        unit={row.unit || 'ед.'}
                                         showCarry={!grouped}
                                       />
                                     ) : (
                                       <span className="hint sched-below">график ниже</span>
                                     )}
                                     {scheduleMode === 'summary' && grouped && group ? (
-                                      <GroupNote group={group} year={plan.year} />
+                                      <GroupNote
+                                        group={group}
+                                        year={plan.year}
+                                        unit={row.unit || 'ед.'}
+                                      />
                                     ) : null}
                                     <button
                                       type="button"

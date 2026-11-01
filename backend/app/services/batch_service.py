@@ -348,10 +348,27 @@ def _lock_plan_item(db: Session, plan_item_id: uuid.UUID) -> PurchasePlanItem | 
     return db.get(PurchasePlanItem, plan_item_id, populate_existing=True)
 
 
+def _plan_year_fits(plan_year: int, day: date) -> bool:
+    """Год плана и дата поступления: тот же год или пограничный месяц.
+
+    Декабрь может закрывать январскую потребность следующего года, январь —
+    декабрьскую предыдущего. Остальные месяцы — только свой год, иначе приход
+    молча завысил бы декабрь чужого плана.
+    """
+    if day.year == plan_year:
+        return True
+    if day.month == 12 and plan_year == day.year + 1:
+        return True
+    return day.month == 1 and plan_year == day.year - 1
+
+
 def _resolve_plan_item(
-    db: Session, product_id: uuid.UUID, plan_item_id: uuid.UUID | None
+    db: Session,
+    product_id: uuid.UUID,
+    plan_item_id: uuid.UUID | None,
+    day: date,
 ) -> uuid.UUID | None:
-    """Проверить ссылку на строку плана: она должна быть про то же сырьё."""
+    """Проверить ссылку на строку плана: то же сырьё и подходящий год."""
     if plan_item_id is None:
         return None
     link = _lock_plan_item(db, plan_item_id)
@@ -359,6 +376,8 @@ def _resolve_plan_item(
         raise ValueError("Строка плана закупок не найдена — обновите карточку")
     if link.product_id != product_id:
         raise ValueError("Строка плана закупок — про другое сырьё")
+    if not _plan_year_fits(link.plan.year, day):
+        raise ValueError("Строка плана закупок — другого года: выберите план этого года")
     return link.id
 
 
@@ -370,7 +389,9 @@ def _items_expenses_payments(
         product = _resolve_product(
             db, item.product_code, item.product_name, item.product_kind, item.unit
         )
-        plan_item_id = _resolve_plan_item(db, product.id, item.purchase_plan_item_id)
+        plan_item_id = _resolve_plan_item(
+            db, product.id, item.purchase_plan_item_id, batch.batch_date
+        )
         db.add(
             BatchItem(
                 batch_id=batch.id,
@@ -427,6 +448,8 @@ def _update_plan_links(db: Session, batch: Batch, payload: BatchCreate) -> None:
             raise ValueError("Строка плана закупок не найдена — обновите карточку")
         if link.product_id != item.product_id:
             raise ValueError("Строка плана закупок — про другое сырьё")
+        if not _plan_year_fits(link.plan.year, batch.batch_date):
+            raise ValueError("Строка плана закупок — другого года: выберите план этого года")
         item.purchase_plan_item_id = link.id
 
 
