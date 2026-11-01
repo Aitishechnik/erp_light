@@ -49,6 +49,7 @@ const TASK: Task = {
   files_count: 0,
   last_report: null,
   is_blocked: false,
+  dynamic_start: false,
   blocked_by: [],
 }
 
@@ -327,6 +328,7 @@ describe('TasksPage — зависимости', () => {
     const blocked: TaskDetail = {
       ...DETAIL,
       is_blocked: true,
+      dynamic_start: true,
       blocked_by: ['задача «Собрать данные»'],
       dependencies: [
         {
@@ -350,6 +352,7 @@ describe('TasksPage — зависимости', () => {
     expect(screen.getByText('задача «Собрать данные»')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Отправить отчёт' })).not.toBeInTheDocument()
     expect(screen.getByText(/Отчёт можно будет прислать/)).toBeInTheDocument()
+    expect(screen.getByText(/Старт сдвигается вперёд/)).toBeInTheDocument()
   })
 
   it('добавляет зависимость от другой задачи', async () => {

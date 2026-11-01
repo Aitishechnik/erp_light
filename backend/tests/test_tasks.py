@@ -680,3 +680,82 @@ def test_only_creator_sets_dependency(client: TestClient, login: Link) -> None:
         json={"depends_on_task_id": prerequisite["id"]},
     )
     assert denied.status_code == 403
+
+
+def test_dependent_start_slides_until_master_done(client: TestClient, login: Link) -> None:
+    """Пока мастер в работе, старт зависимой плавает вместе с сегодняшним днём."""
+    master = new_task(
+        client,
+        login,
+        title="Заключить договор",
+        assignee=SALES,
+        start_date=day(-20),
+        due_date=day(40),
+    )
+    dependent = new_task(
+        client,
+        login,
+        title="Сделать первую отгрузку",
+        assignee=SALES2,
+        start_date=day(-5),
+        due_date=day(2),
+    )
+    login("commercial")
+    add_dependency(client, dependent["id"], {"depends_on_task_id": master["id"]})
+
+    login("sales2")
+    row = client.get(f"/api/v1/tasks/{dependent['id']}").json()
+    assert row["dynamic_start"] is True
+    assert row["start_date"] == day(0)
+    assert row["due_date"] == day(7)
+
+    # Мастер закрыт — старт фиксируется на сегодня и больше не сдвигается.
+    login("sales")
+    client.post(
+        f"/api/v1/tasks/{master['id']}/reports",
+        json={"kind": "final", "text": "Договор подписан", "progress": 100},
+    )
+    login("sales2")
+    frozen = client.get(f"/api/v1/tasks/{dependent['id']}").json()
+    assert frozen["is_blocked"] is False
+    assert frozen["dynamic_start"] is False
+    assert frozen["start_date"] == day(0)
+    assert frozen["due_date"] == day(7)
+
+    rows = client.get("/api/v1/messages").json()["rows"]
+    assert any("разблокирована" in row["summary"] for row in rows)
+
+
+def test_dependent_future_start_does_not_jump(client: TestClient, login: Link) -> None:
+    master = new_task(client, login, title="Мастер", assignee=SALES)
+    dependent = new_task(
+        client,
+        login,
+        title="Позже",
+        assignee=SALES2,
+        start_date=day(10),
+        due_date=day(17),
+    )
+    login("commercial")
+    add_dependency(client, dependent["id"], {"depends_on_task_id": master["id"]})
+    row = client.get(f"/api/v1/tasks/{dependent['id']}").json()
+    assert row["start_date"] == day(10)
+    assert row["dynamic_start"] is False
+
+
+def test_removing_dependency_freezes_start(client: TestClient, login: Link) -> None:
+    master = new_task(client, login, title="Мастер", assignee=SALES)
+    dependent = new_task(
+        client, login, title="Зависимая", assignee=SALES2, start_date=day(-3), due_date=day(4)
+    )
+    login("commercial")
+    blocked = add_dependency(client, dependent["id"], {"depends_on_task_id": master["id"]})
+    assert blocked["start_date"] == day(0)
+
+    dependency_id = blocked["dependencies"][0]["id"]
+    removed = client.delete(f"/api/v1/tasks/{dependent['id']}/dependencies/{dependency_id}")
+    assert removed.status_code == 200, removed.text
+    body = removed.json()
+    assert body["is_blocked"] is False
+    assert body["start_date"] == day(0)
+    assert body["due_date"] == day(7)

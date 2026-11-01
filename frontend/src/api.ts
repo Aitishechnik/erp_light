@@ -1330,6 +1330,7 @@ export type Task = {
   files_count: number
   last_report: TaskLastReport | null
   is_blocked: boolean
+  dynamic_start: boolean
   blocked_by: string[]
 }
 

@@ -160,6 +160,9 @@ class TaskOut(BaseModel):
     files_count: int
     last_report: TaskLastReportOut | None
     is_blocked: bool = Field(description="Ждёт завершения предшественника")
+    dynamic_start: bool = Field(
+        description="Старт сдвигается вперёд каждый день, пока предшественник не завершён"
+    )
     blocked_by: list[str] = Field(description="Кого именно ждёт")
 
 

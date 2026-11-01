@@ -229,13 +229,28 @@ def _last_report(task: Task) -> TaskLastReportOut | None:
     )
 
 
-def _overdue(task: Task) -> tuple[bool, int]:
+def _overdue(task: Task, due: date) -> tuple[bool, int]:
     if task.status in CLOSED_TASK_STATUSES:
         return False, 0
     today = _today()
-    if task.due_date >= today:
+    if due >= today:
         return False, 0
-    return True, (today - task.due_date).days
+    return True, (today - due).days
+
+
+def _effective_dates(task: Task, blocked: bool) -> tuple[date, date, int]:
+    """Пока задача ждёт мастера, её старт плавает: не раньше сегодняшнего дня.
+
+    Возвращает начало, окончание и сдвиг в днях относительно плана.
+    """
+    start, due = task.start_date, task.due_date
+    if not blocked:
+        return start, due, 0
+    today = _today()
+    if start >= today:
+        return start, due, 0
+    shift = (today - start).days
+    return today, due + timedelta(days=shift), shift
 
 
 def _dep_satisfied(dep: TaskDependency) -> bool:
@@ -268,6 +283,42 @@ def _blocked_by(task: Task) -> list[str]:
     return [_dep_label(dep) for dep in task.dependencies if not _dep_satisfied(dep)]
 
 
+def _freeze_start(db: Session, user: User, dependent: Task) -> None:
+    """Разблокировали задачу — фиксируем сегодняшний старт в плане."""
+    if dependent.status in CLOSED_TASK_STATUSES or _blocked_by(dependent):
+        return
+    _, _, shift = _effective_dates(dependent, True)
+    if shift <= 0:
+        return
+    dependent.start_date = dependent.start_date + timedelta(days=shift)
+    dependent.due_date = dependent.due_date + timedelta(days=shift)
+    for step in dependent.steps:
+        if step.is_done:
+            continue
+        step.start_date = step.start_date + timedelta(days=shift)
+        step.due_date = step.due_date + timedelta(days=shift)
+    _renumber(dependent)
+    dependent.updated_at = _now()
+    _record(
+        db,
+        user,
+        "task.updated",
+        dependent,
+        f"Задача «{dependent.title}» разблокирована: старт "
+        f"{dependent.start_date:%d.%m.%Y} — {dependent.due_date:%d.%m.%Y}",
+        audience=_audience(dependent.assignee),
+    )
+
+
+def _unfreeze_dependents(db: Session, user: User, master: Task) -> None:
+    """Мастер завершён: зависимые задачи фиксируют сегодняшний старт."""
+    ids = db.execute(
+        select(TaskDependency.task_id).where(TaskDependency.depends_on_task_id == master.id)
+    ).scalars()
+    for dependent_id in set(ids):
+        _freeze_start(db, user, _load(db, dependent_id))
+
+
 def _step_reported(task: Task, step: TaskStep) -> bool:
     return any(report.step_id == step.id for report in task.reports)
 
@@ -288,7 +339,9 @@ def _progress(task: Task) -> int:
 
 
 def _base(task: Task) -> dict[str, Any]:
-    is_overdue, days = _overdue(task)
+    blocked_by = _blocked_by(task)
+    start_date, due_date, shift = _effective_dates(task, bool(blocked_by))
+    is_overdue, days = _overdue(task, due_date)
     reports = _reports(task)
     today = _today()
     closed = task.status in CLOSED_TASK_STATUSES
@@ -299,8 +352,8 @@ def _base(task: Task) -> dict[str, Any]:
             TaskStepOut(
                 id=step.id,
                 title=step.title,
-                start_date=step.start_date,
-                due_date=step.due_date,
+                start_date=step.start_date + timedelta(days=shift),
+                due_date=step.due_date + timedelta(days=shift),
                 is_done=step.is_done,
                 position=step.position,
                 has_report=has_report,
@@ -319,8 +372,8 @@ def _base(task: Task) -> dict[str, Any]:
         "status": task.status,
         "status_title": TASK_STATUS_TITLES.get(task.status, task.status),
         "progress": _progress(task),
-        "start_date": task.start_date,
-        "due_date": task.due_date,
+        "start_date": start_date,
+        "due_date": due_date,
         "assignee_id": task.assignee_id,
         "assignee_name": task.assignee.full_name if task.assignee else "",
         "created_by_id": task.created_by_id,
@@ -331,8 +384,9 @@ def _base(task: Task) -> dict[str, Any]:
         "is_overdue": is_overdue,
         "days_overdue": days,
         "steps": steps,
-        "is_blocked": bool(_blocked_by(task)),
-        "blocked_by": _blocked_by(task),
+        "is_blocked": bool(blocked_by),
+        "dynamic_start": bool(blocked_by) and shift > 0,
+        "blocked_by": blocked_by,
         "reports_count": len(reports),
         "files_count": sum(len(report.files) for report in reports),
         "last_report": _last_report(task),
@@ -886,7 +940,9 @@ def delete_dependency(
     if dependency is None:
         raise TaskError("Зависимость не найдена", status_code=404)
     label = _dep_label(dependency)
-    db.delete(dependency)
+    task.dependencies.remove(dependency)
+    db.flush()
+    _freeze_start(db, user, task)
     task.updated_at = _now()
     _record(
         db,
@@ -952,6 +1008,7 @@ def add_report(db: Session, user: User, task_id: uuid.UUID, payload: TaskReportI
     task.updated_at = _now()
     task.reports.append(report)
     db.flush()
+    _unfreeze_dependents(db, user, task)
 
     creator = task.created_by
     if payload.kind == "final":
