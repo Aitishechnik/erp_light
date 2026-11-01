@@ -91,6 +91,10 @@ CATALOG: dict[str, EventSpec] = {
     "task.done": EventSpec("Задача выполнена", "critical", "task"),
     "task.reopened": EventSpec("Задача возвращена в работу", "critical", "task"),
     "task.deleted": EventSpec("Задача удалена", "critical", "task"),
+    "task.assignee_changed": EventSpec("Задача передана другому исполнителю", "info", "task"),
+    "task.dependency_cancelled": EventSpec("Мастер-задача отозвана", "info", "task"),
+    "task.dependency_reopened": EventSpec("Мастер-задача возвращена в работу", "info", "task"),
+    "task.dependency_removed": EventSpec("Зависимость снята", "info", "task"),
     "audit.cleanup_offered": EventSpec("Предложена очистка журнала", "critical", "audit"),
     "audit.cleanup_done": EventSpec("Журнал очищен", "critical", "audit"),
 }

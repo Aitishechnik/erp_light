@@ -12,7 +12,19 @@ import uuid
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, Uuid, func
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    Uuid,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -143,6 +155,10 @@ class TaskDependency(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    # Когда зависимость была выполнена и задача освободилась. После возврата
+    # мастера в работу такие зависимости остаются выполненными: задача уже
+    # стартовала, откатывать её сроки нельзя.
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     task: Mapped[Task] = relationship(back_populates="dependencies", foreign_keys=[task_id])
     depends_on: Mapped[Task] = relationship(foreign_keys=[depends_on_task_id], lazy="joined")
@@ -153,6 +169,16 @@ class TaskReport(Base):
     """Отчёт менеджера по задаче: промежуточный или финальный."""
 
     __tablename__ = "task_reports"
+    __table_args__ = (
+        # Один промежуточный отчёт на этап: параллельный второй не пройдёт.
+        Index(
+            "uq_task_reports_interim_step",
+            "task_id",
+            "step_id",
+            unique=True,
+            postgresql_where=text("kind = 'interim' AND step_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     task_id: Mapped[uuid.UUID] = mapped_column(

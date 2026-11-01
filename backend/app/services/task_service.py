@@ -20,7 +20,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import UploadFile
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import ROOT_DIR
@@ -146,6 +147,21 @@ def _check_priority(priority: str) -> None:
         raise TaskError("Приоритет: зелёный, жёлтый или красный", status_code=422)
 
 
+def _clean_title(value: str, what: str) -> str:
+    """Название без пробелов по краям; пустое — ошибка, а не строка-призрак."""
+    title = value.strip()
+    if not title:
+        raise TaskError(f"{what}: название не может быть пустым", status_code=422)
+    return title
+
+
+def _display_shift(task: Task) -> int:
+    """Сдвиг, который видит пользователь у задачи с плавающим стартом."""
+    if not _blocked_by(task):
+        return 0
+    return _effective_dates(task, True)[2]
+
+
 def _check_step_in_task(task: Task, start: date, due: date) -> None:
     _check_dates(start, due, what="Сроки этапа")
     if start < task.start_date or due > task.due_date:
@@ -267,7 +283,9 @@ def _effective_dates(task: Task, blocked: bool) -> tuple[date, date, int]:
 
 
 def _dep_satisfied(dep: TaskDependency) -> bool:
-    """Задача-предшественник закрыта или её этап закрыт отчётом."""
+    """Задача-предшественник закрыта, её этап закрыт или зависимость уже снята."""
+    if dep.released_at is not None:
+        return True
     if dep.depends_on_step_id is not None:
         return bool(dep.step is not None and dep.step.is_done)
     return dep.depends_on is not None and dep.depends_on.status == "done"
@@ -306,6 +324,10 @@ def _freeze_start(db: Session, user: User, dependent: Task, *, target: date | No
         return
     if target is None:
         target = _today()
+    released_at = _now()
+    for dep in dependent.dependencies:
+        if dep.released_at is None:
+            dep.released_at = released_at
     shift = (target - dependent.start_date).days
     if shift == 0:
         return
@@ -325,7 +347,7 @@ def _freeze_start(db: Session, user: User, dependent: Task, *, target: date | No
         dependent,
         f"Задача «{dependent.title}» разблокирована: старт "
         f"{dependent.start_date:%d.%m.%Y} — {dependent.due_date:%d.%m.%Y}",
-        audience=_audience(dependent.assignee),
+        audience=_audience(dependent.assignee, dependent.created_by),
     )
 
 
@@ -336,6 +358,122 @@ def _unfreeze_dependents(db: Session, user: User, master: Task) -> None:
     ).scalars()
     for dependent_id in set(ids):
         _freeze_start(db, user, _load(db, dependent_id))
+
+
+def _dependent_tasks(db: Session, master: Task) -> list[Task]:
+    ids = db.execute(
+        select(TaskDependency.task_id).where(TaskDependency.depends_on_task_id == master.id)
+    ).scalars()
+    return [_load(db, task_id) for task_id in sorted(set(ids), key=str)]
+
+
+def _notify_dependency_cancelled(db: Session, user: User, master: Task) -> None:
+    """Мастер отозван: зависимые должны узнать, что ждать больше нечего."""
+    for dependent in _dependent_tasks(db, master):
+        waiting = [
+            dep
+            for dep in dependent.dependencies
+            if dep.depends_on_task_id == master.id and not _dep_satisfied(dep)
+        ]
+        if not waiting:
+            continue
+        _record(
+            db,
+            user,
+            "task.dependency_cancelled",
+            dependent,
+            f"Задача «{master.title}» отозвана — задача «{dependent.title}» "
+            "её больше не дождётся",
+            audience=_audience(dependent.assignee, dependent.created_by),
+        )
+
+
+def _notify_dependency_reopened(db: Session, user: User, master: Task) -> None:
+    """Мастер вернули в работу: уже стартовавшие зависимые не откатываются."""
+    for dependent in _dependent_tasks(db, master):
+        released = [
+            dep
+            for dep in dependent.dependencies
+            if dep.depends_on_task_id == master.id and dep.released_at is not None
+        ]
+        if not released:
+            continue
+        _record(
+            db,
+            user,
+            "task.dependency_reopened",
+            dependent,
+            f"Задача «{master.title}» снова в работе — задача «{dependent.title}» "
+            "остаётся в работе, срок не меняется",
+            audience=_audience(dependent.assignee, dependent.created_by),
+        )
+
+
+def _freeze_detached_dependent(
+    db: Session,
+    user: User,
+    dependent: Task,
+    *,
+    source: str,
+    target_date: date,
+) -> None:
+    """Зависимость исчезла вместе с мастером: фиксируем дату и объясняем почему."""
+    _freeze_start(db, user, dependent, target=target_date)
+    _record(
+        db,
+        user,
+        "task.dependency_removed",
+        dependent,
+        f"{source} — задача «{dependent.title}» больше её не ждёт, "
+        f"срок зафиксирован на {target_date:%d.%m.%Y}",
+        audience=_audience(dependent.assignee, dependent.created_by),
+    )
+
+
+def _detach_task_dependents(db: Session, user: User, master: Task) -> None:
+    """Перед удалением мастера: снять зависимость и не дать датам прыгнуть."""
+    ids = db.execute(
+        select(TaskDependency.task_id).where(TaskDependency.depends_on_task_id == master.id)
+    ).scalars()
+    for dependent_id in sorted(set(ids), key=str):
+        dependent = _load(db, dependent_id)
+        was_blocked = bool(_blocked_by(dependent))
+        target = _effective_dates(dependent, was_blocked)[0]
+        for dep in list(dependent.dependencies):
+            if dep.depends_on_task_id == master.id:
+                dependent.dependencies.remove(dep)
+        db.flush()
+        if was_blocked:
+            _freeze_detached_dependent(
+                db,
+                user,
+                dependent,
+                source=f"Задача «{master.title}» удалена",
+                target_date=target,
+            )
+
+
+def _detach_step_dependents(db: Session, user: User, master: Task, step: TaskStep) -> None:
+    """Перед удалением этапа: то же самое для зависимостей от этапа."""
+    ids = db.execute(
+        select(TaskDependency.task_id).where(TaskDependency.depends_on_step_id == step.id)
+    ).scalars()
+    for dependent_id in sorted(set(ids), key=str):
+        dependent = _load(db, dependent_id)
+        was_blocked = bool(_blocked_by(dependent))
+        target = _effective_dates(dependent, was_blocked)[0]
+        for dep in list(dependent.dependencies):
+            if dep.depends_on_step_id == step.id:
+                dependent.dependencies.remove(dep)
+        db.flush()
+        if was_blocked:
+            _freeze_detached_dependent(
+                db,
+                user,
+                dependent,
+                source=f"Этап «{step.title}» задачи «{master.title}» удалён",
+                target_date=target,
+            )
 
 
 def _step_reported(task: Task, step: TaskStep) -> bool:
@@ -354,6 +492,9 @@ def _progress(task: Task) -> int:
         closed = sum(1 for step in task.steps if step.is_done)
         return round(closed / len(task.steps) * 100)
     reports = _reports(task)
+    if reports and reports[-1].kind == "final":
+        # Задачу закрыли и вернули в работу: показываем «почти готово», а не 100 %.
+        return 90
     return reports[-1].progress if reports else 0
 
 
@@ -574,7 +715,7 @@ def create_task(db: Session, user: User, payload: TaskCreate) -> TaskDetailOut:
     _check_priority(payload.priority)
     assignee = _assignee(db, payload.assignee_id, user)
     task = Task(
-        title=payload.title.strip(),
+        title=_clean_title(payload.title, "Задача"),
         description=(payload.description or "").strip() or None,
         priority=payload.priority,
         status="in_progress",
@@ -619,8 +760,9 @@ def update_task(db: Session, user: User, task_id: uuid.UUID, payload: TaskUpdate
         raise TaskError("Задача закрыта — сначала верните её в работу", status_code=409)
     changes: list[str] = []
     previous_assignee = task.assignee
+    new_assignee: User | None = None
     if payload.title is not None:
-        task.title = payload.title.strip()
+        task.title = _clean_title(payload.title, "Задача")
         changes.append("название")
     if payload.description is not None:
         task.description = payload.description.strip() or None
@@ -633,6 +775,7 @@ def update_task(db: Session, user: User, task_id: uuid.UUID, payload: TaskUpdate
     if payload.assignee_id is not None and payload.assignee_id != task.assignee_id:
         person = _assignee(db, payload.assignee_id, user)
         task.assignee_id = person.id
+        new_assignee = person
         changes.append("исполнитель")
     start = payload.start_date or task.start_date
     due = payload.due_date or task.due_date
@@ -649,14 +792,28 @@ def update_task(db: Session, user: User, task_id: uuid.UUID, payload: TaskUpdate
     if not changes:
         return _to_detail(task, user)
     task.updated_at = _now()
+    if changes == ["описание"]:
+        # Правка описания — не повод дёргать исполнителя сообщением.
+        db.commit()
+        return _to_detail(_load(db, task_id), user)
     _record(
         db,
         user,
         "task.updated",
         task,
         f"Изменена задача «{task.title}»: {', '.join(changes)}",
-        audience=_audience(task.assignee, previous_assignee),
+        audience=_audience(new_assignee or task.assignee),
     )
+    if new_assignee is not None:
+        _record(
+            db,
+            user,
+            "task.assignee_changed",
+            task,
+            f"Вы сняты с задачи «{task.title}» — её передали другому исполнителю",
+            audience=_audience(previous_assignee),
+            task_link=False,
+        )
     db.commit()
     return _to_detail(_load(db, task_id), user)
 
@@ -712,6 +869,10 @@ def change_status(
             task.progress = 90
     else:
         task.status = "in_progress"
+    if action == "cancel":
+        _notify_dependency_cancelled(db, user, task)
+    elif action == "reopen":
+        _notify_dependency_reopened(db, user, task)
     task.updated_at = _now()
     summary = f"Задача «{task.title}» {_STATUS_ACTION_TITLES[action]}"
     if action == "reopen":
@@ -746,8 +907,11 @@ def reschedule_task(
     _require_manage(user, task)
     if task.status in CLOSED_TASK_STATUSES:
         raise TaskError("Задача закрыта — сначала верните её в работу", status_code=409)
-    _check_dates(payload.start_date, payload.due_date)
-    delta = (payload.start_date - task.start_date).days
+    shift = _display_shift(task)
+    start = payload.start_date - timedelta(days=shift)
+    due = payload.due_date - timedelta(days=shift)
+    _check_dates(start, due)
+    delta = (start - task.start_date).days
     if payload.move_steps and delta:
         # Закрытые этапы — история: их даты не переписываем при переносе.
         for step in task.steps:
@@ -758,8 +922,7 @@ def reschedule_task(
     outside = [
         step
         for step in task.steps
-        if not step.is_done
-        and (step.start_date < payload.start_date or step.due_date > payload.due_date)
+        if not step.is_done and (step.start_date < start or step.due_date > due)
     ]
     if outside:
         first = outside[0]
@@ -769,8 +932,8 @@ def reschedule_task(
             "Включите перенос этапов или поправьте их даты",
             status_code=422,
         )
-    task.start_date = payload.start_date
-    task.due_date = payload.due_date
+    task.start_date = start
+    task.due_date = due
     _renumber(task)
     task.updated_at = _now()
     _record(
@@ -793,20 +956,24 @@ def add_step(db: Session, user: User, task_id: uuid.UUID, payload: TaskStepIn) -
     if task.status in CLOSED_TASK_STATUSES:
         raise TaskError("Задача закрыта — сначала верните её в работу", status_code=409)
     position = max((step.position for step in task.steps), default=-1) + 1
-    _check_step_in_task(task, payload.start_date, payload.due_date)
-    _check_step_overlap(task, payload.start_date, payload.due_date)
+    shift = _display_shift(task)
+    start = payload.start_date - timedelta(days=shift)
+    due = payload.due_date - timedelta(days=shift)
+    _check_step_in_task(task, start, due)
+    _check_step_overlap(task, start, due)
+    title = _clean_title(payload.title, "Этап")
     task.steps.append(
         TaskStep(
-            title=payload.title.strip(),
-            start_date=payload.start_date,
-            due_date=payload.due_date,
+            title=title,
+            start_date=start,
+            due_date=due,
             is_done=False,
             position=position,
         )
     )
     _renumber(task)
     task.updated_at = _now()
-    summary = f"В задаче «{task.title}» новый этап «{payload.title.strip()}»"
+    summary = f"В задаче «{task.title}» новый этап «{title}»"
     _record(
         db,
         user,
@@ -840,10 +1007,13 @@ def update_step(
     if task.status in CLOSED_TASK_STATUSES:
         raise TaskError("Задача закрыта — сначала верните её в работу", status_code=409)
     step = _find_step(task, step_id)
-    start = payload.start_date or step.start_date
-    due = payload.due_date or step.due_date
+    shift = _display_shift(task)
+    shown_start = payload.start_date or step.start_date + timedelta(days=shift)
+    shown_due = payload.due_date or step.due_date + timedelta(days=shift)
+    start = shown_start - timedelta(days=shift)
+    due = shown_due - timedelta(days=shift)
     if payload.title is not None:
-        step.title = payload.title.strip()
+        step.title = _clean_title(payload.title, "Этап")
     if payload.start_date is not None or payload.due_date is not None:
         _check_step_in_task(task, start, due)
         _check_step_overlap(task, start, due, skip_id=step.id)
@@ -869,6 +1039,7 @@ def delete_step(db: Session, user: User, task_id: uuid.UUID, step_id: uuid.UUID)
             "По этапу уже есть отчёт — этап не удаляем, чтобы не терять историю",
             status_code=409,
         )
+    _detach_step_dependents(db, user, task, step)
     task.steps.remove(step)
     _renumber(task)
     task.updated_at = _now()
@@ -912,16 +1083,28 @@ def add_dependency(
     step: TaskStep | None = None
     if payload.depends_on_step_id is not None:
         step = _find_step(prerequisite, payload.depends_on_step_id)
+    # Блокируем обе задачи: иначе одновременные A→B и B→A проскочат проверку цикла.
+    db.execute(
+        select(Task.id)
+        .where(Task.id.in_([task.id, prerequisite.id]))
+        .order_by(Task.id)
+        .with_for_update()
+    )
     if _depends_on(db, prerequisite.id, task.id):
         raise TaskError(
             "Так получится замкнутый круг зависимостей: выберите другую задачу",
             status_code=422,
         )
-    for dep in task.dependencies:
-        if dep.depends_on_task_id == prerequisite.id and dep.depends_on_step_id == (
-            step.id if step else None
-        ):
-            raise TaskError("Такая зависимость уже есть", status_code=409)
+    conditions = [
+        TaskDependency.task_id == task.id,
+        TaskDependency.depends_on_task_id == prerequisite.id,
+    ]
+    if step is not None:
+        conditions.append(TaskDependency.depends_on_step_id == step.id)
+    else:
+        conditions.append(TaskDependency.depends_on_step_id.is_(None))
+    if db.execute(select(TaskDependency.id).where(*conditions)).first():
+        raise TaskError("Такая зависимость уже есть", status_code=409)
     db.add(
         TaskDependency(
             task_id=task.id,
@@ -959,11 +1142,13 @@ def delete_dependency(
     if dependency is None:
         raise TaskError("Зависимость не найдена", status_code=404)
     label = _dep_label(dependency)
-    # Фиксируем ту дату, на которой задача стояла под зависимостью.
-    frozen_start, _, _ = _effective_dates(task, True)
+    # Фиксируем дату остановки только если задача действительно ждала.
+    was_blocked = bool(_blocked_by(task))
+    frozen_start = _effective_dates(task, was_blocked)[0]
     task.dependencies.remove(dependency)
     db.flush()
-    _freeze_start(db, user, task, target=frozen_start)
+    if was_blocked:
+        _freeze_start(db, user, task, target=frozen_start)
     task.updated_at = _now()
     _record(
         db,
@@ -982,6 +1167,12 @@ def add_report(db: Session, user: User, task_id: uuid.UUID, payload: TaskReportI
     """Отчёт присылает исполнитель: промежуточный закрывает этап, финальный — задачу."""
     task = _load(db, task_id)
     _require_view(user, task)
+    # Держим задачу до коммита: иначе удаление успеет проскочить между проверкой и вставкой.
+    if (
+        db.execute(select(Task.id).where(Task.id == task.id).with_for_update()).scalar_one_or_none()
+        is None
+    ):
+        raise TaskError("Задача не найдена", status_code=404)
     if user.id != task.assignee_id:
         raise TaskError("Отчёт по задаче присылает исполнитель", status_code=403)
     blocked = _blocked_by(task)
@@ -999,10 +1190,16 @@ def add_report(db: Session, user: User, task_id: uuid.UUID, payload: TaskReportI
         if payload.kind != "interim":
             raise TaskError("Финальный отчёт — по задаче целиком, без этапа", status_code=422)
         step = _find_step(task, payload.step_id)
+        db.execute(select(TaskStep.id).where(TaskStep.id == step.id).with_for_update())
+        db.refresh(step)
         if step.is_done or _step_reported(task, step):
             raise TaskError("Этап уже закрыт отчётом", status_code=409)
 
     if payload.kind == "final":
+        open_steps = [row for row in task.steps if not row.is_done]
+        if open_steps:
+            names = ", ".join(f"«{row.title}»" for row in open_steps)
+            raise TaskError(f"Сначала закройте этапы отчётами: {names}", status_code=409)
         report = TaskReport(author_id=user.id, kind="final", progress=100, text=text)
         task.progress = 100
         task.status = "done"
@@ -1028,7 +1225,11 @@ def add_report(db: Session, user: User, task_id: uuid.UUID, payload: TaskReportI
             task.status = "in_progress"
     task.updated_at = _now()
     task.reports.append(report)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise TaskError("Этап уже закрыт отчётом", status_code=409) from exc
     _unfreeze_dependents(db, user, task)
 
     creator = task.created_by
@@ -1085,8 +1286,18 @@ def upload_report_file(
         and user.role != ROLE_EXECUTIVE_DIRECTOR
     ):
         raise TaskError("Приложить файл может исполнитель или постановщик", status_code=403)
-    report = _report_of(task, report_id)
-    if len(report.files) >= FILES_PER_REPORT:
+    locked_id = db.execute(
+        select(TaskReport.id).where(TaskReport.id == report_id).with_for_update()
+    ).scalar_one_or_none()
+    report = db.get(TaskReport, report_id) if locked_id is not None else None
+    if report is None or report.task_id != task.id:
+        raise TaskError("Отчёт не найден", status_code=404)
+    files_count = db.execute(
+        select(func.count())
+        .select_from(TaskReportFile)
+        .where(TaskReportFile.report_id == report.id)
+    ).scalar_one()
+    if files_count >= FILES_PER_REPORT:
         raise TaskError(f"К отчёту можно приложить не больше {FILES_PER_REPORT} файлов")
     name = Path(upload.filename or "файл").name
     extension = Path(name).suffix.lower()
@@ -1164,6 +1375,11 @@ def delete_report_file(db: Session, user: User, task_id: uuid.UUID, file_id: uui
 
 def delete_task(db: Session, user: User, task_id: uuid.UUID) -> None:
     """Удалить задачу можно, только пока по ней нет отчётов."""
+    locked = db.execute(
+        select(Task.id).where(Task.id == task_id).with_for_update()
+    ).scalar_one_or_none()
+    if locked is None:
+        raise TaskError("Задача не найдена", status_code=404)
     task = _load(db, task_id)
     _require_view(user, task)
     _require_manage(user, task)
@@ -1172,6 +1388,7 @@ def delete_task(db: Session, user: User, task_id: uuid.UUID) -> None:
             "По задаче уже есть отчёты — её можно отменить, но не удалить",
             status_code=409,
         )
+    _detach_task_dependents(db, user, task)
     folder = ATTACHMENTS_DIR / str(task.id)
     if folder.is_dir():
         for file in folder.iterdir():

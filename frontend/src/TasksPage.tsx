@@ -106,6 +106,7 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
   const [creating, setCreating] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const centered = useRef(false)
+  const [scrollLeft, setScrollLeft] = useState(0)
 
   const canCreate = CREATOR_ROLES.includes(user.role)
 
@@ -170,6 +171,7 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
     if (!element || tasks.length === 0 || centered.current) return
     const frame = requestAnimationFrame(() => {
       element.scrollLeft = Math.max(0, dayOffset(today, gantt) * DAY_WIDTH - 160)
+      setScrollLeft(element.scrollLeft)
       centered.current = true
     })
     return () => cancelAnimationFrame(frame)
@@ -297,7 +299,11 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
 
       {tasks.length > 0 ? (
         <div className="gantt" data-testid="gantt">
-          <div className="gantt-scroll" ref={scrollRef}>
+          <div
+            className="gantt-scroll"
+            ref={scrollRef}
+            onScroll={(event) => setScrollLeft(event.currentTarget.scrollLeft)}
+          >
             <div className="gantt-inner" style={{ width: LABEL_WIDTH + trackWidth }}>
               <div className="gantt-head">
                 <div className="gantt-head-label" style={{ width: LABEL_WIDTH }}>
@@ -328,7 +334,9 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
                           .join(' ')}
                         style={{ width: DAY_WIDTH }}
                       >
-                        {day.isMonday ? shortDate(day.iso) : ''}
+                        {day.isMonday && dayOffset(day.iso, gantt) * DAY_WIDTH >= scrollLeft
+                          ? shortDate(day.iso)
+                          : ''}
                       </div>
                     ))}
                   </div>
@@ -491,6 +499,7 @@ function NewTaskForm({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
+    if (saving) return
     if (!title.trim()) {
       setError('Название задачи обязательно')
       return
@@ -1159,7 +1168,9 @@ function TaskCard({
                 onChange={(event) => setReportKind(event.target.value as 'interim' | 'final')}
               >
                 <option value="interim">Промежуточный</option>
-                <option value="final">Финальный — закрыть задачу</option>
+                <option value="final" disabled={openSteps.length > 0}>
+                  Финальный — закрыть задачу
+                </option>
               </select>
             </label>
             {chosenStep ? (
@@ -1197,6 +1208,11 @@ function TaskCard({
           {chosenStep ? (
             <p className="hint">
               Отчёт по этапу закроет его; следующий этап закрывается своим отчётом.
+            </p>
+          ) : null}
+          {!chosenStep && openSteps.length > 0 ? (
+            <p className="hint">
+              Пока есть открытые этапы, задачу закрыть нельзя: закройте их отчётами.
             </p>
           ) : null}
           <label>

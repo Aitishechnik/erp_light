@@ -810,3 +810,293 @@ def test_dependent_already_finished_when_master_ends(
     shown = _row(client, login, dependent["id"])
     # Мастер идёт, «сегодня» — начало зависимой, окончание сохраняет длину.
     assert (shown["start_date"], shown["due_date"]) == (day(3), day(10))
+
+
+def test_empty_titles_rejected(client: TestClient, login: Link) -> None:
+    """Название из пробелов не создаёт задачу-призрак и пустой этап."""
+    login("commercial")
+    payload = {
+        "title": "   ",
+        "start_date": day(0),
+        "due_date": day(3),
+        "assignee_id": assignee_id(client, SALES),
+    }
+    assert client.post("/api/v1/tasks", json=payload).status_code == 422
+
+    task = new_task(client, login)
+    login("commercial")
+    step = client.post(
+        f"/api/v1/tasks/{task['id']}/steps",
+        json={"title": "  ", "start_date": day(0), "due_date": day(1)},
+    )
+    assert step.status_code == 422
+
+
+def test_transfer_notifies_new_assignee(client: TestClient, login: Link) -> None:
+    """Сообщение о передаче получает новый исполнитель, прежний — «сняты»."""
+    task = new_task(client, login, assignee=SALES)
+    login("commercial")
+    new_assignee = assignee_id(client, ASSISTANT)
+    moved = client.patch(f"/api/v1/tasks/{task['id']}", json={"assignee_id": new_assignee})
+    assert moved.status_code == 200, moved.text
+
+    login("assistant")
+    rows = client.get("/api/v1/messages").json()["rows"]
+    assert any(row["entity_id"] == task["id"] and row["link"] for row in rows)
+
+    login("sales")
+    rows = client.get("/api/v1/messages").json()["rows"]
+    assert any("сняты с задачи" in row["summary"] for row in rows)
+    assert all(row["link"] is None for row in rows if "сняты с задачи" in row["summary"])
+
+
+def test_removing_satisfied_dependency_keeps_dates(client: TestClient, login: Link) -> None:
+    """Снятие уже выполненной зависимости не отбрасывает срок на сегодня."""
+    master = new_task(client, login, title="Мастер", assignee=SALES)
+    dependent = new_task(
+        client,
+        login,
+        title="Зависимая",
+        assignee=SALES2,
+        start_date=day(20),
+        due_date=day(27),
+    )
+    login("sales")
+    client.post(
+        f"/api/v1/tasks/{master['id']}/reports",
+        json={"kind": "final", "text": "Мастер готов", "progress": 100},
+    )
+    _link(client, login, dependent["id"], master["id"])
+    before = _row(client, login, dependent["id"])
+    assert (before["start_date"], before["due_date"]) == (day(20), day(27))
+
+    login("commercial")
+    dependency_id = before["dependencies"][0]["id"]
+    removed = client.delete(f"/api/v1/tasks/{dependent['id']}/dependencies/{dependency_id}")
+    assert removed.status_code == 200, removed.text
+    assert (removed.json()["start_date"], removed.json()["due_date"]) == (day(20), day(27))
+
+
+def test_deleting_master_freezes_dependent(client: TestClient, login: Link) -> None:
+    """Удаление мастера фиксирует дату зависимой и объясняет это сообщением."""
+    master = new_task(client, login, title="Мастер", assignee=SALES)
+    dependent = new_task(
+        client,
+        login,
+        title="Зависимая",
+        assignee=SALES2,
+        start_date=day(20),
+        due_date=day(27),
+    )
+    _link(client, login, dependent["id"], master["id"])
+    shown = _row(client, login, dependent["id"])
+    assert shown["is_blocked"] is True
+
+    login("commercial")
+    assert client.delete(f"/api/v1/tasks/{master['id']}").status_code == 204
+    after = _row(client, login, dependent["id"])
+    assert after["is_blocked"] is False
+    assert (after["start_date"], after["due_date"]) == (shown["start_date"], shown["due_date"])
+
+    login("sales2")
+    rows = client.get("/api/v1/messages").json()["rows"]
+    assert any("удалена" in row["summary"] and row["entity_id"] == dependent["id"] for row in rows)
+
+
+def test_deleting_master_step_freezes_dependent(client: TestClient, login: Link) -> None:
+    """Удаление этапа-мастера тоже не оставляет зависимую без объяснения."""
+    master = new_task(
+        client,
+        login,
+        title="Мастер с этапом",
+        assignee=SALES,
+        start_date=day(0),
+        due_date=day(10),
+        steps=[{"title": "Обзвон", "start_date": day(0), "due_date": day(3)}],
+    )
+    dependent = new_task(
+        client,
+        login,
+        title="Зависимая от этапа",
+        assignee=SALES2,
+        start_date=day(20),
+        due_date=day(24),
+    )
+    login("commercial")
+    add_dependency(
+        client,
+        dependent["id"],
+        {"depends_on_task_id": master["id"], "depends_on_step_id": master["steps"][0]["id"]},
+    )
+    shown = _row(client, login, dependent["id"])
+    login("commercial")
+    assert (
+        client.delete(f"/api/v1/tasks/{master['id']}/steps/{master['steps'][0]['id']}").status_code
+        == 200
+    )
+    after = _row(client, login, dependent["id"])
+    assert (after["start_date"], after["due_date"]) == (shown["start_date"], shown["due_date"])
+    login("sales2")
+    rows = client.get("/api/v1/messages").json()["rows"]
+    assert any("Этап" in row["summary"] and "удалён" in row["summary"] for row in rows)
+
+
+def test_reopening_master_keeps_dependent_dates(client: TestClient, login: Link) -> None:
+    """Возврат мастера в работу не откатывает уже стартовавшую зависимую."""
+    master = new_task(
+        client,
+        login,
+        title="Мастер",
+        assignee=SALES,
+        start_date=day(1),
+        due_date=day(5),
+    )
+    dependent = new_task(
+        client,
+        login,
+        title="Зависимая",
+        assignee=SALES2,
+        start_date=day(10),
+        due_date=day(14),
+    )
+    _link(client, login, dependent["id"], master["id"])
+
+    login("sales")
+    client.post(
+        f"/api/v1/tasks/{master['id']}/reports",
+        json={"kind": "final", "text": "Мастер готов", "progress": 100},
+    )
+    frozen = _row(client, login, dependent["id"])
+    assert (frozen["start_date"], frozen["due_date"]) == (day(0), day(4))
+
+    login("commercial")
+    reopened = client.post(f"/api/v1/tasks/{master['id']}/status", json={"action": "reopen"})
+    assert reopened.status_code == 200, reopened.text
+    after = _row(client, login, dependent["id"])
+    assert after["is_blocked"] is False
+    assert (after["start_date"], after["due_date"]) == (day(0), day(4))
+
+    login("sales2")
+    rows = client.get("/api/v1/messages").json()["rows"]
+    assert any("снова в работе" in row["summary"] for row in rows)
+
+
+def test_cancelling_master_notifies_dependent(client: TestClient, login: Link) -> None:
+    """Отзыв мастера не снимает зависимость, но зависимый узнаёт причину."""
+    master = new_task(
+        client,
+        login,
+        title="Мастер",
+        assignee=SALES,
+        start_date=day(1),
+        due_date=day(5),
+    )
+    dependent = new_task(
+        client,
+        login,
+        title="Зависимая",
+        assignee=SALES2,
+        start_date=day(10),
+        due_date=day(14),
+    )
+    _link(client, login, dependent["id"], master["id"])
+
+    login("commercial")
+    cancelled = client.post(f"/api/v1/tasks/{master['id']}/status", json={"action": "cancel"})
+    assert cancelled.status_code == 200, cancelled.text
+    assert _row(client, login, dependent["id"])["is_blocked"] is True
+
+    login("sales2")
+    rows = client.get("/api/v1/messages").json()["rows"]
+    assert any("отозвана" in row["summary"] for row in rows)
+
+
+def test_final_report_requires_closed_steps(client: TestClient, login: Link) -> None:
+    """Финальный отчёт при открытых этапах не принимается."""
+    task = new_task(
+        client,
+        login,
+        start_date=day(0),
+        due_date=day(10),
+        steps=[{"title": "Первый", "start_date": day(0), "due_date": day(4)}],
+    )
+    login("sales")
+    denied = client.post(
+        f"/api/v1/tasks/{task['id']}/reports",
+        json={"kind": "final", "text": "Закрываю задачу", "progress": 100},
+    )
+    assert denied.status_code == 409
+    assert "закройте этапы" in denied.json()["detail"].lower()
+
+    closed = client.post(
+        f"/api/v1/tasks/{task['id']}/reports",
+        json={
+            "kind": "interim",
+            "text": "Этап готов",
+            "progress": 100,
+            "step_id": task["steps"][0]["id"],
+        },
+    )
+    assert closed.status_code == 200, closed.text
+    final = client.post(
+        f"/api/v1/tasks/{task['id']}/reports",
+        json={"kind": "final", "text": "Задача готова", "progress": 100},
+    )
+    assert final.status_code == 200, final.text
+    assert final.json()["status"] == "done"
+
+
+def test_reopened_task_shows_ninety_percent(client: TestClient, login: Link) -> None:
+    """После возврата в работу шкала показывает 90 %, а не 100 %."""
+    task = new_task(client, login)
+    login("sales")
+    client.post(
+        f"/api/v1/tasks/{task['id']}/reports",
+        json={"kind": "final", "text": "Готово", "progress": 100},
+    )
+    login("commercial")
+    reopened = client.post(f"/api/v1/tasks/{task['id']}/status", json={"action": "reopen"})
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["progress"] == 90
+
+
+def test_description_change_is_silent(client: TestClient, login: Link) -> None:
+    """Правка только описания не дёргает исполнителя сообщением."""
+    task = new_task(client, login, assignee=SALES)
+    login("commercial")
+    client.patch(f"/api/v1/tasks/{task['id']}", json={"description": "Уточнил детали"})
+    login("sales")
+    rows = client.get("/api/v1/messages").json()["rows"]
+    assert not any(row["entity_id"] == task["id"] and "описание" in row["summary"] for row in rows)
+
+
+def test_step_dates_in_floating_task(client: TestClient, login: Link) -> None:
+    """Этап в задаче с плавающим стартом ставится по датам с экрана."""
+    master = new_task(
+        client,
+        login,
+        title="Мастер",
+        assignee=SALES,
+        start_date=day(1),
+        due_date=day(5),
+    )
+    dependent = new_task(
+        client,
+        login,
+        title="Зависимая",
+        assignee=SALES2,
+        start_date=day(10),
+        due_date=day(14),
+    )
+    _link(client, login, dependent["id"], master["id"])
+    shown = _row(client, login, dependent["id"])
+    assert (shown["start_date"], shown["due_date"]) == (day(1), day(5))
+
+    login("commercial")
+    added = client.post(
+        f"/api/v1/tasks/{dependent['id']}/steps",
+        json={"title": "Первый шаг", "start_date": day(2), "due_date": day(3)},
+    )
+    assert added.status_code == 200, added.text
+    step = added.json()["steps"][0]
+    assert (step["start_date"], step["due_date"]) == (day(2), day(3))
