@@ -681,6 +681,24 @@ def test_identical_rows_are_rejected(client: TestClient, login, catalog: dict[st
     assert "уже есть" in duplicated.json()["detail"]
 
 
+def test_same_raw_with_another_price_is_allowed(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    """Контракт разрешает несколько строк одного сырья с разными ценами."""
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    saved = _save(
+        client,
+        plan["id"],
+        [
+            _item(catalog, quantity="30", price="500.00"),
+            _item(catalog, quantity="20", price="600.00"),
+        ],
+    )
+    assert saved.status_code == 200, saved.text
+    assert len(saved.json()["items"]) == 2
+
+
 def test_plan_has_max_quantity_and_price(
     client: TestClient, login, catalog: dict[str, Any]
 ) -> None:

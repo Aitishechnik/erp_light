@@ -694,7 +694,7 @@ def update_items(
     prepared: list[tuple[PurchasePlanItemIn, int, PurchasePlanItem | None]] = []
     seen: set[uuid.UUID] = set()
     product_units: dict[uuid.UUID, str] = {}
-    content: set[tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID | None]] = set()
+    content: set[tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID | None, Decimal | None]] = set()
     for item in items:
         stored: PurchasePlanItem | None = None
         if item.id is not None:
@@ -720,6 +720,7 @@ def update_items(
             item.product_id,
             item.country_id,
             item.alternative_of_id,
+            item.price_rub,
         )
         if content_key in content:
             raise PlanError(
