@@ -376,3 +376,58 @@ def test_report_file_limits(
         client.post(url, files={"file": ("смета.pdf", b"x" * 17, "application/pdf")}).status_code
         == 413
     )
+
+
+def test_progress_comes_from_reports_and_steps(
+    client: TestClient, login: Link, db_session: Session
+) -> None:
+    """Процент на шкале выводится, а не берётся из поля в базе."""
+    from app.models.tasks import Task
+
+    task = new_task(client, login)
+    # Даже если в базе остался чужой процент, без отчётов задача показывает 0.
+    stored = db_session.get(Task, task["id"])
+    assert stored is not None
+    stored.progress = 30
+    db_session.commit()
+    login("commercial")
+    row = next(item for item in client.get("/api/v1/tasks").json() if item["id"] == task["id"])
+    assert row["progress"] == 0
+
+    # Промежуточный отчёт по задаче задаёт процент.
+    login("sales")
+    client.post(
+        f"/api/v1/tasks/{task['id']}/reports",
+        json={"kind": "interim", "text": "Половина пути", "progress": 40},
+    )
+    login("commercial")
+    row = next(item for item in client.get("/api/v1/tasks").json() if item["id"] == task["id"])
+    assert row["progress"] == 40
+
+
+def test_progress_counts_closed_steps(client: TestClient, login: Link) -> None:
+    task = new_task(
+        client,
+        login,
+        start_date=day(0),
+        due_date=day(20),
+        steps=[
+            {"title": "Первый", "start_date": day(0), "due_date": day(9)},
+            {"title": "Второй", "start_date": day(10), "due_date": day(20)},
+        ],
+    )
+    login("sales")
+    closed = client.post(
+        f"/api/v1/tasks/{task['id']}/reports",
+        json={
+            "kind": "interim",
+            "text": "Первый этап готов",
+            "progress": 100,
+            "step_id": task["steps"][0]["id"],
+        },
+    )
+    assert closed.status_code == 200, closed.text
+    assert closed.json()["progress"] == 50
+    login("commercial")
+    row = next(item for item in client.get("/api/v1/tasks").json() if item["id"] == task["id"])
+    assert row["progress"] == 50

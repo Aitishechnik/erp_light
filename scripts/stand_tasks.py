@@ -177,7 +177,7 @@ def main() -> None:
                 description="Свести план/факт и зафиксировать причины отклонений.",
                 priority="red",
                 status="in_progress",
-                progress=30,
+                progress=0,
                 start_date=today - timedelta(days=20),
                 due_date=today - timedelta(days=4),
                 assignee_id=commercial.id,

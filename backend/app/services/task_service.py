@@ -248,6 +248,21 @@ def _step_reported(task: Task, step: TaskStep) -> bool:
     return any(report.step_id == step.id for report in task.reports)
 
 
+def _progress(task: Task) -> int:
+    """Шкала выполнения: доля закрытых этапов, иначе — процент последнего отчёта.
+
+    Значение всегда выводится из отчётов и этапов, а не берётся из поля в базе:
+    иначе задача без единого отчёта могла бы показывать чужой процент.
+    """
+    if task.status == "done":
+        return 100
+    if task.steps:
+        closed = sum(1 for step in task.steps if step.is_done)
+        return round(closed / len(task.steps) * 100)
+    reports = _reports(task)
+    return reports[-1].progress if reports else 0
+
+
 def _base(task: Task) -> dict[str, Any]:
     is_overdue, days = _overdue(task)
     reports = _reports(task)
@@ -279,7 +294,7 @@ def _base(task: Task) -> dict[str, Any]:
         "priority_title": TASK_PRIORITY_TITLES.get(task.priority, task.priority),
         "status": task.status,
         "status_title": TASK_STATUS_TITLES.get(task.status, task.status),
-        "progress": task.progress,
+        "progress": _progress(task),
         "start_date": task.start_date,
         "due_date": task.due_date,
         "assignee_id": task.assignee_id,
