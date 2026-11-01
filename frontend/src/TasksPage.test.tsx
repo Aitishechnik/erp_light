@@ -48,6 +48,8 @@ const TASK: Task = {
   reports_count: 1,
   files_count: 0,
   last_report: null,
+  is_blocked: false,
+  blocked_by: [],
 }
 
 const DETAIL: TaskDetail = {
@@ -67,6 +69,7 @@ const DETAIL: TaskDetail = {
       files: [],
     },
   ],
+  dependencies: [],
   actions: {
     can_edit: true,
     can_change_status: true,
@@ -309,5 +312,90 @@ describe('TasksPage — перенос задачи', () => {
     await user.click(screen.getByRole('button', { name: 'Сохранить перенос' }))
 
     expect(await screen.findByText(/05\.11\.2026 — 12\.11\.2026/)).toBeInTheDocument()
+  })
+})
+
+const OTHER_TASK: Task = {
+  ...TASK,
+  id: 't2',
+  title: 'Собрать данные',
+  steps: [],
+}
+
+describe('TasksPage — зависимости', () => {
+  it('показывает блокировку и не даёт отправить отчёт', async () => {
+    const blocked: TaskDetail = {
+      ...DETAIL,
+      is_blocked: true,
+      blocked_by: ['задача «Собрать данные»'],
+      dependencies: [
+        {
+          id: 'd1',
+          task_id: 't2',
+          task_title: 'Собрать данные',
+          step_id: null,
+          step_title: null,
+          satisfied: false,
+          label: 'задача «Собрать данные»',
+        },
+      ],
+    }
+    mockApi({
+      '/api/v1/tasks/t1': { body: blocked },
+      '/api/v1/tasks': { body: [TASK, OTHER_TASK] },
+    })
+    render(<TasksPage user={MANAGER} focus={['t1']} />)
+
+    expect(await screen.findByText(/Задача ждёт завершения/)).toBeInTheDocument()
+    expect(screen.getByText('задача «Собрать данные»')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Отправить отчёт' })).not.toBeInTheDocument()
+    expect(screen.getByText(/Отчёт можно будет прислать/)).toBeInTheDocument()
+  })
+
+  it('добавляет зависимость от другой задачи', async () => {
+    const user = userEvent.setup()
+    let current: TaskDetail = { ...DETAIL, dependencies: [], is_blocked: false }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        const method = (init?.method ?? 'GET').toUpperCase()
+        const json = (body: unknown) =>
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        if (url.includes('/dependencies') && method === 'POST') {
+          current = {
+            ...current,
+            is_blocked: true,
+            blocked_by: ['задача «Собрать данные»'],
+            dependencies: [
+              {
+                id: 'd1',
+                task_id: 't2',
+                task_title: 'Собрать данные',
+                step_id: null,
+                step_title: null,
+                satisfied: false,
+                label: 'задача «Собрать данные»',
+              },
+            ],
+          }
+          return json(current)
+        }
+        if (url.includes('/api/v1/tasks/t1') && method === 'GET') return json(current)
+        if (url.includes('/api/v1/tasks') && method === 'GET') return json([TASK, OTHER_TASK])
+        return new Response(JSON.stringify({ detail: 'нет мока' }), { status: 404 })
+      }),
+    )
+
+    render(<TasksPage user={COMMERCIAL} focus={['t1']} />)
+
+    await user.selectOptions(await screen.findByLabelText('Задача'), 't2')
+    await user.click(screen.getByRole('button', { name: 'Добавить зависимость' }))
+
+    expect(await screen.findByText('задача «Собрать данные»')).toBeInTheDocument()
+    expect(screen.getByText(/Задача ждёт завершения/)).toBeInTheDocument()
   })
 })

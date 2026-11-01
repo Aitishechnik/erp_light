@@ -3704,3 +3704,73 @@ button.primary:disabled,
   background: #fff;
   color: #111827;
 }
+
+.task-blocked {
+  margin: 0;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.8rem;
+  color: #92400e;
+}
+
+.task-deps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.task-dep {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.9rem;
+}
+
+.task-dep-done {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.task-dep-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  padding: 0.75rem 0.9rem;
+}
+
+.task-dep-form label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.task-dep-form select {
+  font: inherit;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  background: #fff;
+  color: #111827;
+  min-width: 220px;
+}
+
+.badge-wait {
+  flex: none;
+  font-size: 0.7rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.35rem;
+  background: #fef3c7;
+  color: #92400e;
+}

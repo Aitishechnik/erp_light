@@ -13,6 +13,7 @@ from app.api.deps import CurrentUser, DbSession
 from app.schemas.tasks import (
     TaskAssigneeOut,
     TaskCreate,
+    TaskDependencyIn,
     TaskDetailOut,
     TaskOut,
     TaskReportFileOut,
@@ -113,6 +114,31 @@ def change_status(
     """Взять в работу, отложить, отменить или вернуть в работу."""
     try:
         return service.change_status(db, user, task_id, payload)
+    except TaskError as exc:
+        raise _fail(exc) from exc
+
+
+@router.post("/tasks/{task_id}/dependencies", response_model=TaskDetailOut)
+def add_dependency(
+    task_id: uuid.UUID, payload: TaskDependencyIn, user: CurrentUser, db: DbSession
+) -> TaskDetailOut:
+    """Поставить зависимость от задачи или её этапа."""
+    try:
+        return service.add_dependency(db, user, task_id, payload)
+    except TaskError as exc:
+        raise _fail(exc) from exc
+
+
+@router.delete("/tasks/{task_id}/dependencies/{dependency_id}", response_model=TaskDetailOut)
+def delete_dependency(
+    task_id: uuid.UUID,
+    dependency_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbSession,
+) -> TaskDetailOut:
+    """Снять зависимость."""
+    try:
+        return service.delete_dependency(db, user, task_id, dependency_id)
     except TaskError as exc:
         raise _fail(exc) from exc
 

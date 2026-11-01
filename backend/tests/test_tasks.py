@@ -547,3 +547,136 @@ def test_reschedule_keeps_closed_steps_in_history(client: TestClient, login: Lin
         json={"title": "Новый", "start_date": day(5), "due_date": day(9)},
     )
     assert added.status_code == 200, added.text
+
+
+def add_dependency(client: TestClient, task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    response = client.post(f"/api/v1/tasks/{task_id}/dependencies", json=payload)
+    assert response.status_code == 200, response.text
+    result: dict[str, Any] = response.json()
+    return result
+
+
+def test_dependency_blocks_until_task_done(client: TestClient, login: Link) -> None:
+    """Пока задача-предшественник не закрыта, зависимая не принимает отчёт."""
+    prerequisite = new_task(client, login, title="Собрать данные", assignee=SALES)
+    dependent = new_task(client, login, title="Свести отчёт", assignee=SALES2)
+    login("commercial")
+    blocked = add_dependency(client, dependent["id"], {"depends_on_task_id": prerequisite["id"]})
+    assert blocked["is_blocked"] is True
+    assert blocked["dependencies"][0]["satisfied"] is False
+    assert "Собрать данные" in blocked["blocked_by"][0]
+
+    login("sales2")
+    denied = client.post(
+        f"/api/v1/tasks/{dependent['id']}/reports",
+        json={"kind": "interim", "text": "Начал сводить", "progress": 20},
+    )
+    assert denied.status_code == 409
+    assert "ждёт завершения" in denied.json()["detail"]
+
+    # Закрываем предшественника — зависимая разблокирована.
+    login("sales")
+    client.post(
+        f"/api/v1/tasks/{prerequisite['id']}/reports",
+        json={"kind": "final", "text": "Данные собраны", "progress": 100},
+    )
+    login("sales2")
+    allowed = client.post(
+        f"/api/v1/tasks/{dependent['id']}/reports",
+        json={"kind": "interim", "text": "Начал сводить", "progress": 20},
+    )
+    assert allowed.status_code == 200, allowed.text
+
+
+def test_dependency_on_step(client: TestClient, login: Link) -> None:
+    prerequisite = new_task(
+        client,
+        login,
+        title="Собрать цены",
+        assignee=SALES,
+        steps=[{"title": "Обзвон", "start_date": day(0), "due_date": day(3)}],
+        start_date=day(0),
+        due_date=day(10),
+    )
+    step_id = prerequisite["steps"][0]["id"]
+    dependent = new_task(client, login, title="Свести матрицу", assignee=SALES2)
+    login("commercial")
+    blocked = add_dependency(
+        client,
+        dependent["id"],
+        {"depends_on_task_id": prerequisite["id"], "depends_on_step_id": step_id},
+    )
+    assert blocked["dependencies"][0]["step_title"] == "Обзвон"
+
+    login("sales")
+    denied = client.post(
+        f"/api/v1/tasks/{dependent['id']}/reports",
+        json={"kind": "interim", "text": "Пробую", "progress": 10},
+    )
+    assert denied.status_code == 403  # отчёт не его
+
+    client.post(
+        f"/api/v1/tasks/{prerequisite['id']}/reports",
+        json={
+            "kind": "interim",
+            "text": "Обзвон закончен",
+            "progress": 100,
+            "step_id": step_id,
+        },
+    )
+    login("sales2")
+    allowed = client.post(
+        f"/api/v1/tasks/{dependent['id']}/reports",
+        json={"kind": "interim", "text": "Матрицу начал", "progress": 10},
+    )
+    assert allowed.status_code == 200, allowed.text
+
+
+def test_dependency_rejects_cycles_and_self(client: TestClient, login: Link) -> None:
+    first = new_task(client, login, title="Первая", assignee=SALES)
+    second = new_task(client, login, title="Вторая", assignee=SALES)
+    login("commercial")
+    add_dependency(client, first["id"], {"depends_on_task_id": second["id"]})
+
+    self_dep = client.post(
+        f"/api/v1/tasks/{first['id']}/dependencies",
+        json={"depends_on_task_id": first["id"]},
+    )
+    assert self_dep.status_code == 422
+
+    cycle = client.post(
+        f"/api/v1/tasks/{second['id']}/dependencies",
+        json={"depends_on_task_id": first["id"]},
+    )
+    assert cycle.status_code == 422
+    assert "круг" in cycle.json()["detail"]
+
+    duplicate = client.post(
+        f"/api/v1/tasks/{first['id']}/dependencies",
+        json={"depends_on_task_id": second["id"]},
+    )
+    assert duplicate.status_code == 409
+
+
+def test_dependency_can_be_removed(client: TestClient, login: Link) -> None:
+    prerequisite = new_task(client, login, title="Ждём", assignee=SALES)
+    dependent = new_task(client, login, title="Зависимая", assignee=SALES2)
+    login("commercial")
+    blocked = add_dependency(client, dependent["id"], {"depends_on_task_id": prerequisite["id"]})
+    dependency_id = blocked["dependencies"][0]["id"]
+
+    removed = client.delete(f"/api/v1/tasks/{dependent['id']}/dependencies/{dependency_id}")
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["is_blocked"] is False
+    assert removed.json()["dependencies"] == []
+
+
+def test_only_creator_sets_dependency(client: TestClient, login: Link) -> None:
+    prerequisite = new_task(client, login, title="Ждём", assignee=SALES)
+    dependent = new_task(client, login, title="Зависимая", assignee=SALES)
+    login("sales")
+    denied = client.post(
+        f"/api/v1/tasks/{dependent['id']}/dependencies",
+        json={"depends_on_task_id": prerequisite["id"]},
+    )
+    assert denied.status_code == 403

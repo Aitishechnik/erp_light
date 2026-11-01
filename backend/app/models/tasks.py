@@ -95,6 +95,12 @@ class Task(Base):
         cascade="all, delete-orphan",
         order_by="TaskReport.created_at",
     )
+    dependencies: Mapped[list[TaskDependency]] = relationship(
+        back_populates="task",
+        cascade="all, delete-orphan",
+        foreign_keys="TaskDependency.task_id",
+        order_by="TaskDependency.created_at",
+    )
 
 
 class TaskStep(Base):
@@ -113,6 +119,34 @@ class TaskStep(Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     task: Mapped[Task] = relationship(back_populates="steps")
+
+
+class TaskDependency(Base):
+    """Зависимость: задача ждёт завершения другой задачи или её этапа."""
+
+    __tablename__ = "task_dependencies"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    depends_on_task_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Пусто — ждём завершения всей задачи, иначе — конкретного этапа.
+    depends_on_step_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("task_steps.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    created_by_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    task: Mapped[Task] = relationship(back_populates="dependencies", foreign_keys=[task_id])
+    depends_on: Mapped[Task] = relationship(foreign_keys=[depends_on_task_id], lazy="joined")
+    step: Mapped[TaskStep | None] = relationship(lazy="joined")
 
 
 class TaskReport(Base):

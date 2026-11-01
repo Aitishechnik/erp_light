@@ -1295,6 +1295,16 @@ export type TaskLastReport = {
   text: string
 }
 
+export type TaskDependency = {
+  id: string
+  task_id: string
+  task_title: string
+  step_id: string | null
+  step_title: string | null
+  satisfied: boolean
+  label: string
+}
+
 export type Task = {
   id: string
   title: string
@@ -1319,6 +1329,8 @@ export type Task = {
   reports_count: number
   files_count: number
   last_report: TaskLastReport | null
+  is_blocked: boolean
+  blocked_by: string[]
 }
 
 export type TaskActions = {
@@ -1329,7 +1341,11 @@ export type TaskActions = {
   can_reopen: boolean
 }
 
-export type TaskDetail = Task & { reports: TaskReport[]; actions: TaskActions }
+export type TaskDetail = Task & {
+  reports: TaskReport[]
+  dependencies: TaskDependency[]
+  actions: TaskActions
+}
 
 export type TaskAssignee = { id: string; full_name: string; role_title: string }
 
@@ -1380,6 +1396,22 @@ export function updateTask(taskId: string, payload: Partial<TaskIn>): Promise<Ta
   return request<TaskDetail>(`/api/v1/tasks/${taskId}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
+  })
+}
+
+export function addTaskDependency(
+  taskId: string,
+  payload: { depends_on_task_id: string; depends_on_step_id?: string | null },
+): Promise<TaskDetail> {
+  return request<TaskDetail>(`/api/v1/tasks/${taskId}/dependencies`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteTaskDependency(taskId: string, dependencyId: string): Promise<TaskDetail> {
+  return request<TaskDetail>(`/api/v1/tasks/${taskId}/dependencies/${dependencyId}`, {
+    method: 'DELETE',
   })
 }
 

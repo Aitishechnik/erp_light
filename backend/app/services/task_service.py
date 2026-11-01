@@ -43,6 +43,7 @@ from app.models.tasks import (
     TASK_PRIORITY_TITLES,
     TASK_STATUS_TITLES,
     Task,
+    TaskDependency,
     TaskReport,
     TaskReportFile,
     TaskStep,
@@ -51,6 +52,8 @@ from app.schemas.tasks import (
     TaskActionsOut,
     TaskAssigneeOut,
     TaskCreate,
+    TaskDependencyIn,
+    TaskDependencyOut,
     TaskDetailOut,
     TaskLastReportOut,
     TaskOut,
@@ -187,6 +190,8 @@ def _load(db: Session, task_id: uuid.UUID) -> Task:
         .where(Task.id == task_id)
         .options(selectinload(Task.steps))
         .options(selectinload(Task.reports).selectinload(TaskReport.files))
+        .options(selectinload(Task.dependencies).joinedload(TaskDependency.depends_on))
+        .options(selectinload(Task.dependencies).joinedload(TaskDependency.step))
     ).scalar_one_or_none()
     if task is None:
         raise TaskError("Задача не найдена", status_code=404)
@@ -231,6 +236,36 @@ def _overdue(task: Task) -> tuple[bool, int]:
     if task.due_date >= today:
         return False, 0
     return True, (today - task.due_date).days
+
+
+def _dep_satisfied(dep: TaskDependency) -> bool:
+    """Задача-предшественник закрыта или её этап закрыт отчётом."""
+    if dep.depends_on_step_id is not None:
+        return bool(dep.step is not None and dep.step.is_done)
+    return dep.depends_on is not None and dep.depends_on.status == "done"
+
+
+def _dep_label(dep: TaskDependency) -> str:
+    title = dep.depends_on.title if dep.depends_on else "задача"
+    if dep.step is not None:
+        return f"этап «{dep.step.title}» задачи «{title}»"
+    return f"задача «{title}»"
+
+
+def _dependency_out(dep: TaskDependency) -> TaskDependencyOut:
+    return TaskDependencyOut(
+        id=dep.id,
+        task_id=dep.depends_on_task_id,
+        task_title=dep.depends_on.title if dep.depends_on else "",
+        step_id=dep.depends_on_step_id,
+        step_title=dep.step.title if dep.step is not None else None,
+        satisfied=_dep_satisfied(dep),
+        label=_dep_label(dep),
+    )
+
+
+def _blocked_by(task: Task) -> list[str]:
+    return [_dep_label(dep) for dep in task.dependencies if not _dep_satisfied(dep)]
 
 
 def _step_reported(task: Task, step: TaskStep) -> bool:
@@ -296,6 +331,8 @@ def _base(task: Task) -> dict[str, Any]:
         "is_overdue": is_overdue,
         "days_overdue": days,
         "steps": steps,
+        "is_blocked": bool(_blocked_by(task)),
+        "blocked_by": _blocked_by(task),
         "reports_count": len(reports),
         "files_count": sum(len(report.files) for report in reports),
         "last_report": _last_report(task),
@@ -347,7 +384,12 @@ def _to_detail(task: Task, user: User) -> TaskDetailOut:
         )
         for report in _reports(task)
     ]
-    return TaskDetailOut(**_base(task), reports=reports, actions=_actions(user, task))
+    return TaskDetailOut(
+        **_base(task),
+        reports=reports,
+        dependencies=[_dependency_out(dep) for dep in task.dependencies],
+        actions=_actions(user, task),
+    )
 
 
 def _record(
@@ -404,6 +446,8 @@ def list_tasks(
         select(Task)
         .options(selectinload(Task.steps))
         .options(selectinload(Task.reports).selectinload(TaskReport.files))
+        .options(selectinload(Task.dependencies).joinedload(TaskDependency.depends_on))
+        .options(selectinload(Task.dependencies).joinedload(TaskDependency.step))
     )
     if mine or not _is_overseer(user):
         statement = statement.where((Task.assignee_id == user.id) | (Task.created_by_id == user.id))
@@ -761,12 +805,111 @@ def delete_step(db: Session, user: User, task_id: uuid.UUID, step_id: uuid.UUID)
     return _to_detail(_load(db, task_id), user)
 
 
+def _depends_on(db: Session, start_id: uuid.UUID, target_id: uuid.UUID) -> bool:
+    """Есть ли путь по зависимостям от start_id к target_id (для проверки циклов)."""
+    seen: set[uuid.UUID] = set()
+    stack = [start_id]
+    while stack:
+        current = stack.pop()
+        if current == target_id:
+            return True
+        if current in seen:
+            continue
+        seen.add(current)
+        rows = db.execute(
+            select(TaskDependency.depends_on_task_id).where(TaskDependency.task_id == current)
+        ).scalars()
+        stack.extend(rows)
+    return False
+
+
+def add_dependency(
+    db: Session, user: User, task_id: uuid.UUID, payload: TaskDependencyIn
+) -> TaskDetailOut:
+    """Поставить зависимость: задача ждёт завершения другой задачи или её этапа."""
+    task = _load(db, task_id)
+    _require_view(user, task)
+    _require_manage(user, task)
+    if task.status in CLOSED_TASK_STATUSES:
+        raise TaskError("Задача закрыта — сначала верните её в работу", status_code=409)
+    if payload.depends_on_task_id == task.id:
+        raise TaskError("Задача не может зависеть от себя", status_code=422)
+    prerequisite = _load(db, payload.depends_on_task_id)
+    _require_view(user, prerequisite)
+    step: TaskStep | None = None
+    if payload.depends_on_step_id is not None:
+        step = _find_step(prerequisite, payload.depends_on_step_id)
+    if _depends_on(db, prerequisite.id, task.id):
+        raise TaskError(
+            "Так получится замкнутый круг зависимостей: выберите другую задачу",
+            status_code=422,
+        )
+    for dep in task.dependencies:
+        if dep.depends_on_task_id == prerequisite.id and dep.depends_on_step_id == (
+            step.id if step else None
+        ):
+            raise TaskError("Такая зависимость уже есть", status_code=409)
+    db.add(
+        TaskDependency(
+            task_id=task.id,
+            depends_on_task_id=prerequisite.id,
+            depends_on_step_id=step.id if step else None,
+            created_by_id=user.id,
+        )
+    )
+    task.updated_at = _now()
+    _record(
+        db,
+        user,
+        "task.updated",
+        task,
+        f"Задача «{task.title}» теперь ждёт "
+        + (
+            f"этап «{step.title}» задачи «{prerequisite.title}»"
+            if step
+            else f"задачу «{prerequisite.title}»"
+        ),
+        audience=_audience(task.assignee),
+    )
+    db.commit()
+    db.expire_all()
+    return _to_detail(_load(db, task_id), user)
+
+
+def delete_dependency(
+    db: Session, user: User, task_id: uuid.UUID, dependency_id: uuid.UUID
+) -> TaskDetailOut:
+    task = _load(db, task_id)
+    _require_view(user, task)
+    _require_manage(user, task)
+    dependency = next((row for row in task.dependencies if row.id == dependency_id), None)
+    if dependency is None:
+        raise TaskError("Зависимость не найдена", status_code=404)
+    label = _dep_label(dependency)
+    db.delete(dependency)
+    task.updated_at = _now()
+    _record(
+        db,
+        user,
+        "task.updated",
+        task,
+        f"Задача «{task.title}» больше не ждёт {label}",
+        audience=_audience(task.assignee),
+    )
+    db.commit()
+    db.expire_all()
+    return _to_detail(_load(db, task_id), user)
+
+
 def add_report(db: Session, user: User, task_id: uuid.UUID, payload: TaskReportIn) -> TaskDetailOut:
     """Отчёт присылает исполнитель: промежуточный закрывает этап, финальный — задачу."""
     task = _load(db, task_id)
     _require_view(user, task)
     if user.id != task.assignee_id:
         raise TaskError("Отчёт по задаче присылает исполнитель", status_code=403)
+    blocked = _blocked_by(task)
+    if blocked:
+        raise TaskError("Задача ждёт завершения: " + "; ".join(blocked), status_code=409)
     if payload.kind not in REPORT_KINDS:
         raise TaskError("Отчёт: промежуточный или финальный", status_code=422)
     if task.status in CLOSED_TASK_STATUSES:

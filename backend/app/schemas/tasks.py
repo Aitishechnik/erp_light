@@ -45,6 +45,13 @@ class TaskStatusIn(BaseModel):
     action: str = Field(description="start | postpone | cancel | resume | reopen")
 
 
+class TaskDependencyIn(BaseModel):
+    depends_on_task_id: uuid.UUID
+    depends_on_step_id: uuid.UUID | None = Field(
+        default=None, description="Этап задачи-предшественника; пусто — вся задача"
+    )
+
+
 class TaskRescheduleIn(BaseModel):
     start_date: date
     due_date: date
@@ -60,6 +67,16 @@ class TaskReportIn(BaseModel):
     step_id: uuid.UUID | None = Field(
         default=None, description="Этап, который закрывает отчёт; пусто — отчёт по задаче"
     )
+
+
+class TaskDependencyOut(BaseModel):
+    id: uuid.UUID
+    task_id: uuid.UUID
+    task_title: str
+    step_id: uuid.UUID | None
+    step_title: str | None
+    satisfied: bool = Field(description="Предшественник уже завершён")
+    label: str = Field(description="Что ждём: задача или её этап")
 
 
 class TaskStepOut(BaseModel):
@@ -142,8 +159,11 @@ class TaskOut(BaseModel):
     reports_count: int
     files_count: int
     last_report: TaskLastReportOut | None
+    is_blocked: bool = Field(description="Ждёт завершения предшественника")
+    blocked_by: list[str] = Field(description="Кого именно ждёт")
 
 
 class TaskDetailOut(TaskOut):
     reports: list[TaskReportOut]
+    dependencies: list[TaskDependencyOut]
     actions: TaskActionsOut

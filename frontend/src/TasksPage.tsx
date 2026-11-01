@@ -1,10 +1,12 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  addTaskDependency,
   addTaskReport,
   addTaskStep,
   changeTaskStatus,
   createTask,
   deleteTask,
+  deleteTaskDependency,
   deleteTaskReportFile,
   deleteTaskStep,
   errorMessage,
@@ -151,6 +153,8 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
   const backToList = () => {
     window.location.hash = '#/tasks'
     setOpenId(null)
+    // При возврате к списку снова показываем сегодняшний день.
+    centered.current = false
   }
 
   const today = todayIso()
@@ -161,6 +165,7 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
 
   // Первый показ — сразу у сегодняшнего дня, а не у начала плана.
   useEffect(() => {
+    if (openId) return
     const element = scrollRef.current
     if (!element || tasks.length === 0 || centered.current) return
     const frame = requestAnimationFrame(() => {
@@ -168,7 +173,7 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
       centered.current = true
     })
     return () => cancelAnimationFrame(frame)
-  }, [tasks.length, today, gantt])
+  }, [tasks.length, today, gantt, openId])
 
   if (openId) {
     return (
@@ -373,6 +378,7 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
                                 {task.assignee_name} · {shortDate(task.start_date)}–
                                 {shortDate(task.due_date)}
                               </span>
+                              {task.is_blocked ? <span className="badge-wait">ждёт</span> : null}
                               {task.is_overdue ? (
                                 <span className="gantt-overdue">
                                   просрочено на {task.days_overdue} дн.
@@ -613,6 +619,9 @@ function TaskCard({
   const [stepTitle, setStepTitle] = useState('')
   const [stepStart, setStepStart] = useState('')
   const [stepDue, setStepDue] = useState('')
+  const [options, setOptions] = useState<Task[]>([])
+  const [depTaskId, setDepTaskId] = useState('')
+  const [depStepId, setDepStepId] = useState('')
   const [moving, setMoving] = useState(false)
   const [moveStart, setMoveStart] = useState('')
   const [moveDue, setMoveDue] = useState('')
@@ -633,6 +642,12 @@ function TaskCard({
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    fetchTasks()
+      .then(setOptions)
+      .catch(() => setOptions([]))
+  }, [])
 
   /** Общая обёртка: выполняем действие, обновляем карточку и список. */
   const run = async (action: () => Promise<unknown>) => {
@@ -662,6 +677,7 @@ function TaskCard({
 
   const isClosed = task.status === 'done' || task.status === 'cancelled'
   const openSteps = task.steps.filter((step) => !step.is_done)
+  const selectedDep = options.find((row) => row.id === depTaskId) ?? null
   const chosenStep = task.steps.find((step) => step.id === reportStep) ?? null
 
   /** Быстрый отчёт по этапу: выбираем этап в форме и уводим к ней. */
@@ -669,7 +685,9 @@ function TaskCard({
     setReportKind('interim')
     setReportStep(step.id)
     const form = document.querySelector('.task-report-form')
-    form?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    if (form && typeof form.scrollIntoView === 'function') {
+      form.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
   }
 
   const addReport = async (event: FormEvent) => {
@@ -722,6 +740,7 @@ function TaskCard({
         <div className="task-card-badges">
           <span className={`priority-chip ${task.priority}`}>{task.priority_title}</span>
           <span className={`task-status status-${task.status}`}>{task.status_title}</span>
+          {task.is_blocked ? <span className="badge-wait">ждёт</span> : null}
           {task.is_overdue ? (
             <span className="gantt-overdue">просрочено на {task.days_overdue} дн.</span>
           ) : null}
@@ -738,6 +757,13 @@ function TaskCard({
       {task.description ? <p className="task-description">{task.description}</p> : null}
 
       {error ? <p className="error">{error}</p> : null}
+
+      {task.is_blocked ? (
+        <p className="task-blocked">
+          Задача ждёт завершения: {task.blocked_by.join('; ')}. Пока предшественник не выполнен,
+          отчёт прислать нельзя.
+        </p>
+      ) : null}
 
       <div className="task-actions">
         {task.actions.can_change_status && task.status === 'new' ? (
@@ -888,6 +914,85 @@ function TaskCard({
         </form>
       ) : null}
 
+      <h2 className="section-title">Зависит от</h2>
+      {task.dependencies.length === 0 ? (
+        <p className="hint">Задача ни от чего не зависит — можно начинать сразу.</p>
+      ) : null}
+      <ul className="task-deps">
+        {task.dependencies.map((dep) => (
+          <li key={dep.id} className="task-dep">
+            <span className={dep.satisfied ? 'task-dep-done' : ''}>{dep.label}</span>
+            <span className={`task-kind ${dep.satisfied ? 'final' : ''}`}>
+              {dep.satisfied ? 'выполнено' : 'ждёт'}
+            </span>
+            {task.actions.can_edit ? (
+              <button
+                type="button"
+                className="btn-link danger"
+                disabled={busy}
+                onClick={() => run(() => deleteTaskDependency(task.id, dep.id))}
+              >
+                убрать
+              </button>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+
+      {task.actions.can_edit ? (
+        <form
+          className="task-dep-form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (!depTaskId) return
+            void run(async () => {
+              await addTaskDependency(task.id, {
+                depends_on_task_id: depTaskId,
+                depends_on_step_id: depStepId || null,
+              })
+              setDepTaskId('')
+              setDepStepId('')
+            })
+          }}
+        >
+          <label>
+            Задача
+            <select
+              value={depTaskId}
+              onChange={(event) => {
+                setDepTaskId(event.target.value)
+                setDepStepId('')
+              }}
+            >
+              <option value="">Выберите задачу</option>
+              {options
+                .filter((row) => row.id !== task.id)
+                .map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.title}
+                  </option>
+                ))}
+            </select>
+          </label>
+          {selectedDep && selectedDep.steps.length > 0 ? (
+            <label>
+              Этап
+              <select value={depStepId} onChange={(event) => setDepStepId(event.target.value)}>
+                <option value="">Вся задача</option>
+                {selectedDep.steps.map((step) => (
+                  <option key={step.id} value={step.id}>
+                    {step.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          <button type="submit" className="btn-link" disabled={busy || !depTaskId}>
+            Добавить зависимость
+          </button>
+        </form>
+      ) : null}
+
       <h2 className="section-title">Этапы</h2>
       {task.steps.length === 0 ? (
         <p className="hint">Этапов нет — задача идёт одной полосой.</p>
@@ -1018,7 +1123,11 @@ function TaskCard({
         ))}
       </ul>
 
-      {task.actions.can_report ? (
+      {task.actions.can_report && task.is_blocked ? (
+        <p className="hint">Отчёт можно будет прислать, когда предшественник завершится.</p>
+      ) : null}
+
+      {task.actions.can_report && !task.is_blocked ? (
         <form className="task-report-form" onSubmit={addReport}>
           <h3>Добавить отчёт</h3>
           <div className="task-form-row">
