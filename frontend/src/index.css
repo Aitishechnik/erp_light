@@ -2185,6 +2185,13 @@ button.primary:disabled,
   min-width: 6.5rem;
 }
 
+.need-total-caption {
+  margin-right: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
 .need-total small {
   margin-left: 0.25rem;
   font-weight: 500;

@@ -388,8 +388,10 @@ function GroupNote({ group, year, unit }: { group: GroupTotals; year: number; un
   return (
     <span className="sched-group" data-testid="schedule-group">
       <span className="sched-group-line">
-        по сырью ({group.positions} поз.): перекрыто {formatQuantity(group.covered.toFixed(3))} из{' '}
-        {formatQuantity(group.need.toFixed(3))} {unit} ({formatQuantity(share.toFixed(1))} %)
+        по сырью ({group.positions} поз.
+        {group.alternatives > 0 ? `, ${group.alternatives} альт.` : ''}): перекрыто{' '}
+        {formatQuantity(group.covered.toFixed(3))} из {formatQuantity(group.need.toFixed(3))} {unit}{' '}
+        ({formatQuantity(share.toFixed(1))} %)
       </span>
       <span className="sched-group-line">
         {[rest, carry, alternative].filter(Boolean).join(' · ')}
@@ -1193,7 +1195,11 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                     >
                       <td colSpan={7}>
                         <div className="need-head">
-                          <span className="need-total">
+                          <span
+                            className="need-total"
+                            title="Итог по позиции плана продаж (готовая продукция)"
+                          >
+                            <span className="need-total-caption">итог позиции</span>
                             {formatQuantity(position.total)}
                             <small>{position.unit}</small>
                           </span>
