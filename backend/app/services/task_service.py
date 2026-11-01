@@ -239,27 +239,31 @@ def _overdue(task: Task, due: date) -> tuple[bool, int]:
 
 
 def _effective_dates(task: Task, blocked: bool) -> tuple[date, date, int]:
-    """Пока задача ждёт мастера, её старт плавает.
+    """Пока задача ждёт мастера, её старт привязан к окну мастера.
 
-    Начало — не раньше сегодняшнего дня и не раньше планового окончания
-    самого позднего незавершённого мастера. Пока мастер в работе, «сегодня»
-    каждый день догоняет этот срок, поэтому дата и сдвигается вперёд.
+    Начало = сегодня, но не раньше старта мастера и не позже его окончания:
+    мастер ещё не начался — задача стоит на дне его старта; мастер в работе —
+    задача едет вместе с сегодняшним днём; мастер просрочен — задача ждёт на
+    последнем дне мастера. Окончание сдвигается на ту же величину.
     Возвращает начало, окончание и сдвиг в днях относительно плана.
     """
     start, due = task.start_date, task.due_date
     if not blocked:
         return start, due, 0
-    earliest = _today()
-    for dep in task.dependencies:
-        if _dep_satisfied(dep) or dep.depends_on is None:
-            continue
-        after = dep.depends_on.due_date + timedelta(days=1)
-        if after > earliest:
-            earliest = after
-    if earliest <= start:
-        return start, due, 0
-    shift = (earliest - start).days
-    return earliest, due + timedelta(days=shift), shift
+    masters = [
+        dep.depends_on
+        for dep in task.dependencies
+        if not _dep_satisfied(dep) and dep.depends_on is not None
+    ]
+    if not masters:
+        target = _today()
+    else:
+        # Ориентир — мастер с самым поздним окончанием: начало не раньше его
+        # старта, но и не позже его окончания (дальше задача ждёт на месте).
+        anchor = max(masters, key=lambda master: master.due_date)
+        target = min(max(_today(), anchor.start_date), anchor.due_date)
+    shift = (target - start).days
+    return target, due + timedelta(days=shift), shift
 
 
 def _dep_satisfied(dep: TaskDependency) -> bool:
@@ -292,12 +296,18 @@ def _blocked_by(task: Task) -> list[str]:
     return [_dep_label(dep) for dep in task.dependencies if not _dep_satisfied(dep)]
 
 
-def _freeze_start(db: Session, user: User, dependent: Task) -> None:
-    """Разблокировали задачу — фиксируем сегодняшний старт в плане."""
+def _freeze_start(db: Session, user: User, dependent: Task, *, target: date | None = None) -> None:
+    """Разблокировали задачу — фиксируем её старт в плане.
+
+    Без ``target`` берём сегодняшний день (мастер закрыт). При снятии
+    зависимости передаём дату, на которой задача остановилась.
+    """
     if dependent.status in CLOSED_TASK_STATUSES or _blocked_by(dependent):
         return
-    _, _, shift = _effective_dates(dependent, True)
-    if shift <= 0:
+    if target is None:
+        target = _today()
+    shift = (target - dependent.start_date).days
+    if shift == 0:
         return
     dependent.start_date = dependent.start_date + timedelta(days=shift)
     dependent.due_date = dependent.due_date + timedelta(days=shift)
@@ -394,7 +404,7 @@ def _base(task: Task) -> dict[str, Any]:
         "days_overdue": days,
         "steps": steps,
         "is_blocked": bool(blocked_by),
-        "dynamic_start": bool(blocked_by) and shift > 0,
+        "dynamic_start": bool(blocked_by) and shift != 0,
         "blocked_by": blocked_by,
         "reports_count": len(reports),
         "files_count": sum(len(report.files) for report in reports),
@@ -949,9 +959,11 @@ def delete_dependency(
     if dependency is None:
         raise TaskError("Зависимость не найдена", status_code=404)
     label = _dep_label(dependency)
+    # Фиксируем ту дату, на которой задача стояла под зависимостью.
+    frozen_start, _, _ = _effective_dates(task, True)
     task.dependencies.remove(dependency)
     db.flush()
-    _freeze_start(db, user, task)
+    _freeze_start(db, user, task, target=frozen_start)
     task.updated_at = _now()
     _record(
         db,

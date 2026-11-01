@@ -352,7 +352,7 @@ describe('TasksPage — зависимости', () => {
     expect(screen.getByText('задача «Собрать данные»')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Отправить отчёт' })).not.toBeInTheDocument()
     expect(screen.getByText(/Отчёт можно будет прислать/)).toBeInTheDocument()
-    expect(screen.getByText(/Старт — не раньше/)).toBeInTheDocument()
+    expect(screen.getByText(/Старт привязан к мастер-задаче/)).toBeInTheDocument()
   })
 
   it('добавляет зависимость от другой задачи', async () => {

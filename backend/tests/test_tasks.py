@@ -682,96 +682,33 @@ def test_only_creator_sets_dependency(client: TestClient, login: Link) -> None:
     assert denied.status_code == 403
 
 
-def test_dependent_start_slides_until_master_done(client: TestClient, login: Link) -> None:
-    """Пока мастер в работе, старт зависимой плавает вместе с сегодняшним днём."""
+def _at(offset: int):
+    """Подменить «сегодня» в сервисе, чтобы проверить сдвиг по дням."""
+    return lambda: date.today() + timedelta(days=offset)
+
+
+def _link(client: TestClient, login: Link, task_id: str, master_id: str) -> None:
+    login("commercial")
+    add_dependency(client, task_id, {"depends_on_task_id": master_id})
+
+
+def _row(client: TestClient, login: Link, task_id: str) -> dict[str, Any]:
+    login("commercial")
+    row: dict[str, Any] = client.get(f"/api/v1/tasks/{task_id}").json()
+    return row
+
+
+def test_dependent_waits_on_master_window(
+    client: TestClient, login: Link, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Пример из жизни: мастер 15–20, задача 2–9 переезжает на 15 и едет за сегодня."""
     master = new_task(
         client,
         login,
         title="Заключить договор",
         assignee=SALES,
-        start_date=day(-20),
-        due_date=day(40),
-    )
-    dependent = new_task(
-        client,
-        login,
-        title="Сделать первую отгрузку",
-        assignee=SALES2,
-        start_date=day(-5),
-        due_date=day(2),
-    )
-    login("commercial")
-    add_dependency(client, dependent["id"], {"depends_on_task_id": master["id"]})
-
-    login("sales2")
-    row = client.get(f"/api/v1/tasks/{dependent['id']}").json()
-    assert row["dynamic_start"] is True
-    # Не раньше планового окончания мастера (day(40)) плюс день.
-    assert row["start_date"] == day(41)
-    assert row["due_date"] == day(48)
-
-    # Мастер закрыт — старт фиксируется на сегодня и больше не сдвигается.
-    login("sales")
-    client.post(
-        f"/api/v1/tasks/{master['id']}/reports",
-        json={"kind": "final", "text": "Договор подписан", "progress": 100},
-    )
-    login("sales2")
-    frozen = client.get(f"/api/v1/tasks/{dependent['id']}").json()
-    assert frozen["is_blocked"] is False
-    assert frozen["dynamic_start"] is False
-    assert frozen["start_date"] == day(0)
-    assert frozen["due_date"] == day(7)
-
-    rows = client.get("/api/v1/messages").json()["rows"]
-    assert any("разблокирована" in row["summary"] for row in rows)
-
-
-def test_dependent_future_start_does_not_jump(client: TestClient, login: Link) -> None:
-    master = new_task(client, login, title="Мастер", assignee=SALES)
-    dependent = new_task(
-        client,
-        login,
-        title="Позже",
-        assignee=SALES2,
-        start_date=day(10),
-        due_date=day(17),
-    )
-    login("commercial")
-    add_dependency(client, dependent["id"], {"depends_on_task_id": master["id"]})
-    row = client.get(f"/api/v1/tasks/{dependent['id']}").json()
-    assert row["start_date"] == day(10)
-    assert row["dynamic_start"] is False
-
-
-def test_removing_dependency_freezes_start(client: TestClient, login: Link) -> None:
-    master = new_task(client, login, title="Мастер", assignee=SALES)
-    dependent = new_task(
-        client, login, title="Зависимая", assignee=SALES2, start_date=day(-3), due_date=day(4)
-    )
-    login("commercial")
-    blocked = add_dependency(client, dependent["id"], {"depends_on_task_id": master["id"]})
-    # Мастер по умолчанию заканчивается на day(5), значит старт — day(6).
-    assert blocked["start_date"] == day(6)
-
-    dependency_id = blocked["dependencies"][0]["id"]
-    removed = client.delete(f"/api/v1/tasks/{dependent['id']}/dependencies/{dependency_id}")
-    assert removed.status_code == 200, removed.text
-    body = removed.json()
-    assert body["is_blocked"] is False
-    assert body["start_date"] == day(0)
-    assert body["due_date"] == day(7)
-
-
-def test_dependent_plan_moves_after_master_due(client: TestClient, login: Link) -> None:
-    """Даже если план зависимой был раньше мастера, даты встают после него."""
-    master = new_task(
-        client,
-        login,
-        title="Согласовать матрицу",
-        assignee=SALES,
-        start_date=day(40),
-        due_date=day(70),
+        start_date=day(13),
+        due_date=day(18),
     )
     dependent = new_task(
         client,
@@ -781,8 +718,95 @@ def test_dependent_plan_moves_after_master_due(client: TestClient, login: Link) 
         start_date=day(0),
         due_date=day(7),
     )
+    _link(client, login, dependent["id"], master["id"])
+
+    shown = _row(client, login, dependent["id"])
+    assert (shown["start_date"], shown["due_date"]) == (day(13), day(20))
+
+    # Завтра (3 ноября) мастер ещё не начался — задача стоит на 15-м.
+    monkeypatch.setattr(task_service, "_today", _at(1))
+    shown = _row(client, login, dependent["id"])
+    assert (shown["start_date"], shown["due_date"]) == (day(13), day(20))
+
+    # 16 ноября — задача поехала вместе с сегодняшним днём.
+    monkeypatch.setattr(task_service, "_today", _at(14))
+    shown = _row(client, login, dependent["id"])
+    assert (shown["start_date"], shown["due_date"]) == (day(14), day(21))
+
+    monkeypatch.setattr(task_service, "_today", _at(16))
+    shown = _row(client, login, dependent["id"])
+    assert (shown["start_date"], shown["due_date"]) == (day(16), day(23))
+
+    # Мастер закрыт 18 ноября — старт фиксируется на дне завершения.
+    monkeypatch.setattr(task_service, "_today", _at(16))
+    login("sales")
+    client.post(
+        f"/api/v1/tasks/{master['id']}/reports",
+        json={"kind": "final", "text": "Договор подписан", "progress": 100},
+    )
+    frozen = _row(client, login, dependent["id"])
+    assert (frozen["start_date"], frozen["due_date"]) == (day(16), day(23))
+    assert frozen["is_blocked"] is False
+    assert frozen["dynamic_start"] is False
+
+
+def test_dependent_stops_at_master_due(
+    client: TestClient, login: Link, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Мастер просрочен — задача ждёт на его последнем дне."""
+    master = new_task(
+        client,
+        login,
+        title="Мастер",
+        assignee=SALES,
+        start_date=day(13),
+        due_date=day(18),
+    )
+    dependent = new_task(
+        client,
+        login,
+        title="Зависимая",
+        assignee=SALES2,
+        start_date=day(0),
+        due_date=day(7),
+    )
+    _link(client, login, dependent["id"], master["id"])
+    monkeypatch.setattr(task_service, "_today", _at(25))
+
+    shown = _row(client, login, dependent["id"])
+    assert (shown["start_date"], shown["due_date"]) == (day(18), day(25))
+
+    # Сняли зависимость — задача остаётся на той дате, где остановилась.
+    dependency_id = shown["dependencies"][0]["id"]
     login("commercial")
-    add_dependency(client, dependent["id"], {"depends_on_task_id": master["id"]})
-    row = client.get(f"/api/v1/tasks/{dependent['id']}").json()
-    assert row["start_date"] == day(71)
-    assert row["due_date"] == day(78)
+    removed = client.delete(f"/api/v1/tasks/{dependent['id']}/dependencies/{dependency_id}")
+    assert removed.status_code == 200, removed.text
+    body = removed.json()
+    assert (body["start_date"], body["due_date"]) == (day(18), day(25))
+
+
+def test_dependent_already_finished_when_master_ends(
+    client: TestClient, login: Link, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Если план уже позже окна мастера, задача не прыгает назад."""
+    master = new_task(
+        client,
+        login,
+        title="Мастер",
+        assignee=SALES,
+        start_date=day(1),
+        due_date=day(5),
+    )
+    dependent = new_task(
+        client,
+        login,
+        title="Позже",
+        assignee=SALES2,
+        start_date=day(10),
+        due_date=day(17),
+    )
+    _link(client, login, dependent["id"], master["id"])
+    monkeypatch.setattr(task_service, "_today", _at(3))
+    shown = _row(client, login, dependent["id"])
+    # Мастер идёт, «сегодня» — начало зависимой, окончание сохраняет длину.
+    assert (shown["start_date"], shown["due_date"]) == (day(3), day(10))
