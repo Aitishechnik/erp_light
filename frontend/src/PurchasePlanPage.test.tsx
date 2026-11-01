@@ -226,11 +226,11 @@ describe('PurchasePlanPage', () => {
     expect(detail).toHaveTextContent('Докупить, кг')
     expect(detail).toHaveTextContent('100 %')
 
-    // Переключатель: полоса по месяцам заказа и кварталы.
-    await user.click(screen.getByRole('button', { name: 'полосой' }))
-    expect(screen.getByTestId('schedule-bars')).toBeInTheDocument()
+    // Видов графика два: «кратко» и «кварталы»; вид «полосой» убран.
+    expect(screen.queryByRole('button', { name: 'полосой' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'кварталы' }))
     expect(screen.getByTestId('schedule-quarters')).toHaveTextContent('I квартал 2026')
+    expect(screen.queryByTestId('schedule-bars')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Добавить сырьё FIN-1' }))
     await user.selectOptions(screen.getByLabelText('Сырьё FIN-1 2'), 'raw-2')

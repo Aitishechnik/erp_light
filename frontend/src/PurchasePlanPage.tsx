@@ -120,12 +120,11 @@ function splitPreview(
   return result
 }
 
-/** Как показывать график заказа: сводкой, полосой по месяцам заказа или кварталами. */
-type ScheduleMode = 'summary' | 'bars' | 'quarters'
+/** Как показывать график заказа: сводкой или кварталами. */
+type ScheduleMode = 'summary' | 'quarters'
 
 const SCHEDULE_MODES: { id: ScheduleMode; title: string }[] = [
   { id: 'summary', title: 'кратко' },
-  { id: 'bars', title: 'полосой' },
   { id: 'quarters', title: 'кварталы' },
 ]
 
@@ -458,7 +457,6 @@ function ScheduleView({
   onToggle,
   year,
   extra,
-  wide = false,
   tableOnly = false,
   showCarry = true,
 }: {
@@ -468,7 +466,6 @@ function ScheduleView({
   onToggle: () => void
   year: number
   extra: string
-  wide?: boolean
   tableOnly?: boolean
   /** Излишек одной строки не показываем: по сырью он общий, его видно в сводке. */
   showCarry?: boolean
@@ -480,50 +477,6 @@ function ScheduleView({
 
   if (mode === 'summary' && tableOnly) {
     return <ScheduleTable rows={rows} year={year} extra="" />
-  }
-
-  if (mode === 'bars') {
-    const max = Math.max(...rows.map((row) => row.need), 1)
-    const maxHeight = wide ? 96 : 56
-    return (
-      <div className="sched-bars-wrap">
-        <div className="sched-bars" data-testid="schedule-bars">
-          {rows.map((row) => {
-            const height = Math.max(Math.round((row.need / max) * maxHeight), 3)
-            const filled = Math.min(row.covered / Math.max(row.need, 1), 1) * height
-            return (
-              <span
-                key={row.entry.month}
-                className={
-                  row.entry.overdue ? 'bar-col overdue' : row.soon ? 'bar-col soon' : 'bar-col'
-                }
-                title={`Потребность ${needMonth(row, year)}: ${formatQuantity(
-                  row.need.toFixed(3),
-                )} кг; заказ к ${orderDate(row)}${
-                  row.covered > 0
-                    ? `; перекрыто ${formatQuantity(row.covered.toFixed(3))} кг (${formatQuantity(
-                        row.share.toFixed(1),
-                      )} %)`
-                    : ''
-                }`}
-              >
-                <span className="bar-body" style={{ height }}>
-                  <i style={{ height: filled }} />
-                </span>
-                <span className="bar-label">
-                  {monthShort(row.entry.orderMonth)}
-                  <i>{String(row.entry.orderYear).slice(2)}</i>
-                </span>
-              </span>
-            )
-          })}
-        </div>
-        <span className="sched-legend">
-          месяцы заказа · тёмная часть столбика — перекрыто остатком и приходами
-        </span>
-        {extraLine}
-      </div>
-    )
   }
 
   if (mode === 'quarters') {
@@ -1499,7 +1452,6 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                             <ScheduleView
                               rows={rowSchedule}
                               mode={scheduleMode}
-                              wide
                               tableOnly
                               expanded={expanded}
                               onToggle={() => toggleSchedule(row.key)}

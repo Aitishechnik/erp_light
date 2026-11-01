@@ -699,11 +699,11 @@ test('закупщик раскладывает потребность план�
   await page.getByLabel('Цена FIN-1 1').fill('500')
   await expect(page.getByTestId('purchase-table')).toContainText('Ближайший заказ')
   await expect(page.getByTestId('purchase-table')).toContainText('10 кг')
-  // Переключатель видов графика: полоса по месяцам заказа и кварталы.
-  await page.getByRole('button', { name: 'полосой' }).click()
-  await expect(page.getByTestId('schedule-bars')).toBeVisible()
+  // Видов графика два — «кратко» и «кварталы»; вид «полосой» убран.
+  await expect(page.getByRole('button', { name: 'полосой' })).toHaveCount(0)
   await page.getByRole('button', { name: 'кварталы' }).click()
   await expect(page.getByTestId('schedule-quarters')).toContainText('I квартал')
+  await expect(page.getByTestId('schedule-bars')).toHaveCount(0)
   // «Кратко» + «Весь график»: таблица месяцев рисуется широкой строкой под сырьём.
   await page.getByRole('button', { name: 'кратко' }).click()
   await page.getByRole('button', { name: 'Весь график' }).first().click()

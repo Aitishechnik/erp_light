@@ -2882,19 +2882,6 @@ button.primary:disabled,
   display: block;
 }
 
-.sched-bars-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.sched-bars {
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-  flex-wrap: nowrap;
-}
-
 .sched-quarters {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2902,8 +2889,8 @@ button.primary:disabled,
   white-space: normal;
 }
 
-/* Полоса и кварталы рисуются во всю ширину под строкой сырья: в узкой колонке
-   двенадцать месяцев не читаются. */
+/* График рисуется во всю ширину под строкой сырья: в узкой колонке двенадцать
+   месяцев не читаются. */
 .sched-wide-head {
   margin-bottom: 0.35rem;
   color: var(--muted);
@@ -2912,43 +2899,6 @@ button.primary:disabled,
 
 .sched-wide-head b {
   color: var(--text);
-}
-
-.sched-bars .bar-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  flex: 1 1 0;
-  min-width: 0;
-}
-
-.sched-bars .bar-body {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  width: 100%;
-  background: #c7d7f7;
-  border-radius: 3px 3px 0 0;
-  overflow: hidden;
-}
-
-.sched-bars .bar-label {
-  display: flex;
-  gap: 3px;
-  font-size: 0.72rem;
-  color: var(--muted);
-}
-
-.sched-bars .bar-label i {
-  font-style: normal;
-  color: #98a2b3;
-}
-
-.sched-bars .sched-legend,
-.sched-bars-wrap .sched-legend {
-  color: var(--muted);
-  font-size: 0.72rem;
 }
 
 .sched-quarters .q-card {
@@ -3002,11 +2952,6 @@ button.primary:disabled,
   font-weight: 600;
 }
 
-.sched-bars .bar-body i {
-  display: block;
-  background: #3b82f6;
-}
-
 .purchase-table .schedule-wide > td {
   padding: 0.4rem 0.5rem 0.6rem;
   background: #fcfdff;
@@ -3057,14 +3002,6 @@ button.primary:disabled,
 .purchase-table .sched-table td.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
-}
-
-.sched-bars .bar-col.overdue .bar-body {
-  outline: 1px solid #e5484d;
-}
-
-.sched-bars .bar-col.soon .bar-body {
-  outline: 1px solid #f0b26b;
 }
 
 .purchase-table .sched-table tr.overdue td {
