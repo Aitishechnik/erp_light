@@ -83,6 +83,13 @@ CATALOG: dict[str, EventSpec] = {
     "counterparty.updated": EventSpec("Изменён контрагент", "critical", "counterparty"),
     "country.updated": EventSpec("Изменена страна и срок доставки", "critical", "country"),
     "auth.login_failed": EventSpec("Неудачная попытка входа", "critical", "user"),
+    "task.created": EventSpec("Поставлена задача", "info", "task"),
+    "task.updated": EventSpec("Изменена задача", "info", "task"),
+    "task.status_changed": EventSpec("Сменён статус задачи", "info", "task"),
+    "task.report_added": EventSpec("Отчёт по задаче", "info", "task"),
+    "task.done": EventSpec("Задача выполнена", "critical", "task"),
+    "task.reopened": EventSpec("Задача возвращена в работу", "critical", "task"),
+    "task.deleted": EventSpec("Задача удалена", "critical", "task"),
     "audit.cleanup_offered": EventSpec("Предложена очистка журнала", "critical", "audit"),
     "audit.cleanup_done": EventSpec("Журнал очищен", "critical", "audit"),
 }
@@ -172,6 +179,8 @@ def _link(event: AuditEvent) -> str | None:
         return f"#/counterparties/{event.entity_id}"
     if kind == "country" and event.entity_id:
         return f"#/countries/{event.entity_id}"
+    if kind == "task" and event.entity_id:
+        return f"#/tasks/{event.entity_id}"
     return None
 
 

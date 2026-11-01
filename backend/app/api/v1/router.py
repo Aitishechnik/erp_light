@@ -18,6 +18,7 @@ from app.api.v1 import (
     sales_plan_corrections,
     sales_plans,
     stock,
+    tasks,
     users,
 )
 
@@ -38,3 +39,4 @@ api_router.include_router(annual_sales_plans.router)
 api_router.include_router(sales_plan_corrections.router)
 api_router.include_router(purchase_plans.router)
 api_router.include_router(month_results.router)
+api_router.include_router(tasks.router)

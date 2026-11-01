@@ -20,6 +20,7 @@ import { PurchasePlanPage } from './PurchasePlanPage'
 import { ReceiptsPage } from './ReceiptsPage'
 import { SalesPlansPage } from './SalesPlansPage'
 import { StockPage } from './StockPage'
+import { TasksPage } from './TasksPage'
 
 type SectionId =
   | 'sales'
@@ -52,6 +53,8 @@ type Group = {
   id: string
   title: string
   sections: Section[]
+  /** Пункт меню без раскрытия: раздел один, как «Задачи». */
+  direct?: boolean
 }
 
 const PURCHASE_ROLES: Role[] = ['purchase_director', 'import_manager', 'executive_director']
@@ -106,7 +109,8 @@ const GROUPS: Group[] = [
   {
     id: 'tasks',
     title: 'Задачи',
-    sections: [{ id: 'tasks', title: 'Таск-трекер', ready: false }],
+    direct: true,
+    sections: [{ id: 'tasks', title: 'Таск-трекер', ready: true }],
   },
   {
     id: 'admin',
@@ -237,37 +241,56 @@ export function App() {
             const hasActive = currentGroup?.id === group.id
             return (
               <div className="nav-group" key={group.id}>
-                <button
-                  type="button"
-                  className={hasActive ? 'nav-group-head active' : 'nav-group-head'}
-                  aria-expanded={isOpen}
-                  onClick={() => setOpenGroup(isOpen ? null : group.id)}
-                >
-                  <span className="chevron" aria-hidden="true">
-                    {isOpen ? '▾' : '▸'}
-                  </span>
-                  {group.title}
-                </button>
-                {isOpen ? (
-                  <ul className="nav-sublist">
-                    {group.sections.map((section) => (
-                      <li key={section.id}>
-                        <button
-                          type="button"
-                          className={section.id === current.id ? 'nav-item active' : 'nav-item'}
-                          aria-current={section.id === current.id ? 'page' : undefined}
-                          onClick={() => {
-                            setActive(section.id)
-                            window.location.hash = sectionHash(section.id)
-                            setRoute({ section: section.id, params: [] })
-                          }}
-                        >
-                          {section.title}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
+                {group.direct ? (
+                  <button
+                    type="button"
+                    className={hasActive ? 'nav-item active nav-direct' : 'nav-item nav-direct'}
+                    aria-current={hasActive ? 'page' : undefined}
+                    onClick={() => {
+                      const section = group.sections[0]
+                      if (!section) return
+                      setActive(section.id)
+                      window.location.hash = sectionHash(section.id)
+                      setRoute({ section: section.id, params: [] })
+                    }}
+                  >
+                    {group.title}
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className={hasActive ? 'nav-group-head active' : 'nav-group-head'}
+                      aria-expanded={isOpen}
+                      onClick={() => setOpenGroup(isOpen ? null : group.id)}
+                    >
+                      <span className="chevron" aria-hidden="true">
+                        {isOpen ? '▾' : '▸'}
+                      </span>
+                      {group.title}
+                    </button>
+                    {isOpen ? (
+                      <ul className="nav-sublist">
+                        {group.sections.map((section) => (
+                          <li key={section.id}>
+                            <button
+                              type="button"
+                              className={section.id === current.id ? 'nav-item active' : 'nav-item'}
+                              aria-current={section.id === current.id ? 'page' : undefined}
+                              onClick={() => {
+                                setActive(section.id)
+                                window.location.hash = sectionHash(section.id)
+                                setRoute({ section: section.id, params: [] })
+                              }}
+                            >
+                              {section.title}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </>
+                )}
               </div>
             )
           })}
@@ -315,6 +338,7 @@ export function App() {
         ) : null}
         {current.id === 'imports' && current.ready ? <ImportsPage user={user} /> : null}
         {current.id === 'messages' && current.ready ? <MessagesPage user={user} /> : null}
+        {current.id === 'tasks' && current.ready ? <TasksPage user={user} focus={focus} /> : null}
         {!current.ready ? (
           <section>
             <h1>{current.title}</h1>

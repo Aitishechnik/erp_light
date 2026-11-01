@@ -59,6 +59,19 @@ from app.models.sales import (
     SalesFact,
     SalesFactUnmatched,
 )
+from app.models.tasks import (
+    CLOSED_TASK_STATUSES,
+    REPORT_KIND_TITLES,
+    REPORT_KINDS,
+    TASK_PRIORITIES,
+    TASK_PRIORITY_TITLES,
+    TASK_STATUS_TITLES,
+    TASK_STATUSES,
+    Task,
+    TaskReport,
+    TaskReportFile,
+    TaskStep,
+)
 
 __all__ = [
     "BATCH_TYPES",
@@ -114,5 +127,16 @@ __all__ = [
     "SalesPlanItem",
     "StockSnapshot",
     "User",
+    "CLOSED_TASK_STATUSES",
+    "REPORT_KINDS",
+    "REPORT_KIND_TITLES",
+    "TASK_PRIORITIES",
+    "TASK_PRIORITY_TITLES",
+    "TASK_STATUSES",
+    "TASK_STATUS_TITLES",
+    "Task",
+    "TaskReport",
+    "TaskReportFile",
+    "TaskStep",
     "name_key",
 ]

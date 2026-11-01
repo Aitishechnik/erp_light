@@ -1431,3 +1431,189 @@ test('ссылка из журнала открывает объект и под
   await expect(page.getByRole('heading', { level: 1, name: 'Номенклатура' })).toBeVisible()
   await expect(page.locator('tr.focus-row')).toContainText('SKU-1')
 })
+
+const TASK_BASE = {
+  id: 'task-1',
+  title: 'Подготовить матрицу цен',
+  description: 'Свести цены по клиентам' as string | null,
+  priority: 'red',
+  priority_title: 'Высокий',
+  status: 'new',
+  status_title: 'Новая',
+  progress: 0,
+  start_date: '2026-11-01',
+  due_date: '2026-11-08',
+  assignee_id: 'sm-1',
+  assignee_name: 'Иван Петров',
+  created_by_id: 'sm-1',
+  created_by_name: 'Иван Петров',
+  closed_at: null as string | null,
+  created_at: '2026-11-01T09:00:00Z',
+  updated_at: '2026-11-01T09:00:00Z',
+  is_overdue: false,
+  days_overdue: 0,
+  steps: [] as unknown[],
+  reports_count: 0,
+  files_count: 0,
+  last_report: null as unknown,
+}
+
+test('таск-трекер: задача, отчёт с файлом и закрытие', async ({ page }) => {
+  await mockSession(page)
+  await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
+
+  type StoredFile = {
+    id: string
+    original_name: string
+    size_bytes: number
+    content_type: string
+    uploaded_by_name: string
+    created_at: string
+  }
+  type StoredReport = {
+    id: string
+    kind: 'interim' | 'final'
+    kind_title: string
+    progress: number
+    text: string
+    author_id: string
+    author_name: string
+    created_at: string
+    files: StoredFile[]
+  }
+
+  let task: typeof TASK_BASE | null = null
+  const reports: StoredReport[] = []
+
+  const detail = () => {
+    const current = task ?? TASK_BASE
+    const done = current.status === 'done'
+    return {
+      ...current,
+      reports,
+      reports_count: reports.length,
+      files_count: reports.reduce((sum, report) => sum + report.files.length, 0),
+      actions: {
+        can_edit: !done,
+        can_change_status: !done,
+        can_report: !done,
+        can_delete: reports.length === 0,
+        can_reopen: done,
+      },
+    }
+  }
+
+  await page.route('**/api/v1/tasks**', async (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+    const path = url.pathname
+    const method = request.method()
+
+    if (path.endsWith('/assignees')) {
+      return route.fulfill({
+        json: [{ id: 'sm-1', full_name: 'Иван Петров', role_title: 'Менеджер по продажам' }],
+      })
+    }
+    if (path === '/api/v1/tasks' && method === 'GET') {
+      return route.fulfill({ json: task ? [task] : [] })
+    }
+    if (path === '/api/v1/tasks' && method === 'POST') {
+      const body = JSON.parse(request.postData() ?? '{}') as Record<string, unknown>
+      task = {
+        ...TASK_BASE,
+        title: String(body.title),
+        description: (body.description as string | null) ?? null,
+        priority: (body.priority as string) ?? 'yellow',
+        priority_title: body.priority === 'red' ? 'Высокий' : 'Обычный',
+        start_date: String(body.start_date),
+        due_date: String(body.due_date),
+      }
+      return route.fulfill({ status: 201, json: detail() })
+    }
+    if (path.endsWith('/reports') && method === 'POST') {
+      const body = JSON.parse(request.postData() ?? '{}') as {
+        kind: 'interim' | 'final'
+        text: string
+        progress: number
+      }
+      const final = body.kind === 'final'
+      reports.push({
+        id: `report-${reports.length + 1}`,
+        kind: body.kind,
+        kind_title: final ? 'Финальный' : 'Промежуточный',
+        progress: final ? 100 : body.progress,
+        text: body.text,
+        author_id: 'sm-1',
+        author_name: 'Иван Петров',
+        created_at: '2026-11-01T10:00:00Z',
+        files: [],
+      })
+      task = {
+        ...(task ?? TASK_BASE),
+        progress: final ? 100 : body.progress,
+        status: final ? 'done' : 'in_progress',
+        status_title: final ? 'Выполнена' : 'В работе',
+        closed_at: final ? '2026-11-01T10:00:00Z' : null,
+      }
+      return route.fulfill({ json: detail() })
+    }
+    if (path.includes('/files') && method === 'POST') {
+      const last = reports[reports.length - 1]
+      if (last) {
+        last.files.push({
+          id: 'file-1',
+          original_name: 'смета.pdf',
+          size_bytes: 2048,
+          content_type: 'application/pdf',
+          uploaded_by_name: 'Иван Петров',
+          created_at: '2026-11-01T10:01:00Z',
+        })
+      }
+      return route.fulfill({ json: { id: 'file-1', original_name: 'смета.pdf', size_bytes: 2048 } })
+    }
+    if (method === 'GET' && /\/api\/v1\/tasks\/[^/]+$/.test(path)) {
+      return route.fulfill({ json: detail() })
+    }
+    return route.fulfill({ status: 404, json: { detail: `нет мока для ${method} ${path}` } })
+  })
+
+  await page.goto('/')
+  // «Задачи» — верхний пункт меню, раздел открывается сразу.
+  await page.getByRole('button', { name: 'Задачи', exact: true }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Задачи' })).toBeVisible()
+  await expect(page.getByText('Задач пока нет — поставьте первую.')).toBeVisible()
+
+  await page.getByRole('button', { name: '＋ Новая задача' }).first().click()
+  await page.getByLabel('Название').fill('Подготовить матрицу цен')
+  await page.getByRole('button', { name: 'Поставить задачу' }).click()
+
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Подготовить матрицу цен' }),
+  ).toBeVisible()
+  await expect(page.getByText('Готовность: 0%')).toBeVisible()
+
+  // Промежуточный отчёт с файлом.
+  await page.getByLabel('Что сделано').fill('Собрал цены по десяти клиентам')
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'смета.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from('%PDF-1.4 test'),
+  })
+  await page.getByRole('button', { name: 'Отправить отчёт' }).click()
+
+  await expect(page.getByText('Собрал цены по десяти клиентам')).toBeVisible()
+  await expect(page.getByRole('link', { name: 'смета.pdf' })).toBeVisible()
+
+  // Финальный отчёт закрывает задачу.
+  await page.getByLabel('Вид отчёта').selectOption('final')
+  await page.getByLabel('Что сделано').fill('Матрица согласована с коммерческим директором')
+  await page.getByRole('button', { name: 'Закрыть задачу' }).click()
+
+  await expect(page.getByText('Выполнена', { exact: true })).toBeVisible()
+  await expect(page.getByText('Готовность: 100%')).toBeVisible()
+
+  // Гант показывает закрытую задачу с полной заливкой.
+  await page.getByRole('button', { name: '← Все задачи' }).click()
+  await expect(page.getByTestId('gantt')).toBeVisible()
+  await expect(page.getByText('100%')).toBeVisible()
+})

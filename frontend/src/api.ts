@@ -1245,3 +1245,209 @@ export function errorMessage(err: unknown): string {
   if (err instanceof ApiError) return err.message
   return err instanceof Error ? err.message : 'Не удалось выполнить действие'
 }
+
+// --- Таск-трекер ---------------------------------------------------------
+
+export type TaskPriority = 'green' | 'yellow' | 'red'
+
+export type TaskStatus = 'new' | 'in_progress' | 'postponed' | 'done' | 'cancelled'
+
+export type TaskStep = {
+  id: string
+  title: string
+  start_date: string
+  due_date: string
+  is_done: boolean
+  position: number
+}
+
+export type TaskReportFile = {
+  id: string
+  original_name: string
+  size_bytes: number
+  content_type: string
+  uploaded_by_name: string
+  created_at: string
+}
+
+export type TaskReport = {
+  id: string
+  kind: 'interim' | 'final'
+  kind_title: string
+  progress: number
+  text: string
+  author_id: string
+  author_name: string
+  created_at: string
+  files: TaskReportFile[]
+}
+
+export type TaskLastReport = {
+  created_at: string
+  kind: 'interim' | 'final'
+  kind_title: string
+  author_name: string
+  text: string
+}
+
+export type Task = {
+  id: string
+  title: string
+  description: string | null
+  priority: TaskPriority
+  priority_title: string
+  status: TaskStatus
+  status_title: string
+  progress: number
+  start_date: string
+  due_date: string
+  assignee_id: string
+  assignee_name: string
+  created_by_id: string
+  created_by_name: string
+  closed_at: string | null
+  created_at: string
+  updated_at: string
+  is_overdue: boolean
+  days_overdue: number
+  steps: TaskStep[]
+  reports_count: number
+  files_count: number
+  last_report: TaskLastReport | null
+}
+
+export type TaskActions = {
+  can_edit: boolean
+  can_change_status: boolean
+  can_report: boolean
+  can_delete: boolean
+  can_reopen: boolean
+}
+
+export type TaskDetail = Task & { reports: TaskReport[]; actions: TaskActions }
+
+export type TaskAssignee = { id: string; full_name: string; role_title: string }
+
+export type TaskIn = {
+  title: string
+  description?: string | null
+  priority?: TaskPriority
+  start_date: string
+  due_date: string
+  assignee_id?: string | null
+}
+
+export type TaskFilters = {
+  mine?: boolean
+  status?: string
+  priority?: string
+  overdue?: boolean
+  assigneeId?: string
+}
+
+export function fetchTaskAssignees(): Promise<TaskAssignee[]> {
+  return request<TaskAssignee[]>('/api/v1/tasks/assignees')
+}
+
+export function fetchTasks(filters?: TaskFilters): Promise<Task[]> {
+  const query = new URLSearchParams()
+  if (filters?.mine) query.set('mine', 'true')
+  if (filters?.status) query.set('status', filters.status)
+  if (filters?.priority) query.set('priority', filters.priority)
+  if (filters?.overdue) query.set('overdue', 'true')
+  if (filters?.assigneeId) query.set('assignee_id', filters.assigneeId)
+  const suffix = query.toString() ? `?${query.toString()}` : ''
+  return request<Task[]>(`/api/v1/tasks${suffix}`)
+}
+
+export function fetchTask(taskId: string): Promise<TaskDetail> {
+  return request<TaskDetail>(`/api/v1/tasks/${taskId}`)
+}
+
+export function createTask(payload: TaskIn): Promise<TaskDetail> {
+  return request<TaskDetail>('/api/v1/tasks', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateTask(taskId: string, payload: Partial<TaskIn>): Promise<TaskDetail> {
+  return request<TaskDetail>(`/api/v1/tasks/${taskId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteTask(taskId: string): Promise<void> {
+  return request<void>(`/api/v1/tasks/${taskId}`, { method: 'DELETE' })
+}
+
+export function changeTaskStatus(taskId: string, action: string): Promise<TaskDetail> {
+  return request<TaskDetail>(`/api/v1/tasks/${taskId}/status`, {
+    method: 'POST',
+    body: JSON.stringify({ action }),
+  })
+}
+
+export function addTaskStep(
+  taskId: string,
+  payload: { title: string; start_date: string; due_date: string },
+): Promise<TaskDetail> {
+  return request<TaskDetail>(`/api/v1/tasks/${taskId}/steps`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateTaskStep(
+  taskId: string,
+  stepId: string,
+  payload: { is_done?: boolean; title?: string; start_date?: string; due_date?: string },
+): Promise<TaskDetail> {
+  return request<TaskDetail>(`/api/v1/tasks/${taskId}/steps/${stepId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteTaskStep(taskId: string, stepId: string): Promise<TaskDetail> {
+  return request<TaskDetail>(`/api/v1/tasks/${taskId}/steps/${stepId}`, { method: 'DELETE' })
+}
+
+export function addTaskReport(
+  taskId: string,
+  payload: { kind: 'interim' | 'final'; text: string; progress: number },
+): Promise<TaskDetail> {
+  return request<TaskDetail>(`/api/v1/tasks/${taskId}/reports`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function uploadTaskReportFile(
+  taskId: string,
+  reportId: string,
+  file: File,
+): Promise<TaskReportFile> {
+  const form = new FormData()
+  form.append('file', file)
+  return request<TaskReportFile>(`/api/v1/tasks/${taskId}/reports/${reportId}/files`, {
+    method: 'POST',
+    body: form,
+  })
+}
+
+export function deleteTaskReportFile(
+  taskId: string,
+  reportId: string,
+  fileId: string,
+): Promise<void> {
+  return request<void>(`/api/v1/tasks/${taskId}/reports/${reportId}/files/${fileId}`, {
+    method: 'DELETE',
+  })
+}
+
+/** Прямая ссылка на файл отчёта: cookie сессии браузер отправит сам. */
+export function taskFileUrl(taskId: string, reportId: string, fileId: string): string {
+  return `/api/v1/tasks/${taskId}/reports/${reportId}/files/${fileId}`
+}

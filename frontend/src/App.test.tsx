@@ -158,6 +158,23 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: 'Номенклатура' })).not.toBeInTheDocument()
   })
 
+  it('«Задачи» — верхний пункт меню: открывает трекер без раскрытия', async () => {
+    const user = userEvent.setup()
+    mockApi({
+      '/api/v1/auth/me': { body: MANAGER },
+      '/api/v1/stock': { body: [] },
+      '/api/v1/tasks': { body: [] },
+    })
+    render(<App />)
+
+    const section = await screen.findByRole('button', { name: 'Задачи' })
+    expect(screen.queryByRole('button', { name: 'Таск-трекер' })).not.toBeInTheDocument()
+
+    await user.click(section)
+    expect(await screen.findByRole('heading', { level: 1, name: 'Задачи' })).toBeInTheDocument()
+    expect(screen.getByText('Задач пока нет — поставьте первую.')).toBeInTheDocument()
+  })
+
   it('показывает пустое состояние, когда остатков нет', async () => {
     mockApi({ '/api/v1/auth/me': { body: MANAGER }, '/api/v1/stock': { body: [] } })
     render(<App />)
