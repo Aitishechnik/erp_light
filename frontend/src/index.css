@@ -2087,27 +2087,6 @@ button.primary:disabled,
   font-size: 0.8rem;
 }
 
-/* План/факт строки: поступило по явно связанным поступлениям, под количеством. */
-.purchase-table .fact-line {
-  display: block;
-  margin-top: 2px;
-  max-width: 7rem;
-  color: var(--muted);
-  font-size: 0.74rem;
-  white-space: normal;
-  line-height: 1.2;
-}
-
-.purchase-table .fact-line.done {
-  color: #1c6b3a;
-  font-weight: 600;
-}
-
-.purchase-table .fact-share {
-  display: block;
-  white-space: nowrap;
-}
-
 .annual-items-head {
   margin-top: 1rem;
 }

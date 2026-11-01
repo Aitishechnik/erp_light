@@ -210,8 +210,7 @@ describe('PurchasePlanPage', () => {
     expect(screen.getByTestId('position-FIN-1')).toHaveTextContent('разложено')
     expect(await screen.findByLabelText('Количество FIN-1 1')).toHaveValue('30')
     expect(screen.getByTestId('purchase-plan-card')).toHaveTextContent(/15\s*000,00/)
-    // Приход: 10 кг из 30 — только по явной ссылке поступления на строку.
-    expect(screen.getByTestId('fact-item-1')).toHaveTextContent('пришло 10')
+    // Приход 10 кг из 30 виден по покрытию: январь закрыт.
     // График по умолчанию — одна строка «ближайший заказ», январь уже перекрыт приходом.
     const table = screen.getByTestId('purchase-table')
     expect(table).toHaveTextContent(
@@ -268,7 +267,7 @@ describe('PurchasePlanPage', () => {
     )
     render(<PurchasePlanPage user={DIRECTOR} />)
 
-    expect(await screen.findByTestId('fact-item-1')).toHaveTextContent('пришло 10')
+    await screen.findByTestId('purchase-row-item-1')
     const table = screen.getByTestId('purchase-table')
     // Январь закрыт полностью, остаток 15 кг пошёл на февраль: докупить 5 кг.
     expect(table).toHaveTextContent(
@@ -298,8 +297,9 @@ describe('PurchasePlanPage', () => {
     )
     render(<PurchasePlanPage user={DIRECTOR} />)
 
-    const table = await screen.findByTestId('purchase-table')
-    expect(await screen.findByLabelText('Количество FIN-1 1')).toHaveValue('30')
+    await screen.findByTestId('purchase-row-item-1')
+    const table = screen.getByTestId('purchase-table')
+    expect(screen.getByLabelText('Количество FIN-1 1')).toHaveValue('30')
     expect(table).toHaveTextContent('Потребность закрыта до конца года')
     expect(table).toHaveTextContent('излишек после февраль 2026 — 12 кг, переносим на 2027 год')
   })
@@ -338,9 +338,8 @@ describe('PurchasePlanPage', () => {
     )
     render(<PurchasePlanPage user={DIRECTOR} />)
 
-    // Приход связан только с первой строкой, но показан как общий по сырью.
-    expect(await screen.findByTestId('fact-item-1')).toHaveTextContent('пришло 40')
-    expect(screen.getByTestId('fact-item-2')).toHaveTextContent('пришло 40')
+    // Приход связан только с первой строкой, но считается общим по сырью.
+    await screen.findByTestId('purchase-row-item-1')
     const table = screen.getByTestId('purchase-table')
     expect(screen.getAllByTestId('schedule-group')).toHaveLength(2)
     // Нужно 45 кг, пришло 40: обе строки закрыты пропорционально, докупить 5.

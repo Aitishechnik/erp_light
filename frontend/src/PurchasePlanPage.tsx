@@ -1280,12 +1280,6 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                         const group = coverage.group.get(groupKey(row))
                         const rowSchedule = coverage.byRow.get(row.key) ?? []
                         const grouped = (group?.rows ?? 1) > 1 || (group?.alternatives ?? 0) > 0
-                        const factText = `пришло ${formatQuantity(
-                          grouped ? (group?.fact ?? 0).toFixed(3) : row.factQuantity,
-                        )}`
-                        const factTitle = grouped
-                          ? 'Общий приход по сырью — по всем строкам этого сырья'
-                          : 'Приход по связанным поступлениям'
                         return (
                           <tr
                             key={row.key}
@@ -1396,15 +1390,6 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                               ) : (
                                 formatQuantity(row.quantity)
                               )}
-                              {row.id ? (
-                                <span
-                                  className="fact-line"
-                                  data-testid={`fact-${row.key}`}
-                                  title={factTitle}
-                                >
-                                  {factText}
-                                </span>
-                              ) : null}
                             </td>
                             <td className="num">
                               {canEdit ? (
