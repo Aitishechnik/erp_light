@@ -45,6 +45,14 @@ class TaskStatusIn(BaseModel):
     action: str = Field(description="start | postpone | cancel | resume | reopen")
 
 
+class TaskRescheduleIn(BaseModel):
+    start_date: date
+    due_date: date
+    move_steps: bool = Field(
+        default=True, description="Сдвинуть этапы на тот же срок, что и задачу"
+    )
+
+
 class TaskReportIn(BaseModel):
     kind: str = Field(description="interim — промежуточный, final — финальный")
     text: str = Field(min_length=3, max_length=4000, description="Что сделано / итог")

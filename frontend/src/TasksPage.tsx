@@ -12,6 +12,7 @@ import {
   fetchTaskAssignees,
   fetchTasks,
   type Role,
+  rescheduleTask,
   type SessionUser,
   type Task,
   type TaskAssignee,
@@ -611,6 +612,10 @@ function TaskCard({
   const [stepTitle, setStepTitle] = useState('')
   const [stepStart, setStepStart] = useState('')
   const [stepDue, setStepDue] = useState('')
+  const [moving, setMoving] = useState(false)
+  const [moveStart, setMoveStart] = useState('')
+  const [moveDue, setMoveDue] = useState('')
+  const [moveSteps, setMoveSteps] = useState(true)
 
   const load = useCallback(async () => {
     try {
@@ -769,6 +774,21 @@ function TaskCard({
         {task.actions.can_edit ? (
           <button
             type="button"
+            className="btn-link"
+            disabled={busy}
+            onClick={() => {
+              setMoveStart(task.start_date)
+              setMoveDue(task.due_date)
+              setMoveSteps(true)
+              setMoving(true)
+            }}
+          >
+            Перенести
+          </button>
+        ) : null}
+        {task.actions.can_edit ? (
+          <button
+            type="button"
             className="btn-link danger"
             disabled={busy}
             onClick={() => run(() => changeTaskStatus(task.id, 'cancel'))}
@@ -803,6 +823,71 @@ function TaskCard({
           </button>
         ) : null}
       </div>
+
+      {!task.actions.can_delete && task.actions.can_edit && !isClosed && task.reports.length > 0 ? (
+        <p className="hint">
+          Удалить задачу нельзя: по ней уже есть отчёты — история сохраняется. Чтобы снять её с
+          работы, нажмите «Отозвать задачу».
+        </p>
+      ) : null}
+
+      {moving ? (
+        <form
+          className="task-move-form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (!moveStart || !moveDue) {
+              setError('Укажите обе новые даты')
+              return
+            }
+            if (moveDue < moveStart) {
+              setError('Новое окончание раньше нового начала')
+              return
+            }
+            void run(async () => {
+              await rescheduleTask(task.id, {
+                start_date: moveStart,
+                due_date: moveDue,
+                move_steps: moveSteps,
+              })
+              setMoving(false)
+            })
+          }}
+        >
+          <label>
+            Новое начало
+            <input
+              type="date"
+              value={moveStart}
+              onChange={(event) => setMoveStart(event.target.value)}
+            />
+          </label>
+          <label>
+            Новое окончание
+            <input
+              type="date"
+              value={moveDue}
+              onChange={(event) => setMoveDue(event.target.value)}
+            />
+          </label>
+          <label className="inline-check">
+            <input
+              type="checkbox"
+              checked={moveSteps}
+              onChange={(event) => setMoveSteps(event.target.checked)}
+            />
+            сдвинуть этапы вместе с задачей
+          </label>
+          <div className="task-form-actions">
+            <button type="submit" className="btn-primary" disabled={busy}>
+              Сохранить перенос
+            </button>
+            <button type="button" className="btn-link" onClick={() => setMoving(false)}>
+              Отмена
+            </button>
+          </div>
+        </form>
+      ) : null}
 
       <h2 className="section-title">Этапы</h2>
       {task.steps.length === 0 ? (

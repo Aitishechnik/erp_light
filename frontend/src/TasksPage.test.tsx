@@ -262,3 +262,52 @@ describe('TasksPage — этапы', () => {
     expect(screen.getByText('Скидки согласованы со всеми')).toBeInTheDocument()
   })
 })
+
+describe('TasksPage — перенос задачи', () => {
+  it('меняет сроки и показывает новые даты', async () => {
+    const user = userEvent.setup()
+    let current: TaskDetail = {
+      ...DETAIL,
+      start_date: '2026-11-02',
+      due_date: '2026-11-06',
+      steps: [],
+      reports: [],
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        const method = (init?.method ?? 'GET').toUpperCase()
+        const json = (body: unknown) =>
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        if (url.includes('/reschedule') && method === 'POST') {
+          const payload = JSON.parse(String(init?.body)) as {
+            start_date: string
+            due_date: string
+          }
+          current = { ...current, start_date: payload.start_date, due_date: payload.due_date }
+          return json(current)
+        }
+        if (url.includes('/api/v1/tasks/t1') && method === 'GET') return json(current)
+        if (url.includes('/api/v1/tasks') && method === 'GET') return json([TASK])
+        return new Response(JSON.stringify({ detail: 'нет мока' }), { status: 404 })
+      }),
+    )
+
+    render(<TasksPage user={COMMERCIAL} focus={['t1']} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Перенести' }))
+    const start = screen.getByLabelText('Новое начало')
+    const due = screen.getByLabelText('Новое окончание')
+    await user.clear(start)
+    await user.type(start, '2026-11-05')
+    await user.clear(due)
+    await user.type(due, '2026-11-12')
+    await user.click(screen.getByRole('button', { name: 'Сохранить перенос' }))
+
+    expect(await screen.findByText(/05\.11\.2026 — 12\.11\.2026/)).toBeInTheDocument()
+  })
+})

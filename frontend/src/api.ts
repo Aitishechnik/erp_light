@@ -1383,6 +1383,16 @@ export function updateTask(taskId: string, payload: Partial<TaskIn>): Promise<Ta
   })
 }
 
+export function rescheduleTask(
+  taskId: string,
+  payload: { start_date: string; due_date: string; move_steps: boolean },
+): Promise<TaskDetail> {
+  return request<TaskDetail>(`/api/v1/tasks/${taskId}/reschedule`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function deleteTask(taskId: string): Promise<void> {
   return request<void>(`/api/v1/tasks/${taskId}`, { method: 'DELETE' })
 }

@@ -1552,6 +1552,11 @@ test('таск-трекер: коммерческий ставит задачу,
       })
       return route.fulfill({ status: 201, json: detail() })
     }
+    if (path.endsWith('/reschedule') && method === 'POST') {
+      const body = JSON.parse(request.postData() ?? '{}') as Record<string, string>
+      task = { ...(task ?? {}), start_date: body.start_date, due_date: body.due_date }
+      return route.fulfill({ json: detail() })
+    }
     if (path.endsWith('/steps') && method === 'POST') {
       const body = JSON.parse(request.postData() ?? '{}') as Record<string, unknown>
       steps.push({
@@ -1656,12 +1661,19 @@ test('таск-трекер: коммерческий ставит задачу,
   // Задача принята автоматически: она сразу в работе.
   await expect(page.getByText('В работе', { exact: true })).toBeVisible()
 
-  // 2. Постановщик добавляет этап — даты подставляются по порядку.
+  // 2. Постановщик переносит задачу: сроки меняются, этапы поедут следом.
+  await page.getByRole('button', { name: 'Перенести' }).click()
+  await page.getByLabel('Новое начало').fill('2026-12-01')
+  await page.getByLabel('Новое окончание').fill('2026-12-10')
+  await page.getByRole('button', { name: 'Сохранить перенос' }).click()
+  await expect(page.getByText(/01\.12\.2026 — 10\.12\.2026/)).toBeVisible()
+
+  // 3. Добавляем этап — даты подставляются по порядку.
   await page.getByPlaceholder('Название этапа').fill('Собрать цены')
   await page.getByRole('button', { name: 'Добавить этап' }).click()
   await expect(page.getByText('Собрать цены')).toBeVisible()
 
-  // 3. Исполнитель закрывает этап промежуточным отчётом.
+  // 4. Исполнитель закрывает этап промежуточным отчётом.
   session = SALES_USER
   await page.goto('/#/tasks/task-1')
   await page.reload()
@@ -1674,7 +1686,7 @@ test('таск-трекер: коммерческий ставит задачу,
   await expect(page.getByText('Отчёт получен')).toBeVisible()
   await expect(page.getByText('Отчёт получен')).toHaveCount(1)
 
-  // 4. Финальный отчёт с файлом закрывает задачу.
+  // 5. Финальный отчёт с файлом закрывает задачу.
   await page.getByLabel('Вид отчёта').selectOption('final')
   await page.getByLabel('Что сделано').fill('Матрица согласована')
   await page.locator('input[type="file"]').setInputFiles({
@@ -1686,7 +1698,7 @@ test('таск-трекер: коммерческий ставит задачу,
   await expect(page.getByText('Выполнена', { exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'смета.pdf' })).toBeVisible()
 
-  // 5. Постановщик получил служебное сообщение об отчётах.
+  // 6. Постановщик получил служебное сообщение об отчётах.
   session = COMMERCIAL_USER
   await page.goto('/#/tasks/task-1')
   await page.reload()

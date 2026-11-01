@@ -431,3 +431,59 @@ def test_progress_counts_closed_steps(client: TestClient, login: Link) -> None:
     login("commercial")
     row = next(item for item in client.get("/api/v1/tasks").json() if item["id"] == task["id"])
     assert row["progress"] == 50
+
+
+def test_reschedule_moves_steps_and_notifies(client: TestClient, login: Link) -> None:
+    """Перенос задачи сдвигает этапы на тот же срок и сообщает исполнителю."""
+    task = new_task(
+        client,
+        login,
+        start_date=day(0),
+        due_date=day(9),
+        steps=[{"title": "Этап", "start_date": day(0), "due_date": day(4)}],
+    )
+    moved = client.post(
+        f"/api/v1/tasks/{task['id']}/reschedule",
+        json={"start_date": day(3), "due_date": day(12), "move_steps": True},
+    )
+    assert moved.status_code == 200, moved.text
+    body = moved.json()
+    assert body["start_date"] == day(3)
+    assert body["due_date"] == day(12)
+    assert body["steps"][0]["start_date"] == day(3)
+    assert body["steps"][0]["due_date"] == day(7)
+
+    login("sales")
+    rows = client.get("/api/v1/messages").json()["rows"]
+    assert any("перенесена" in row["summary"] for row in rows)
+
+
+def test_reschedule_without_steps_refuses_to_break_them(client: TestClient, login: Link) -> None:
+    task = new_task(
+        client,
+        login,
+        start_date=day(0),
+        due_date=day(9),
+        steps=[{"title": "Этап", "start_date": day(0), "due_date": day(4)}],
+    )
+    denied = client.post(
+        f"/api/v1/tasks/{task['id']}/reschedule",
+        json={"start_date": day(3), "due_date": day(12), "move_steps": False},
+    )
+    assert denied.status_code == 422
+    assert "не вмещают этапы" in denied.json()["detail"]
+
+
+def test_reschedule_closed_task_forbidden(client: TestClient, login: Link) -> None:
+    task = new_task(client, login)
+    login("sales")
+    client.post(
+        f"/api/v1/tasks/{task['id']}/reports",
+        json={"kind": "final", "text": "Готово", "progress": 100},
+    )
+    login("commercial")
+    denied = client.post(
+        f"/api/v1/tasks/{task['id']}/reschedule",
+        json={"start_date": day(1), "due_date": day(10), "move_steps": True},
+    )
+    assert denied.status_code == 409

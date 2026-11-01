@@ -17,6 +17,7 @@ from app.schemas.tasks import (
     TaskOut,
     TaskReportFileOut,
     TaskReportIn,
+    TaskRescheduleIn,
     TaskStatusIn,
     TaskStepIn,
     TaskStepUpdate,
@@ -112,6 +113,17 @@ def change_status(
     """Взять в работу, отложить, отменить или вернуть в работу."""
     try:
         return service.change_status(db, user, task_id, payload)
+    except TaskError as exc:
+        raise _fail(exc) from exc
+
+
+@router.post("/tasks/{task_id}/reschedule", response_model=TaskDetailOut)
+def reschedule_task(
+    task_id: uuid.UUID, payload: TaskRescheduleIn, user: CurrentUser, db: DbSession
+) -> TaskDetailOut:
+    """Перенести задачу на новые сроки (этапы — вместе с ней)."""
+    try:
+        return service.reschedule_task(db, user, task_id, payload)
     except TaskError as exc:
         raise _fail(exc) from exc
 

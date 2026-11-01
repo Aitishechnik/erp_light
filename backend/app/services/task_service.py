@@ -57,6 +57,7 @@ from app.schemas.tasks import (
     TaskReportFileOut,
     TaskReportIn,
     TaskReportOut,
+    TaskRescheduleIn,
     TaskStatusIn,
     TaskStepIn,
     TaskStepOut,
@@ -626,6 +627,50 @@ def change_status(
             audience=_audience(task.assignee),
             payload={"status": task.status},
         )
+    db.commit()
+    return _to_detail(_load(db, task_id), user)
+
+
+def reschedule_task(
+    db: Session, user: User, task_id: uuid.UUID, payload: TaskRescheduleIn
+) -> TaskDetailOut:
+    """Перенести задачу: новые сроки; этапы при желании сдвигаются вместе с ней."""
+    task = _load(db, task_id)
+    _require_view(user, task)
+    _require_manage(user, task)
+    if task.status in CLOSED_TASK_STATUSES:
+        raise TaskError("Задача закрыта — сначала верните её в работу", status_code=409)
+    _check_dates(payload.start_date, payload.due_date)
+    delta = (payload.start_date - task.start_date).days
+    if payload.move_steps and delta:
+        for step in task.steps:
+            step.start_date = step.start_date + timedelta(days=delta)
+            step.due_date = step.due_date + timedelta(days=delta)
+    outside = [
+        step
+        for step in task.steps
+        if step.start_date < payload.start_date or step.due_date > payload.due_date
+    ]
+    if outside:
+        first = outside[0]
+        raise TaskError(
+            "Новые сроки не вмещают этапы: "
+            f"«{first.title}» идёт {first.start_date:%d.%m.%Y} — {first.due_date:%d.%m.%Y}. "
+            "Включите перенос этапов или поправьте их даты",
+            status_code=422,
+        )
+    task.start_date = payload.start_date
+    task.due_date = payload.due_date
+    task.updated_at = _now()
+    _record(
+        db,
+        user,
+        "task.updated",
+        task,
+        f"Задача «{task.title}» перенесена: {task.start_date:%d.%m.%Y} — "
+        f"{task.due_date:%d.%m.%Y}",
+        audience=_audience(task.assignee),
+    )
     db.commit()
     return _to_detail(_load(db, task_id), user)
 
