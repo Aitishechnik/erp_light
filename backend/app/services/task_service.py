@@ -153,44 +153,32 @@ def _check_step_in_task(task: Task, start: date, due: date) -> None:
 
 
 def _step_order(task: Task, skip_id: uuid.UUID | None = None) -> list[TaskStep]:
+    """Этапы по датам: порядок задаёт календарь, а не порядок добавления."""
     return sorted(
         (step for step in task.steps if step.id != skip_id),
-        key=lambda row: (row.position, str(row.id)),
+        key=lambda row: (row.start_date, row.position, str(row.id)),
     )
 
 
-def _check_step_sequence(
-    task: Task,
-    start: date,
-    due: date,
-    *,
-    position: int,
-    skip_id: uuid.UUID | None = None,
+def _check_step_overlap(
+    task: Task, start: date, due: date, *, skip_id: uuid.UUID | None = None
 ) -> None:
-    """Этапы не пересекаются: следующий начинается после предыдущего."""
-    previous: TaskStep | None = None
-    following: TaskStep | None = None
+    """Этапы не пересекаются, но могут стоять в любом свободном месте срока."""
     for step in _step_order(task, skip_id):
-        if step.position < position:
-            previous = step
-        elif step.position > position and following is None:
-            following = step
-    if previous is not None and start <= previous.due_date:
-        earliest = previous.due_date + timedelta(days=1)
-        raise TaskError(
-            "Этап не может начаться раньше "
-            f"{earliest:%d.%m.%Y}: предыдущий этап «{previous.title}» "
-            f"заканчивается {previous.due_date:%d.%m.%Y}",
-            status_code=422,
-        )
-    if following is not None and due >= following.start_date:
-        latest = following.start_date - timedelta(days=1)
-        raise TaskError(
-            "Этап не может закончиться позже "
-            f"{latest:%d.%m.%Y}: следующий этап «{following.title}» "
-            f"начинается {following.start_date:%d.%m.%Y}",
-            status_code=422,
-        )
+        if start <= step.due_date and due >= step.start_date:
+            raise TaskError(
+                f"Этап пересекается с этапом «{step.title}» "
+                f"({step.start_date:%d.%m.%Y} — {step.due_date:%d.%m.%Y}): "
+                "выберите другие даты",
+                status_code=422,
+            )
+
+
+def _renumber(task: Task) -> None:
+    """Порядковый номер этапа — его место на календаре."""
+    ordered = sorted(task.steps, key=lambda row: (row.start_date, row.position, str(row.id)))
+    for index, step in enumerate(ordered):
+        step.position = index
 
 
 def _load(db: Session, task_id: uuid.UUID) -> Task:
@@ -270,7 +258,7 @@ def _base(task: Task) -> dict[str, Any]:
     today = _today()
     closed = task.status in CLOSED_TASK_STATUSES
     steps: list[TaskStepOut] = []
-    for step in sorted(task.steps, key=lambda row: (row.position, str(row.id))):
+    for step in sorted(task.steps, key=lambda row: (row.start_date, row.position)):
         has_report = _step_reported(task, step)
         steps.append(
             TaskStepOut(
@@ -481,7 +469,7 @@ def create_task(db: Session, user: User, payload: TaskCreate) -> TaskDetailOut:
     )
     for position, step in enumerate(payload.steps):
         _check_step_in_task(task, step.start_date, step.due_date)
-        _check_step_sequence(task, step.start_date, step.due_date, position=position)
+        _check_step_overlap(task, step.start_date, step.due_date)
         task.steps.append(
             TaskStep(
                 title=step.title.strip(),
@@ -491,6 +479,7 @@ def create_task(db: Session, user: User, payload: TaskCreate) -> TaskDetailOut:
                 position=position,
             )
         )
+    _renumber(task)
     db.add(task)
     db.flush()
     _record(
@@ -643,13 +632,17 @@ def reschedule_task(
     _check_dates(payload.start_date, payload.due_date)
     delta = (payload.start_date - task.start_date).days
     if payload.move_steps and delta:
+        # Закрытые этапы — история: их даты не переписываем при переносе.
         for step in task.steps:
+            if step.is_done:
+                continue
             step.start_date = step.start_date + timedelta(days=delta)
             step.due_date = step.due_date + timedelta(days=delta)
     outside = [
         step
         for step in task.steps
-        if step.start_date < payload.start_date or step.due_date > payload.due_date
+        if not step.is_done
+        and (step.start_date < payload.start_date or step.due_date > payload.due_date)
     ]
     if outside:
         first = outside[0]
@@ -661,6 +654,7 @@ def reschedule_task(
         )
     task.start_date = payload.start_date
     task.due_date = payload.due_date
+    _renumber(task)
     task.updated_at = _now()
     _record(
         db,
@@ -683,7 +677,7 @@ def add_step(db: Session, user: User, task_id: uuid.UUID, payload: TaskStepIn) -
         raise TaskError("Задача закрыта — сначала верните её в работу", status_code=409)
     position = max((step.position for step in task.steps), default=-1) + 1
     _check_step_in_task(task, payload.start_date, payload.due_date)
-    _check_step_sequence(task, payload.start_date, payload.due_date, position=position)
+    _check_step_overlap(task, payload.start_date, payload.due_date)
     task.steps.append(
         TaskStep(
             title=payload.title.strip(),
@@ -693,6 +687,7 @@ def add_step(db: Session, user: User, task_id: uuid.UUID, payload: TaskStepIn) -
             position=position,
         )
     )
+    _renumber(task)
     task.updated_at = _now()
     summary = f"В задаче «{task.title}» новый этап «{payload.title.strip()}»"
     _record(
@@ -734,9 +729,10 @@ def update_step(
         step.title = payload.title.strip()
     if payload.start_date is not None or payload.due_date is not None:
         _check_step_in_task(task, start, due)
-        _check_step_sequence(task, start, due, position=step.position, skip_id=step.id)
+        _check_step_overlap(task, start, due, skip_id=step.id)
         step.start_date = start
         step.due_date = due
+        _renumber(task)
     task.updated_at = _now()
     summary = f"Изменён этап «{step.title}» задачи «{task.title}»"
     _record(db, user, "task.updated", task, summary, audience=_audience(task.assignee))
@@ -757,6 +753,7 @@ def delete_step(db: Session, user: User, task_id: uuid.UUID, step_id: uuid.UUID)
             status_code=409,
         )
     task.steps.remove(step)
+    _renumber(task)
     task.updated_at = _now()
     summary = f"Удалён этап «{step.title}» задачи «{task.title}»"
     _record(db, user, "task.updated", task, summary, audience=_audience(task.assignee))

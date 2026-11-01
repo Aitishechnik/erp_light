@@ -83,11 +83,12 @@ function fileSize(bytes: number): string {
   return `${Math.max(1, Math.round(bytes / 1024))} КБ`
 }
 
-/** С какого дня может начаться следующий этап и когда он должен закончиться. */
+/** Удобная подстановка дат для нового этапа: после последнего, иначе с начала срока. */
 function nextStepWindow(task: Task, steps: TaskStep[]): { start: string; due: string } {
-  const last = steps[steps.length - 1]
-  const start = last ? addDaysIso(last.due_date, 1) : task.start_date
-  return { start: start < task.start_date ? task.start_date : start, due: task.due_date }
+  const last = [...steps].sort((a, b) => a.due_date.localeCompare(b.due_date)).at(-1)
+  let start = last ? addDaysIso(last.due_date, 1) : task.start_date
+  if (start < task.start_date || start > task.due_date) start = task.start_date
+  return { start, due: task.due_date }
 }
 
 export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] }) {
@@ -662,8 +663,6 @@ function TaskCard({
   const isClosed = task.status === 'done' || task.status === 'cancelled'
   const openSteps = task.steps.filter((step) => !step.is_done)
   const chosenStep = task.steps.find((step) => step.id === reportStep) ?? null
-  const stepWindow = nextStepWindow(task, task.steps)
-  const canAddStep = stepWindow.start <= task.due_date
 
   /** Быстрый отчёт по этапу: выбираем этап в форме и уводим к ней. */
   const reportOnStep = (step: TaskStep) => {
@@ -926,7 +925,7 @@ function TaskCard({
         ))}
       </ul>
 
-      {task.actions.can_edit && canAddStep ? (
+      {task.actions.can_edit ? (
         <form
           className="task-step-form"
           onSubmit={(event) => {
@@ -954,14 +953,14 @@ function TaskCard({
           <input
             type="date"
             value={stepStart}
-            min={stepWindow.start}
+            min={task.start_date}
             max={task.due_date}
             onChange={(event) => setStepStart(event.target.value)}
           />
           <input
             type="date"
             value={stepDue}
-            min={stepStart || stepWindow.start}
+            min={task.start_date}
             max={task.due_date}
             onChange={(event) => setStepDue(event.target.value)}
           />
@@ -970,17 +969,11 @@ function TaskCard({
           </button>
         </form>
       ) : null}
-      {task.actions.can_edit && !canAddStep ? (
+      {task.actions.can_edit ? (
         <p className="hint">
-          Свободных сроков в задаче не осталось: следующий этап не помещается до{' '}
-          {ruDate(task.due_date)}. Сдвиньте срок задачи или поправьте этапы.
-        </p>
-      ) : null}
-      {task.actions.can_edit && canAddStep ? (
-        <p className="hint">
-          Этапы идут по порядку: следующий начинается не раньше{' '}
-          {ruDate(addDaysIso(stepStart ?? task.start_date, 0))}, а последний заканчивается не позже{' '}
-          {ruDate(task.due_date)}. Этап закрывается промежуточным отчётом исполнителя.
+          Этапы не пересекаются, но стоят в любых свободных датах срока задачи (с{' '}
+          {ruDate(task.start_date)} по {ruDate(task.due_date)}). Этап закрывается промежуточным
+          отчётом исполнителя.
         </p>
       ) : null}
 

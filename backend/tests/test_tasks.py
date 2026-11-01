@@ -157,7 +157,7 @@ def test_steps_run_in_order(client: TestClient, login: Link) -> None:
         json={"title": "Третий", "start_date": day(20), "due_date": day(29)},
     )
     assert overlap.status_code == 422
-    assert "не может начаться раньше" in overlap.json()["detail"]
+    assert "пересекается с этапом" in overlap.json()["detail"]
 
     outside = client.post(
         f"/api/v1/tasks/{task['id']}/steps",
@@ -487,3 +487,63 @@ def test_reschedule_closed_task_forbidden(client: TestClient, login: Link) -> No
         json={"start_date": day(1), "due_date": day(10), "move_steps": True},
     )
     assert denied.status_code == 409
+
+
+def test_step_can_be_added_before_existing(client: TestClient, login: Link) -> None:
+    """Свободные даты в начале срока — тоже место для этапа."""
+    task = new_task(
+        client,
+        login,
+        start_date=day(0),
+        due_date=day(19),
+        steps=[{"title": "Второй", "start_date": day(10), "due_date": day(19)}],
+    )
+    added = client.post(
+        f"/api/v1/tasks/{task['id']}/steps",
+        json={"title": "Первый", "start_date": day(0), "due_date": day(9)},
+    )
+    assert added.status_code == 200, added.text
+    titles = [row["title"] for row in added.json()["steps"]]
+    assert titles == ["Первый", "Второй"]
+
+
+def test_reschedule_keeps_closed_steps_in_history(client: TestClient, login: Link) -> None:
+    """Закрытый этап не переезжает вместе с задачей — это история."""
+    task = new_task(
+        client,
+        login,
+        start_date=day(0),
+        due_date=day(14),
+        steps=[
+            {"title": "Закрытый", "start_date": day(0), "due_date": day(4)},
+            {"title": "Открытый", "start_date": day(5), "due_date": day(9)},
+        ],
+    )
+    login("sales")
+    client.post(
+        f"/api/v1/tasks/{task['id']}/reports",
+        json={
+            "kind": "interim",
+            "text": "Первый этап закрыт",
+            "progress": 50,
+            "step_id": task["steps"][0]["id"],
+        },
+    )
+    login("commercial")
+    moved = client.post(
+        f"/api/v1/tasks/{task['id']}/reschedule",
+        json={"start_date": day(5), "due_date": day(20), "move_steps": True},
+    )
+    assert moved.status_code == 200, moved.text
+    steps = {row["title"]: row for row in moved.json()["steps"]}
+    assert steps["Закрытый"]["start_date"] == day(0)
+    assert steps["Закрытый"]["due_date"] == day(4)
+    assert steps["Открытый"]["start_date"] == day(10)
+    assert steps["Открытый"]["due_date"] == day(14)
+
+    # После переноса начало срока свободно — новый этап можно поставить туда.
+    added = client.post(
+        f"/api/v1/tasks/{task['id']}/steps",
+        json={"title": "Новый", "start_date": day(5), "due_date": day(9)},
+    )
+    assert added.status_code == 200, added.text
