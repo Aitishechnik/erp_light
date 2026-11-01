@@ -2973,21 +2973,28 @@ button.primary:disabled,
   table-layout: fixed;
 }
 
+/* Пять колонок: месяц, нужно, заказать к, перекрыто, докупить. Ширины в сумме
+   100 %, иначе последняя колонка схлопывается и шапка съезжает со строками. */
 .purchase-table .sched-table th:nth-child(1) {
-  width: 32%;
+  width: 22%;
 }
 
 .purchase-table .sched-table th:nth-child(2) {
-  width: 18%;
+  width: 14%;
   text-align: right;
 }
 
 .purchase-table .sched-table th:nth-child(3) {
-  width: 24%;
+  width: 26%;
 }
 
 .purchase-table .sched-table th:nth-child(4) {
-  width: 26%;
+  width: 16%;
+  text-align: right;
+}
+
+.purchase-table .sched-table th:nth-child(5) {
+  width: 22%;
   text-align: right;
 }
 
@@ -3006,7 +3013,8 @@ button.primary:disabled,
   letter-spacing: 0.02em;
 }
 
-.purchase-table .sched-table td.num {
+.purchase-table .sched-table td.num,
+.purchase-table .sched-table td:nth-child(4) {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
