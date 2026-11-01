@@ -704,10 +704,12 @@ test('закупщик раскладывает потребность план�
   await page.getByRole('button', { name: 'кварталы' }).click()
   await expect(page.getByTestId('schedule-quarters')).toContainText('I квартал')
   await expect(page.getByTestId('schedule-bars')).toHaveCount(0)
-  // «Кратко» + «Весь график»: таблица месяцев рисуется широкой строкой под сырьём.
+  // Одна кнопка на всю страницу, в строке «График заказа:»: она же в «кратко», она же в кварталах.
+  await expect(page.getByRole('button', { name: 'Показать таблицей' })).toHaveCount(1)
   await page.getByRole('button', { name: 'кратко' }).click()
-  await page.getByRole('button', { name: 'Весь график' }).first().click()
-  const detail = page.getByTestId('schedule-table')
+  await page.getByRole('button', { name: 'Показать таблицей' }).click()
+  await expect(page.getByRole('button', { name: 'Скрыть таблицу' })).toHaveCount(1)
+  const detail = page.getByTestId('schedule-table').first()
   await expect(detail).toBeVisible()
   await expect(detail).toContainText('Месяц потребности')
 

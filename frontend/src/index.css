@@ -2860,6 +2860,13 @@ button.primary:disabled,
   line-height: 1.3;
 }
 
+/* Одна кнопка «Показать/Скрыть таблицу» — в общей строке «График заказа:»,
+   рядом с видами «кратко» и «кварталы»: место не меняется вместе с видом. */
+.sched-toggle {
+  margin-left: 0.4rem;
+  white-space: nowrap;
+}
+
 .sched-need {
   color: var(--muted);
 }

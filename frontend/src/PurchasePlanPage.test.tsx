@@ -217,20 +217,25 @@ describe('PurchasePlanPage', () => {
       'Ближайший заказ: к 01.11.2025 — 20 кг (потребность — февраль 2026)',
     )
 
-    // «Весь график» раскрывает таблицу месяцев с заказом и фактом.
-    await user.click(screen.getByRole('button', { name: 'Весь график' }))
+    // Одна кнопка на страницу раскрывает таблицу месяцев с заказом и фактом.
+    expect(screen.getAllByRole('button', { name: 'Показать таблицей' })).toHaveLength(1)
+    await user.click(screen.getByRole('button', { name: 'Показать таблицей' }))
     const detail = await screen.findByTestId('schedule-table')
     expect(detail).toHaveTextContent('январь 2026')
     expect(detail).toHaveTextContent('Нужно, кг')
     expect(detail).toHaveTextContent('Перекрыто')
     expect(detail).toHaveTextContent('Докупить, кг')
     expect(detail).toHaveTextContent('100 %')
+    // Кнопка в строке одна: после раскрытия она же называется «Скрыть таблицу».
+    expect(screen.getByRole('button', { name: 'Скрыть таблицу' })).toBeInTheDocument()
 
     // Видов графика два: «кратко» и «кварталы»; вид «полосой» убран.
     expect(screen.queryByRole('button', { name: 'полосой' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'кварталы' }))
     expect(screen.getByTestId('schedule-quarters')).toHaveTextContent('I квартал 2026')
     expect(screen.queryByTestId('schedule-bars')).not.toBeInTheDocument()
+    // В кварталах кнопка та же и там же — в строке сырья.
+    expect(screen.getByRole('button', { name: 'Скрыть таблицу' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Добавить сырьё FIN-1' }))
     await user.selectOptions(screen.getByLabelText('Сырьё FIN-1 2'), 'raw-2')
@@ -274,12 +279,16 @@ describe('PurchasePlanPage', () => {
       'Ближайший заказ: к 01.11.2025 — 5 кг (потребность — февраль 2026)',
     )
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Весь график' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Показать таблицей' }))
     const detail = await screen.findByTestId('schedule-table')
     // Январь перекрыт полностью (100 %), февраль — на 15 из 20 кг: докупить 5.
     expect(detail).toHaveTextContent('январь 2026')
     expect(detail).toHaveTextContent('100 %')
     expect(detail).toHaveTextContent('75 %')
+
+    // Та же кнопка скрывает таблицу: отдельной «Скрыть график» больше нет.
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Скрыть таблицу' }))
+    expect(screen.queryByTestId('schedule-table')).not.toBeInTheDocument()
   })
 
   it('когда потребность закрыта целиком, показывает перенос излишка на следующий год', async () => {

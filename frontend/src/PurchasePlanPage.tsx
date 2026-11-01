@@ -449,24 +449,18 @@ function ScheduleTable({
   )
 }
 
-/** График заказа: один и тот же расчёт, три способа показать. */
+/** График заказа: сводка в строке или кварталы под ней — расчёт один. */
 function ScheduleView({
   rows,
   mode,
-  expanded,
-  onToggle,
   year,
   extra,
-  tableOnly = false,
   showCarry = true,
 }: {
   rows: ScheduleRow[]
   mode: ScheduleMode
-  expanded: boolean
-  onToggle: () => void
   year: number
   extra: string
-  tableOnly?: boolean
   /** Излишек одной строки не показываем: по сырью он общий, его видно в сводке. */
   showCarry?: boolean
 }) {
@@ -474,10 +468,6 @@ function ScheduleView({
   const last = rows.length > 0 ? rows[rows.length - 1] : null
   const carry = last ? last.carry : 0
   const extraLine = extra ? <span className="month-fact extra">{extra}</span> : null
-
-  if (mode === 'summary' && tableOnly) {
-    return <ScheduleTable rows={rows} year={year} extra="" />
-  }
 
   if (mode === 'quarters') {
     return (
@@ -544,9 +534,6 @@ function ScheduleView({
           на {year + 1} год
         </span>
       ) : null}
-      <button type="button" className="mini" onClick={onToggle}>
-        {expanded ? 'Скрыть график' : 'Весь график'}
-      </button>
       {extraLine}
     </div>
   )
@@ -654,12 +641,8 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
   const thisYear = new Date().getFullYear()
   const [year, setYear] = useState(focus?.[0] ? Number(focus[0]) : thisYear)
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>('summary')
-  const [openSchedule, setOpenSchedule] = useState<string[]>([])
-
-  const toggleSchedule = (key: string) =>
-    setOpenSchedule((current) =>
-      current.includes(key) ? current.filter((row) => row !== key) : [...current, key],
-    )
+  /** Одна кнопка на всю страницу: показать помесячную таблицу под графиком. */
+  const [showTables, setShowTables] = useState(false)
   const [plans, setPlans] = useState<PurchasePlan[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [countries, setCountries] = useState<Country[]>([])
@@ -1128,6 +1111,14 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                 {mode.title}
               </button>
             ))}
+            <button
+              type="button"
+              className={showTables ? 'mini sched-toggle active' : 'mini sched-toggle'}
+              aria-pressed={showTables}
+              onClick={() => setShowTables((current) => !current)}
+            >
+              {showTables ? 'Скрыть таблицу' : 'Показать таблицей'}
+            </button>
           </fieldset>
 
           <div className="purchase-table">
@@ -1380,23 +1371,23 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                     хватает
                                   </span>
                                 </span>
-                              ) : scheduleMode === 'summary' ? (
+                              ) : (
                                 <>
-                                  <ScheduleView
-                                    rows={rowSchedule}
-                                    mode="summary"
-                                    expanded={openSchedule.includes(row.key)}
-                                    onToggle={() => toggleSchedule(row.key)}
-                                    year={plan.year}
-                                    extra={extraFacts(row, group?.months ?? monthsOf(schedule))}
-                                    showCarry={!grouped}
-                                  />
-                                  {grouped && group ? (
+                                  {scheduleMode === 'summary' ? (
+                                    <ScheduleView
+                                      rows={rowSchedule}
+                                      mode="summary"
+                                      year={plan.year}
+                                      extra={extraFacts(row, group?.months ?? monthsOf(schedule))}
+                                      showCarry={!grouped}
+                                    />
+                                  ) : (
+                                    <span className="hint">график ниже</span>
+                                  )}
+                                  {scheduleMode === 'summary' && grouped && group ? (
                                     <GroupNote group={group} year={plan.year} />
                                   ) : null}
                                 </>
-                              ) : (
-                                <span className="hint">график ниже</span>
                               )}
                             </td>
                             <td>
@@ -1427,39 +1418,30 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                       const group = coverage.group.get(groupKey(row))
                       const rowSchedule = coverage.byRow.get(row.key) ?? []
                       const grouped = (group?.rows ?? 1) > 1
-                      const expanded = openSchedule.includes(row.key)
                       if (schedule.length === 0) return null
-                      if (scheduleMode === 'summary' && !expanded) return null
+                      if (scheduleMode === 'summary' && !showTables) return null
                       return (
                         <tr key={`${row.key}-schedule`} className="schedule-wide">
                           <td colSpan={7}>
-                            <div className="sched-wide-head">
-                              <b>{row.productName || 'Сырьё'}</b>
-                              {row.countryName ? ` · ${row.countryName}` : ''}
-                              {scheduleMode === 'summary' ? null : (
-                                <button
-                                  type="button"
-                                  className="mini"
-                                  onClick={() => toggleSchedule(row.key)}
-                                >
-                                  {expanded ? 'Скрыть таблицу' : 'Показать таблицей'}
-                                </button>
-                              )}
-                              {grouped && group ? (
-                                <GroupNote group={group} year={plan.year} />
-                              ) : null}
-                            </div>
-                            <ScheduleView
-                              rows={rowSchedule}
-                              mode={scheduleMode}
-                              tableOnly
-                              expanded={expanded}
-                              onToggle={() => toggleSchedule(row.key)}
-                              year={plan.year}
-                              extra={extraFacts(row, group?.months ?? monthsOf(schedule))}
-                              showCarry={!grouped}
-                            />
-                            {scheduleMode !== 'summary' && expanded ? (
+                            {scheduleMode === 'quarters' ? (
+                              <>
+                                <div className="sched-wide-head">
+                                  <b>{row.productName || 'Сырьё'}</b>
+                                  {row.countryName ? ` · ${row.countryName}` : ''}
+                                  {grouped && group ? (
+                                    <GroupNote group={group} year={plan.year} />
+                                  ) : null}
+                                </div>
+                                <ScheduleView
+                                  rows={rowSchedule}
+                                  mode="quarters"
+                                  year={plan.year}
+                                  extra={extraFacts(row, group?.months ?? monthsOf(schedule))}
+                                  showCarry={!grouped}
+                                />
+                              </>
+                            ) : null}
+                            {showTables ? (
                               <ScheduleTable rows={rowSchedule} year={plan.year} extra="" />
                             ) : null}
                           </td>
