@@ -2737,6 +2737,28 @@ button.primary:disabled,
   color: var(--muted);
 }
 
+/* Строка-кнопка: клик отмечает сообщение прочитанным (и открывает объект). */
+.bell-row[role="button"] {
+  margin: 0 -0.35rem;
+  padding: 0.4rem 0.35rem;
+  border-radius: 0.35rem;
+  cursor: pointer;
+}
+
+.bell-row[role="button"]:hover {
+  background: #f5f7fa;
+}
+
+.bell-row[role="button"]:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+}
+
+.bell-hint {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+}
+
 .bell-actions {
   display: flex;
   flex-wrap: wrap;

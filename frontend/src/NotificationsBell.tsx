@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AuditEvent } from './api'
-import { errorMessage, fetchMessages, fetchUnreadCount, markAllMessagesRead } from './api'
+import {
+  errorMessage,
+  fetchMessages,
+  fetchUnreadCount,
+  markAllMessagesRead,
+  markMessagesRead,
+} from './api'
 
 type Props = {
   /** Переход в полный журнал действий. */
@@ -17,12 +23,25 @@ function formatTime(value: string): string {
   })
 }
 
+function rowTitle(row: AuditEvent): string {
+  if (row.link) return row.read ? 'Открыть сообщение' : 'Открыть и отметить прочитанным'
+  return 'Отметить прочитанным'
+}
+
+function rowAriaLabel(row: AuditEvent): string {
+  return `${rowTitle(row)}: ${row.summary}`
+}
+
 /**
  * Колокольчик служебных сообщений.
  *
  * Счётчик непрочитанных обновляется при входе и после каждого открытия панели:
  * отдельного «живого» канала нет — сообщения приходят на действия пользователей,
  * а не мгновенно.
+ *
+ * Прочитанность — по одному сообщению: клик по строке отмечает её прочитанной
+ * и уменьшает счётчик на единицу (было 4 — осталось 3). «Отметить всё» —
+ * отдельная кнопка, сама панель ничего не гасит.
  */
 export function NotificationsBell({ onOpenJournal }: Props) {
   const [open, setOpen] = useState(false)
@@ -103,6 +122,39 @@ export function NotificationsBell({ onOpenJournal }: Props) {
     }
   }
 
+  /** Одно сообщение: отмечаем прочитанным и сразу гасим строку и счётчик. */
+  const readOne = useCallback(
+    async (row: AuditEvent) => {
+      if (row.read) return
+      setRows((current) =>
+        current.map((item) => (item.id === row.id ? { ...item, read: true } : item)),
+      )
+      setUnread((current) => Math.max(0, current - 1))
+      try {
+        const data = await markMessagesRead([row.id])
+        setUnread(data.unread)
+      } catch (err) {
+        // Не получилось — возвращаем строку в непрочитанные, счётчик перечитываем.
+        setRows((current) =>
+          current.map((item) => (item.id === row.id ? { ...item, read: false } : item)),
+        )
+        setError(errorMessage(err))
+        void refreshCount()
+      }
+    },
+    [refreshCount],
+  )
+
+  const openRow = (row: AuditEvent) => {
+    void readOne(row)
+    if (row.link) {
+      setOpen(false)
+      window.location.hash = row.link
+    }
+  }
+
+  const hasUnreadRows = rows.some((row) => !row.read)
+
   const shown = rows.length
   return (
     <div className="bell" ref={panelRef}>
@@ -147,6 +199,11 @@ export function NotificationsBell({ onOpenJournal }: Props) {
             </button>
           </div>
           {error ? <p className="hint error">{error}</p> : null}
+          {hasUnreadRows ? (
+            <p className="hint bell-hint" data-testid="bell-hint">
+              Нажмите на сообщение — оно станет прочитанным.
+            </p>
+          ) : null}
           {rows.length === 0 ? (
             <p className="hint" data-testid="bell-empty">
               Новых сообщений нет.
@@ -154,30 +211,52 @@ export function NotificationsBell({ onOpenJournal }: Props) {
           ) : (
             <>
               <ul className="bell-list" data-testid="bell-list" ref={listRef}>
-                {rows.map((row) => (
-                  <li key={row.id} className={row.read ? 'bell-row read' : 'bell-row'}>
-                    <span className="bell-time">{formatTime(row.created_at)}</span>
-                    <span className="bell-text">
-                      <span className="bell-summary">
-                        {row.link ? (
-                          <a className="audit-link" href={row.link} onClick={() => setOpen(false)}>
-                            {row.summary}
-                          </a>
-                        ) : (
-                          row.summary
-                        )}
+                {rows.map((row) => {
+                  const actionable = !row.read || Boolean(row.link)
+                  return (
+                    <li
+                      key={row.id}
+                      className={row.read ? 'bell-row read' : 'bell-row'}
+                      data-testid={`bell-row-${row.id}`}
+                      role={actionable ? 'button' : undefined}
+                      tabIndex={actionable ? 0 : undefined}
+                      aria-label={actionable ? rowAriaLabel(row) : undefined}
+                      title={actionable ? rowTitle(row) : undefined}
+                      onClick={actionable ? () => openRow(row) : undefined}
+                      onKeyDown={
+                        actionable
+                          ? (event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault()
+                                openRow(row)
+                              }
+                            }
+                          : undefined
+                      }
+                    >
+                      <span className="bell-time">{formatTime(row.created_at)}</span>
+                      <span className="bell-text">
+                        <span className="bell-summary">
+                          {row.link ? (
+                            <span className="audit-link">{row.summary}</span>
+                          ) : (
+                            row.summary
+                          )}
+                        </span>
+                        <span className="bell-meta">
+                          {row.actor_name ?? 'Система'}
+                          {row.actor_role_title &&
+                          row.actor_name &&
+                          !row.actor_name
+                            .toLowerCase()
+                            .startsWith(row.actor_role_title.toLowerCase())
+                            ? ` · ${row.actor_role_title}`
+                            : ''}
+                        </span>
                       </span>
-                      <span className="bell-meta">
-                        {row.actor_name ?? 'Система'}
-                        {row.actor_role_title &&
-                        row.actor_name &&
-                        !row.actor_name.toLowerCase().startsWith(row.actor_role_title.toLowerCase())
-                          ? ` · ${row.actor_role_title}`
-                          : ''}
-                      </span>
-                    </span>
-                  </li>
-                ))}
+                    </li>
+                  )
+                })}
               </ul>
               {canScroll ? (
                 <p className="hint bell-more" data-testid="bell-more">

@@ -1381,6 +1381,43 @@ test('колокольчик приносит директору служебн�
   await expect(page.getByTestId('messages-unread')).toContainText('Непрочитанных: 1')
 })
 
+test('прочтение одного сообщения уменьшает счётчик на единицу', async ({ page }) => {
+  let unread = 2
+  const rows = [
+    { ...AUDIT_EVENT, link: null },
+    {
+      ...AUDIT_EVENT,
+      id: 'ev-2',
+      summary: 'Изменена номенклатура SKU-1 · Товар 1',
+      action: 'product.updated',
+      action_title: 'Изменена номенклатура',
+      read: true,
+      link: null,
+    },
+  ]
+
+  await mockSession(page, EXECUTIVE)
+  await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/messages**', (route) =>
+    route.fulfill({ json: { rows, unread, total: 2 } }),
+  )
+  await page.route('**/api/v1/messages/count', (route) => route.fulfill({ json: { unread } }))
+  await page.route('**/api/v1/messages/read', (route) => {
+    unread = 1
+    return route.fulfill({ json: { unread } })
+  })
+
+  await page.goto('/')
+  await expect(page.getByTestId('bell-badge')).toHaveText('2')
+  await page.getByLabel(/Служебные сообщения, непрочитанных: 2/).click()
+  await expect(page.getByTestId('bell-row-ev-1')).toHaveAttribute('role', 'button')
+
+  await page.getByTestId('bell-row-ev-1').click()
+
+  await expect(page.getByTestId('bell-badge')).toHaveText('1')
+  await expect(page.getByTestId('bell-row-ev-1')).toHaveClass(/read/)
+})
+
 test('ссылка из журнала открывает объект и подсвечивает строку', async ({ page }) => {
   await mockSession(page, EXECUTIVE)
   await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))

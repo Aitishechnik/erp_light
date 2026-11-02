@@ -84,6 +84,53 @@ describe('Служебные сообщения', () => {
     })
   })
 
+  it('прочтение одного сообщения уменьшает счётчик на единицу', async () => {
+    const user = userEvent.setup()
+    mockApi({
+      ...SESSION,
+      '/api/v1/messages': {
+        body: {
+          rows: [event({ link: null }), event({ id: 'ev-2', read: true, link: null })],
+          unread: 2,
+          total: 2,
+        },
+      },
+    })
+    render(<App />)
+
+    expect(await screen.findByTestId('bell-badge')).toHaveTextContent('2')
+    await user.click(screen.getByLabelText(/Служебные сообщения, непрочитанных: 2/))
+
+    const row = await screen.findByTestId('bell-row-ev-1')
+    await user.click(row)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('bell-badge')).toHaveTextContent('1')
+    })
+    expect(row).toHaveClass('read')
+    expect(screen.queryByTestId('bell-hint')).not.toBeInTheDocument()
+  })
+
+  it('сообщение отмечается прочитанным и с клавиатуры', async () => {
+    const user = userEvent.setup()
+    mockApi({
+      ...SESSION,
+      '/api/v1/messages': {
+        body: { rows: [event({ link: null })], unread: 1, total: 1 },
+      },
+    })
+    render(<App />)
+
+    await user.click(await screen.findByLabelText(/Служебные сообщения, непрочитанных: 2/))
+    const row = await screen.findByTestId('bell-row-ev-1')
+    row.focus()
+    await user.keyboard('{Enter}')
+
+    await waitFor(() => {
+      expect(row).toHaveClass('read')
+    })
+  })
+
   it('открывает журнал действий из панели', async () => {
     const user = userEvent.setup()
     mockApi(SESSION)
