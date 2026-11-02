@@ -67,6 +67,7 @@ describe('Служебные сообщения', () => {
     expect(await screen.findByTestId('bell-list')).toHaveTextContent(
       'План продаж на 2026 год утверждён',
     )
+    expect(screen.queryByTestId('bell-row-ev-2')).not.toBeInTheDocument()
     expect(screen.getAllByText(/Коммерческий директор \(демо\)/).length).toBeGreaterThan(0)
   })
 
@@ -107,8 +108,11 @@ describe('Служебные сообщения', () => {
     await waitFor(() => {
       expect(screen.getByTestId('bell-badge')).toHaveTextContent('1')
     })
-    expect(row).toHaveClass('read')
+    expect(screen.queryByTestId('bell-row-ev-1')).not.toBeInTheDocument()
     expect(screen.queryByTestId('bell-hint')).not.toBeInTheDocument()
+    expect(await screen.findByTestId('bell-empty')).toHaveTextContent(
+      'Непрочитанных нет — все сообщения в журнале',
+    )
   })
 
   it('сообщение отмечается прочитанным и с клавиатуры', async () => {
@@ -127,7 +131,7 @@ describe('Служебные сообщения', () => {
     await user.keyboard('{Enter}')
 
     await waitFor(() => {
-      expect(row).toHaveClass('read')
+      expect(screen.queryByTestId('bell-row-ev-1')).not.toBeInTheDocument()
     })
   })
 

@@ -440,11 +440,20 @@ def journal(
     limit: int | None = None,
     before: datetime | None = None,
 ) -> list[AuditEventOut]:
-    """Журнал: исполнительный директор видит всё, остальные — свои действия."""
+    """Журнал: директор видит всё, остальные — свои действия и свои сообщения.
+
+    Колокольчик показывает только непрочитанное, поэтому прочитанные сообщения
+    должны оставаться доступными здесь: «своё» — это и действие, и адресат.
+    """
     limit = _limit(limit)
     statement = select(AuditEvent).order_by(AuditEvent.seq.desc()).limit(limit)
     if user.role != ROLE_EXECUTIVE_DIRECTOR:
-        statement = statement.where(AuditEvent.actor_id == user.id)
+        statement = statement.where(
+            or_(
+                AuditEvent.actor_id == user.id,
+                AuditEvent.audience.contains([user_marker(user)]),
+            )
+        )
     if action:
         statement = statement.where(AuditEvent.action == action)
     if entity_kind:

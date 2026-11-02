@@ -39,18 +39,16 @@ function rowAriaLabel(row: AuditEvent): string {
  * отдельного «живого» канала нет — сообщения приходят на действия пользователей,
  * а не мгновенно.
  *
- * Прочитанность — по одному сообщению: клик по строке отмечает её прочитанной
- * и уменьшает счётчик на единицу (было 4 — осталось 3). «Отметить всё» —
- * отдельная кнопка, сама панель ничего не гасит.
+ * Панель показывает только непрочитанное: клик по строке отмечает сообщение
+ * прочитанным и убирает его из списка. Прочитанные и все действия остаются
+ * в журнале — туда ведёт кнопка «Весь журнал».
  */
 export function NotificationsBell({ onOpenJournal }: Props) {
   const [open, setOpen] = useState(false)
   const [unread, setUnread] = useState(0)
   const [rows, setRows] = useState<AuditEvent[]>([])
-  const [total, setTotal] = useState(0)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [canScroll, setCanScroll] = useState(false)
   const panelRef = useRef<HTMLDivElement | null>(null)
 
   const refreshCount = useCallback(async () => {
@@ -85,13 +83,12 @@ export function NotificationsBell({ onOpenJournal }: Props) {
     }
   }, [open])
 
-  // Список длиннее окна — показываем подсказку, что есть ещё. Меряем после
-  // отрисовки: ref-callback срабатывает, когда список уже в DOM и посчитан.
-  const listRef = useCallback((node: HTMLUListElement | null) => {
-    if (!node) return
-    requestAnimationFrame(() => {
-      setCanScroll(node.scrollHeight > node.clientHeight + 1)
-    })
+  /** В панель попадают только непрочитанные: прочитанное живёт в журнале. */
+  const loadUnread = useCallback(async () => {
+    const data = await fetchMessages({ unread: true, limit: 20 })
+    setRows(data.rows.filter((row) => !row.read))
+    setUnread(data.unread)
+    setError('')
   }, [])
 
   const showPanel = async () => {
@@ -99,11 +96,7 @@ export function NotificationsBell({ onOpenJournal }: Props) {
     setOpen(next)
     if (!next) return
     try {
-      const data = await fetchMessages({ limit: 20 })
-      setRows(data.rows)
-      setUnread(data.unread)
-      setTotal(data.total)
-      setError('')
+      await loadUnread()
     } catch (err) {
       setError(errorMessage(err))
     }
@@ -114,7 +107,7 @@ export function NotificationsBell({ onOpenJournal }: Props) {
     try {
       const data = await markAllMessagesRead()
       setUnread(data.unread)
-      setRows((current) => current.map((row) => ({ ...row, read: true })))
+      setRows([])
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -126,23 +119,19 @@ export function NotificationsBell({ onOpenJournal }: Props) {
   const readOne = useCallback(
     async (row: AuditEvent) => {
       if (row.read) return
-      setRows((current) =>
-        current.map((item) => (item.id === row.id ? { ...item, read: true } : item)),
-      )
+      setRows((current) => current.filter((item) => item.id !== row.id))
       setUnread((current) => Math.max(0, current - 1))
       try {
         const data = await markMessagesRead([row.id])
         setUnread(data.unread)
       } catch (err) {
-        // Не получилось — возвращаем строку в непрочитанные, счётчик перечитываем.
-        setRows((current) =>
-          current.map((item) => (item.id === row.id ? { ...item, read: false } : item)),
-        )
+        // Не получилось — возвращаем список непрочитанных с сервера.
         setError(errorMessage(err))
+        void loadUnread().catch(() => undefined)
         void refreshCount()
       }
     },
-    [refreshCount],
+    [loadUnread, refreshCount],
   )
 
   const openRow = (row: AuditEvent) => {
@@ -154,8 +143,6 @@ export function NotificationsBell({ onOpenJournal }: Props) {
   }
 
   const hasUnreadRows = rows.some((row) => !row.read)
-
-  const shown = rows.length
   return (
     <div className="bell" ref={panelRef}>
       <button
@@ -192,7 +179,7 @@ export function NotificationsBell({ onOpenJournal }: Props) {
           <div className="bell-head">
             <strong>Служебные сообщения</strong>
             <span className="bell-count" data-testid="bell-count">
-              показано {shown} из {total}
+              непрочитанных: {unread}
             </span>
             <button type="button" className="mini" onClick={() => setOpen(false)}>
               Закрыть
@@ -201,70 +188,62 @@ export function NotificationsBell({ onOpenJournal }: Props) {
           {error ? <p className="hint error">{error}</p> : null}
           {hasUnreadRows ? (
             <p className="hint bell-hint" data-testid="bell-hint">
-              Нажмите на сообщение — оно станет прочитанным.
+              Нажмите на сообщение — оно откроется и станет прочитанным.
             </p>
           ) : null}
           {rows.length === 0 ? (
             <p className="hint" data-testid="bell-empty">
-              Новых сообщений нет.
+              Непрочитанных нет — все сообщения в журнале.
             </p>
           ) : (
-            <>
-              <ul className="bell-list" data-testid="bell-list" ref={listRef}>
-                {rows.map((row) => {
-                  const actionable = !row.read || Boolean(row.link)
-                  return (
-                    <li
-                      key={row.id}
-                      className={row.read ? 'bell-row read' : 'bell-row'}
-                      data-testid={`bell-row-${row.id}`}
-                      role={actionable ? 'button' : undefined}
-                      tabIndex={actionable ? 0 : undefined}
-                      aria-label={actionable ? rowAriaLabel(row) : undefined}
-                      title={actionable ? rowTitle(row) : undefined}
-                      onClick={actionable ? () => openRow(row) : undefined}
-                      onKeyDown={
-                        actionable
-                          ? (event) => {
-                              if (event.key === 'Enter' || event.key === ' ') {
-                                event.preventDefault()
-                                openRow(row)
-                              }
+            <ul className="bell-list" data-testid="bell-list">
+              {rows.map((row) => {
+                const actionable = !row.read || Boolean(row.link)
+                return (
+                  <li
+                    key={row.id}
+                    className={row.read ? 'bell-row read' : 'bell-row'}
+                    data-testid={`bell-row-${row.id}`}
+                    role={actionable ? 'button' : undefined}
+                    tabIndex={actionable ? 0 : undefined}
+                    aria-label={actionable ? rowAriaLabel(row) : undefined}
+                    title={actionable ? rowTitle(row) : undefined}
+                    onClick={actionable ? () => openRow(row) : undefined}
+                    onKeyDown={
+                      actionable
+                        ? (event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault()
+                              openRow(row)
                             }
-                          : undefined
-                      }
-                    >
-                      <span className="bell-time">{formatTime(row.created_at)}</span>
-                      <span className="bell-text">
-                        <span className="bell-summary">
-                          {row.link ? (
-                            <span className="audit-link">{row.summary}</span>
-                          ) : (
-                            row.summary
-                          )}
-                        </span>
-                        <span className="bell-meta">
-                          {row.actor_name ?? 'Система'}
-                          {row.actor_role_title &&
-                          row.actor_name &&
-                          !row.actor_name
-                            .toLowerCase()
-                            .startsWith(row.actor_role_title.toLowerCase())
-                            ? ` · ${row.actor_role_title}`
-                            : ''}
-                        </span>
+                          }
+                        : undefined
+                    }
+                  >
+                    <span className="bell-time">{formatTime(row.created_at)}</span>
+                    <span className="bell-text">
+                      <span className="bell-summary">
+                        {row.link ? <span className="audit-link">{row.summary}</span> : row.summary}
                       </span>
-                    </li>
-                  )
-                })}
-              </ul>
-              {canScroll ? (
-                <p className="hint bell-more" data-testid="bell-more">
-                  Прокрутите список — есть ещё сообщения.
-                </p>
-              ) : null}
-            </>
+                      <span className="bell-meta">
+                        {row.actor_name ?? 'Система'}
+                        {row.actor_role_title &&
+                        row.actor_name &&
+                        !row.actor_name.toLowerCase().startsWith(row.actor_role_title.toLowerCase())
+                          ? ` · ${row.actor_role_title}`
+                          : ''}
+                      </span>
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
           )}
+          {unread > rows.length ? (
+            <p className="hint bell-more" data-testid="bell-more">
+              Показаны последние {rows.length} — остальные в журнале.
+            </p>
+          ) : null}
           <div className="bell-actions">
             <button
               type="button"

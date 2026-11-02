@@ -248,3 +248,39 @@ def test_cleanup_deletes_previous_year(db_session: Session, users: None) -> None
     assert "старая запись" not in left
     assert "свежая запись" in left
     assert "Журнал за 2025 год очищен" in " ".join(left)
+
+
+def test_journal_keeps_addressed_messages_after_reading(client: TestClient, login) -> None:
+    """Колокольчик показывает только непрочитанное, журнал — и прочитанное тоже."""
+    login("commercial")
+    people = {row["full_name"]: row["id"] for row in client.get("/api/v1/tasks/assignees").json()}
+    start = date.today().isoformat()
+    created = client.post(
+        "/api/v1/tasks",
+        json={
+            "title": "Сообщение в журнале",
+            "start_date": start,
+            "due_date": start,
+            "assignee_id": people["Менеджер по продажам (демо)"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    task_id = created.json()["id"]
+
+    login("sales")
+    journal = client.get("/api/v1/audit", params={"limit": 100}).json()
+    assert any(row["action"] == "task.created" and row["entity_id"] == task_id for row in journal)
+
+    unread = client.get("/api/v1/messages", params={"unread": True}).json()["rows"]
+    message = next(row for row in unread if row["entity_id"] == task_id)
+    assert client.post("/api/v1/messages/read", json={"ids": [message["id"]]}).status_code == 200
+
+    left = client.get("/api/v1/messages", params={"unread": True}).json()["rows"]
+    assert all(row["entity_id"] != task_id for row in left)
+    after = client.get("/api/v1/audit", params={"limit": 100}).json()
+    assert any(row["entity_id"] == task_id for row in after)
+
+    # Чужому менеджеру адресованное не показываем.
+    login("sales2")
+    other = client.get("/api/v1/audit", params={"limit": 100}).json()
+    assert all(row["entity_id"] != task_id for row in other)
