@@ -10,6 +10,7 @@ import {
   reopenAnnualSalesPlan,
   type SessionUser,
 } from './api'
+import { PageHelp } from './PageHelp'
 
 export function AnnualSalesPlanPage({ user, focus }: { user: SessionUser; focus?: string[] }) {
   const thisYear = new Date().getFullYear()
@@ -80,10 +81,10 @@ export function AnnualSalesPlanPage({ user, focus }: { user: SessionUser; focus?
     <section>
       <header className="page-head">
         <h1>Годовой план отдела продаж</h1>
-        <p className="hint">
+        <PageHelp>
           Собирается из утверждённых планов всех менеджеров. Финально согласует генеральный
           директор; любое изменение плана менеджера требует повторного согласования.
-        </p>
+        </PageHelp>
         <div className="toolbar">
           <button
             type="button"
@@ -221,7 +222,7 @@ export function AnnualSalesPlanPage({ user, focus }: { user: SessionUser; focus?
           </button>
         ) : null}
         {!isCommercial && !isExecutive ? (
-          <span className="hint">Просмотр: финально согласует генеральный директор</span>
+          <span className="status-chip">Только просмотр</span>
         ) : null}
       </div>
 

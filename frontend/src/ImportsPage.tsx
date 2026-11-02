@@ -8,6 +8,7 @@ import {
   type SessionUser,
   uploadImport,
 } from './api'
+import { PageHelp } from './PageHelp'
 
 /** Компактная дата: «08.10.26 01:59» — иначе журнал не влезает по ширине. */
 function stamp(value: string): string {
@@ -74,10 +75,10 @@ export function ImportsPage({ user }: { user?: SessionUser }) {
     <section>
       <header className="page-head">
         <h1>Загрузка данных</h1>
-        <p className="hint">
+        <PageHelp>
           Файлы выгрузок из 1С в формате .xlsx. Номенклатура опознаётся по коду 1С, контрагенты — по
           наименованию, поэтому повторная загрузка не создаёт дублей, а обновляет найденные записи.
-        </p>
+        </PageHelp>
       </header>
 
       {error ? (
@@ -99,7 +100,7 @@ export function ImportsPage({ user }: { user?: SessionUser }) {
               >
                 <h2>{kind.title}</h2>
                 <p className="hint">Колонки: {kind.columns.join(', ')}</p>
-                {kind.note ? <p className="hint">{kind.note}</p> : null}
+                {kind.note ? <PageHelp label="Как читается файл">{kind.note}</PageHelp> : null}
                 <input
                   type="file"
                   accept=".xlsx"

@@ -10,6 +10,7 @@ import {
   type SessionUser,
   updateCounterparty,
 } from './api'
+import { PageHelp } from './PageHelp'
 
 const EMPTY_FORM = {
   name: '',
@@ -148,11 +149,11 @@ export function CounterpartiesPage({ user, focusId }: { user?: SessionUser; focu
     <section>
       <header className="page-head">
         <h1>Контрагенты</h1>
-        <p className="hint">
+        <PageHelp>
           Покупатели, локальные и импортные поставщики. Одна компания может быть и покупателем, и
           поставщиком — это одна запись с двумя признаками. В плане продаж выбираются только
           покупатели.
-        </p>
+        </PageHelp>
       </header>
 
       {error ? (

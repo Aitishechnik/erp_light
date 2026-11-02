@@ -21,6 +21,7 @@ import {
   setMonthDecision,
   type TransferDrafts,
 } from './api'
+import { PageHelp } from './PageHelp'
 
 const MONTH_NAMES = [
   'Январь',
@@ -406,11 +407,11 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
     <section>
       <header className="page-head">
         <h1>Итоги месяца</h1>
-        <p className="hint">
+        <PageHelp>
           План продаж против факта из выгрузки 1С по клиенту и позиции. План — утверждённые планы
           менеджеров; факт — продажи за месяц, возвраты идут минусом. Сравнение по количеству: в
           плане продаж цен нет.
-        </p>
+        </PageHelp>
       </header>
 
       <div className="toolbar">
@@ -477,15 +478,15 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
           <span className={`badge ${result.status === 'closed' ? 'badge-closed' : 'badge-open'}`}>
             {result.status === 'closed' ? 'месяц закрыт' : 'месяц открыт'}
           </span>
-          <span className="hint">
-            {result.status === 'closed'
-              ? `Снимок зафиксирован ${formatDate(result.closed_at)}, ${result.closed_by_name ?? '—'}. ${
-                  result.reopen_reason
-                    ? `Месяц открывали заново — причина: «${result.reopen_reason}».`
-                    : ''
-                }`
-              : 'Загрузка продаж и правка причин доступны до закрытия.'}
-          </span>
+          {result.status === 'closed' ? (
+            <span className="hint">
+              {`Снимок зафиксирован ${formatDate(result.closed_at)}, ${result.closed_by_name ?? '—'}. ${
+                result.reopen_reason
+                  ? `Месяц открывали заново — причина: «${result.reopen_reason}».`
+                  : ''
+              }`}
+            </span>
+          ) : null}
           {mayClose ? (
             result.status === 'closed' ? (
               <button type="button" className="mini" onClick={() => setReopenOpen(true)}>

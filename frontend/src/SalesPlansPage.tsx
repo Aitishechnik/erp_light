@@ -28,6 +28,7 @@ import {
   saveSalesPlanItems,
   submitSalesPlanCorrection,
 } from './api'
+import { PageHelp } from './PageHelp'
 
 type DraftRow = {
   productId: string
@@ -551,10 +552,11 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
     <section>
       <header className="page-head">
         <h1>Планирование продаж</h1>
-        <p className="hint">
+        <PageHelp>
           Годовой план на менеджера: клиент × товар × месяц, только количество. Утверждает
-          коммерческий директор.
-        </p>
+          коммерческий директор. Утверждённый план нельзя править напрямую — создайте корректировку:
+          в ней можно менять объёмы и состав позиций.
+        </PageHelp>
         <div className="toolbar">
           <button type="button" onClick={() => setYear(year - 1)} aria-label="Предыдущий год">
             ←
@@ -708,7 +710,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
                 Удалить
               </button>
             ) : null}
-            {isExecutive ? <span className="hint">Просмотр без правок</span> : null}
+            {isExecutive ? <span className="status-chip">Только просмотр</span> : null}
           </div>
 
           {plan.notes ? <p className="hint">Примечания: {plan.notes}</p> : null}
@@ -1023,12 +1025,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
                     </p>
                   ) : null}
                 </>
-              ) : (
-                <p className="hint">
-                  Утверждённый план нельзя править напрямую — создайте корректировку: в ней можно
-                  менять объёмы и состав позиций.
-                </p>
-              )}
+              ) : null}
             </div>
           ) : null}
 

@@ -1179,16 +1179,13 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
         </div>
       </div>
 
-      <div className="rail-day" data-testid="rail-day">
-        {dayLabel} · {dayBatches.length} {dayBatchesWord}
-      </div>
+      {dayBatches.length > 0 ? (
+        <div className="rail-day" data-testid="rail-day">
+          {dayLabel} · {dayBatches.length} {dayBatchesWord}
+        </div>
+      ) : null}
 
       <div className="rail-list" data-testid="day-receipts">
-        {dayBatches.length === 0 ? (
-          <p className="hint rail-empty" data-testid="day-empty">
-            В этот день поступлений нет.
-          </p>
-        ) : null}
         {dayBatches.map((batch) => {
           const isDraft = batch.source === '1c' && batch.items.length === 0
           const planned = batch.items.filter((item) => item.purchase_plan_item_id).length

@@ -9,6 +9,7 @@ import {
   type Product,
   updateProduct,
 } from './api'
+import { PageHelp } from './PageHelp'
 
 const EMPTY_FORM = { code: '', name: '', kind: 'material', unit: 'шт' }
 const VISIBLE_LIMIT = 100
@@ -98,10 +99,10 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
     <section>
       <header className="page-head">
         <h1>Номенклатура</h1>
-        <p className="hint">
+        <PageHelp>
           Материалы, сырьё и готовая продукция из выгрузок 1С плюс позиции, заведённые вручную. Код
           — код из 1С, поэтому повторная загрузка обновляет позицию, а не создаёт дубль.
-        </p>
+        </PageHelp>
       </header>
 
       {error ? (

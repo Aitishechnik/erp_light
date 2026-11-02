@@ -692,7 +692,7 @@ describe('PurchasePlanPage', () => {
     render(<PurchasePlanPage user={DIRECTOR} />)
 
     await screen.findByTestId('purchase-status')
-    expect(screen.getByText('План утверждён — правки недоступны')).toBeInTheDocument()
+    expect(screen.getByTestId('plan-approved-chip')).toHaveTextContent('Утверждён')
     await user.click(screen.getByTestId('source-request-revision'))
     await waitFor(() => {
       expect(calls().some((url) => url.includes('/request-revision'))).toBe(true)

@@ -7,6 +7,7 @@ import {
   type SessionUser,
   updateCountry,
 } from './api'
+import { PageHelp } from './PageHelp'
 
 const EMPTY_FORM = { name: '', delivery_days: '30' }
 
@@ -114,10 +115,10 @@ export function CountriesPage({ user, focusId }: { user: SessionUser; focusId?: 
     <section>
       <header className="page-head">
         <h1>Страны</h1>
-        <p className="hint">
+        <PageHelp>
           Страна происхождения сырья и срок доставки. План закупок сдвигает месяц заказа назад ровно
           на этот срок: январская потребность при сроке 90 дней заказывается в октябре.
-        </p>
+        </PageHelp>
       </header>
 
       {error ? (
@@ -151,11 +152,10 @@ export function CountriesPage({ user, focusId }: { user: SessionUser; focusId?: 
             Добавить
           </button>
         </form>
-      ) : (
-        <p className="hint">Справочник стран ведёт директор по закупкам — здесь только просмотр.</p>
-      )}
+      ) : null}
 
       <div className="toolbar">
+        {canEdit ? null : <span className="status-chip">Только просмотр</span>}
         <input
           aria-label="Поиск по стране"
           placeholder="Поиск по названию"

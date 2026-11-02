@@ -125,6 +125,6 @@ describe('CountriesPage', () => {
     expect(await screen.findByTestId('countries-table')).toHaveTextContent('Таиланд')
     expect(screen.queryByLabelText('Название страны')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Изменить' })).not.toBeInTheDocument()
-    expect(screen.getByText(/Справочник стран ведёт директор по закупкам/)).toBeInTheDocument()
+    expect(screen.getByText('Только просмотр')).toBeInTheDocument()
   })
 })

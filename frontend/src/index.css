@@ -127,6 +127,136 @@ body {
   font-size: 1.375rem;
 }
 
+/* ── Справка и служебные метки в шапке ─────────────────────────────────── */
+
+/* Раскрывающаяся справка вместо серого абзаца под заголовком. */
+.page-help {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+}
+
+.page-help summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.55rem 0.15rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f9fafb;
+  color: #374151;
+  cursor: pointer;
+  list-style: none;
+  width: fit-content;
+}
+
+.page-help summary::-webkit-details-marker {
+  display: none;
+}
+
+.page-help summary::before {
+  content: "i";
+  display: inline-grid;
+  place-items: center;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid #9ca3af;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-style: italic;
+  line-height: 1;
+  color: #6b7280;
+}
+
+.page-help summary::after {
+  content: "▾";
+  font-size: 0.65rem;
+  color: #6b7280;
+}
+
+.page-help[open] summary::after {
+  content: "▴";
+}
+
+.page-help summary:hover {
+  background: #f1f3f5;
+}
+
+.page-help-body {
+  max-width: 72ch;
+  margin-top: 0.4rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: #fff;
+  color: #374151;
+  line-height: 1.45;
+}
+
+.page-help-body p {
+  margin: 0 0 0.35rem;
+}
+
+.page-help-body p:last-child {
+  margin-bottom: 0;
+}
+
+/* Статус в тулбаре: «Только просмотр», «Утверждён» — метка, а не серый текст. */
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f9fafb;
+  color: #374151;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+/* Ключевые числа в шапке: вместо пояснительной фразы. */
+.page-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.25rem;
+  margin: 0 0 0.9rem;
+  color: #374151;
+  font-size: 0.9rem;
+}
+
+.page-stats strong {
+  color: #111827;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Легенда диаграммы: обозначения отдельными метками, а не серым предложением. */
+.page-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.9rem;
+  margin: 0.15rem 0 0.75rem;
+  color: #374151;
+  font-size: 0.8rem;
+}
+
+.page-legend .legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.page-legend .priority-dot {
+  display: inline-block;
+}
+
+.page-legend .legend-overdue {
+  padding: 0.02rem 0.35rem;
+  border: 1px solid #b42318;
+  border-radius: 0.3rem;
+  color: #b42318;
+}
+
 .hint {
   color: var(--muted);
   font-size: 0.9rem;
@@ -717,6 +847,10 @@ button.primary:disabled,
   margin: 0;
 }
 
+.import-card .page-help {
+  margin: 0;
+}
+
 .import-card button {
   justify-self: start;
   padding: 0.35rem 0.75rem;
@@ -743,6 +877,13 @@ button.primary:disabled,
 .journal-table th,
 .journal-table td {
   padding: 0.3rem 0.4rem;
+}
+
+/* Пояснение к загрузке: переносится по словам, иначе длинная строка уезжает за край. */
+.journal-table .journal-note td {
+  white-space: normal;
+  background: #fcfcfd;
+  color: #4b5563;
 }
 
 /* ── Поступления: календарь и карточка ─────────────────────────────────── */

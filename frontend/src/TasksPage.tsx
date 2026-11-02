@@ -196,10 +196,21 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
       <div className="page-head">
         <div>
           <h1>Задачи</h1>
-          <p className="hint">
-            Задачи коммерческого отдела: цвет — приоритет, красная рамка — просрочка. Процент — доля
-            закрытых этапов; у задачи без этапов — процент из последнего отчёта.
-          </p>
+          <div className="page-legend">
+            <span className="legend-item">
+              <i className="priority-dot green" /> низкий приоритет
+            </span>
+            <span className="legend-item">
+              <i className="priority-dot yellow" /> обычный
+            </span>
+            <span className="legend-item">
+              <i className="priority-dot red" /> высокий
+            </span>
+            <span className="legend-item">
+              <span className="legend-overdue">просрочка</span>
+            </span>
+            <span className="legend-item">% — готовность по этапам</span>
+          </div>
         </div>
         {canCreate ? (
           <div className="task-toolbar">

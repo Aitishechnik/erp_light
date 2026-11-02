@@ -39,15 +39,17 @@ export function StockPage() {
     <section>
       <header className="page-head">
         <h1>Партии и остатки</h1>
-        <p className="hint">
-          Остаток и оперативная себестоимость по каждой партии.{' '}
-          {state.status === 'ready' ? (
-            <>
+        {state.status === 'ready' ? (
+          <div className="page-stats">
+            <span>
+              Партий: <strong>{state.rows.length}</strong>
+            </span>
+            <span>
               Стоимость остатка:{' '}
               <strong data-testid="total-value">{formatMoney(String(totalValue))} ₽</strong>
-            </>
-          ) : null}
-        </p>
+            </span>
+          </div>
+        ) : null}
       </header>
 
       {state.status === 'loading' ? <p className="hint">Загрузка остатков…</p> : null}

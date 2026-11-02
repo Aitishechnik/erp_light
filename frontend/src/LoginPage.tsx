@@ -24,7 +24,6 @@ export function LoginPage({ onLogin }: { onLogin: (user: SessionUser) => void })
     <div className="login-screen">
       <form className="login-card" onSubmit={submit}>
         <h1>erp_lite</h1>
-        <p className="hint">Вход для сотрудников: закупки, коммерция, руководство.</p>
         <label htmlFor="login">Логин</label>
         <input
           id="login"

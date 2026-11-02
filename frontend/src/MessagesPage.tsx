@@ -8,6 +8,7 @@ import {
   fetchMessages,
   markAllMessagesRead,
 } from './api'
+import { PageHelp } from './PageHelp'
 
 type Props = { user: SessionUser }
 
@@ -124,13 +125,13 @@ export function MessagesPage({ user }: Props) {
   return (
     <section>
       <h1>Служебные сообщения</h1>
-      <p className="hint">
+      <PageHelp>
         Журнал фиксирует действия, которые меняют планы, справочники и поступления.
         {user.role === 'executive_director'
           ? ' Исполнительный директор видит действия всех сотрудников.'
           : ' Здесь ваши действия и сообщения, адресованные вам.'}{' '}
         Непрочитанные — в колокольчике, прочитанные остаются здесь.
-      </p>
+      </PageHelp>
       <div className="toolbar messages-toolbar">
         <input
           className="audit-search"
@@ -147,7 +148,7 @@ export function MessagesPage({ user }: Props) {
           />
           только служебные сообщения
         </label>
-        <span className="hint" data-testid="messages-unread">
+        <span className="status-chip" data-testid="messages-unread">
           Непрочитанных: {unread}
         </span>
         <button

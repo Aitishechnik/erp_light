@@ -26,6 +26,7 @@ import {
   savePurchasePlanItems,
   submitPurchasePlan,
 } from './api'
+import { PageHelp } from './PageHelp'
 
 const QTY_PATTERN = /^\d+(?:[.,]\d{1,3})?$/
 const PRICE_PATTERN = /^\d+(?:[.,]\d{1,2})?$/
@@ -881,11 +882,11 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
     <section>
       <header className="page-head">
         <h1>План закупок сырья</h1>
-        <p className="hint">
+        <PageHelp>
           Годовой план строится из финально согласованного годового плана продаж. Позиция
           раскладывается на сырьё вручную: страна задаёт срок доставки, по нему считается месяц
           заказа. Утверждает исполнительный директор.
-        </p>
+        </PageHelp>
         <div className="toolbar">
           <button
             type="button"
@@ -1134,10 +1135,12 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
               </button>
             ) : null}
             {isExecutive && plan.status === 'draft' ? (
-              <span className="hint">Просмотр: план ещё заполняет закупщик</span>
+              <span className="status-chip">План ещё заполняется</span>
             ) : null}
             {isEditor && plan.status === 'approved' ? (
-              <span className="hint">План утверждён — правки недоступны</span>
+              <span className="status-chip" data-testid="plan-approved-chip">
+                Утверждён
+              </span>
             ) : null}
           </div>
 
