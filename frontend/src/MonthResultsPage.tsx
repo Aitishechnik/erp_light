@@ -749,10 +749,10 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
           ) : null}
 
           {result.rows.length === 0 ? (
-            <p className="hint" data-testid="month-empty">
-              За этот месяц продаж и плана нет. Загрузите выгрузку «Продажи за месяц» в разделе
-              «Загрузка данных».
-            </p>
+            <div className="empty-state" data-testid="month-empty">
+              <strong>За этот месяц продаж и плана нет</strong>
+              <span>Загрузите выгрузку «Продажи за месяц» в разделе «Загрузка данных».</span>
+            </div>
           ) : null}
 
           {result.rows.length > 0 ? (

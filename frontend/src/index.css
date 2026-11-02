@@ -4505,3 +4505,164 @@ input[type="file"]::file-selector-button:hover {
   color: var(--muted);
   box-shadow: none;
 }
+
+/* ── Ровность карточек и полос ─────────────────────────────────────────── */
+
+/* Тулбар без единого контрола — не карточка, а строка статуса. */
+.toolbar:not(:has(input, select, button)) {
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  margin-bottom: 0.75rem;
+}
+
+.inline-form {
+  padding: 0.6rem 0.75rem;
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  gap: 0.6rem;
+}
+
+.purchase-summary {
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+
+button.primary:disabled {
+  box-shadow: none;
+}
+
+.sidebar-footer .user-name {
+  white-space: normal;
+  line-height: 1.25;
+}
+
+/* Длинные названия контрагентов переносятся, иначе таблица уезжает за край. */
+[data-testid="counterparties-table"] th:first-child,
+[data-testid="counterparties-table"] td:first-child {
+  white-space: normal;
+  width: 42%;
+  min-width: 200px;
+}
+
+[data-testid="counterparties-table"] select {
+  max-width: 100%;
+}
+
+/* ── Пустое состояние: блок, а не серая строка ─────────────────────────── */
+
+.empty-state {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  flex: 1 1 100%;
+  max-width: 44rem;
+  padding: 1.5rem 1.75rem;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.empty-state strong {
+  font-size: 0.98rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+/* ── Активные карточки и метки: мягче кромки, без белых обводок ────────── */
+
+.rail-list .batch-card:hover {
+  border-color: var(--border-strong);
+}
+
+.rail-list .batch-card.active {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--surface));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.month-state .badge {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.74rem;
+}
+
+.focus-card {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent),
+    var(--shadow);
+}
+
+[data-theme="dark"] .focus-card {
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent),
+    var(--shadow);
+}
+
+/* ── Плотнее на 1280–1400: таблицы перестают уезжать за край ───────────── */
+
+@media (max-width: 1400px) {
+  th,
+  td {
+    padding: 0.5rem 0.45rem;
+  }
+
+  table {
+    font-size: 0.8rem;
+  }
+}
+
+@media (max-width: 1320px) {
+  th,
+  td {
+    padding: 0.45rem 0.4rem;
+  }
+
+  table {
+    font-size: 0.78rem;
+  }
+}
+
+/* Поля справочников: не растягиваются на всю строку, чтобы форма не прыгала. */
+.inline-form input {
+  flex: 1 1 12rem;
+  max-width: 18rem;
+}
+
+.inline-form select {
+  flex: 0 0 auto;
+  max-width: 11rem;
+}
+
+/* Флажки и переключатели — нативные, только с акцентным цветом. */
+input[type="checkbox"],
+input[type="radio"] {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  accent-color: var(--accent-solid);
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  width: 1rem;
+  height: 1rem;
+}
+
+/* Финальная ровность: отступы пустых блоков и служебных строк. */
+.empty-state {
+  margin-top: 0.5rem;
+}
+
+.toolbar:not(:has(input, select, button)) {
+  margin-bottom: 0.5rem;
+}
+
+.status-chip {
+  border-color: var(--border-strong);
+}

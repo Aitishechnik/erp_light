@@ -615,9 +615,10 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
 
       <div className="plan-list">
         {yearPlans.length === 0 ? (
-          <p className="hint" data-testid="no-plans">
-            На {year} год планов нет.
-          </p>
+          <div className="empty-state" data-testid="no-plans">
+            <strong>На {year} год планов нет</strong>
+            <span>Создайте план продаж кнопкой выше — он появится здесь.</span>
+          </div>
         ) : (
           yearPlans.map((row) => (
             <button

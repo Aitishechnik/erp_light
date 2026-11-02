@@ -458,8 +458,13 @@ export function App() {
         {current.id === 'tasks' && current.ready ? <TasksPage user={user} focus={focus} /> : null}
         {!current.ready ? (
           <section>
-            <h1>{current.title}</h1>
-            <p className="hint">Модуль ещё не реализован.</p>
+            <header className="page-head">
+              <h1>{current.title}</h1>
+            </header>
+            <div className="empty-state">
+              <strong>Модуль ещё не реализован.</strong>
+              <span>Раздел появится в одном из следующих обновлений.</span>
+            </div>
           </section>
         ) : null}
       </main>

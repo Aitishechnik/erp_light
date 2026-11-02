@@ -164,7 +164,7 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
         </select>
         <input
           aria-label="Поиск по коду или наименованию"
-          placeholder="Поиск по коду или наименованию"
+          placeholder="Поиск по коду или названию"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />

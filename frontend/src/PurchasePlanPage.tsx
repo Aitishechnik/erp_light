@@ -937,12 +937,14 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
       ) : null}
 
       {plan === null ? (
-        <p className="hint" data-testid="purchase-no-plan">
-          На {year} год плана закупок сырья нет.
-          {isEditor
-            ? ' План создаётся на основании финально согласованного годового плана продаж за этот год.'
-            : ' План создаёт директор по закупкам.'}
-        </p>
+        <div className="empty-state" data-testid="purchase-no-plan">
+          <strong>На {year} год плана закупок сырья нет</strong>
+          <span>
+            {isEditor
+              ? 'План создаётся на основании финально согласованного годового плана продаж за этот год.'
+              : 'План создаёт директор по закупкам.'}
+          </span>
+        </div>
       ) : (
         <>
           <div className="purchase-summary" data-testid="purchase-plan-card">
