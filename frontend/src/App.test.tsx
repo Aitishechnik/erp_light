@@ -52,6 +52,8 @@ const STOCK: StockRow[] = [
 
 beforeEach(() => {
   window.location.hash = ''
+  localStorage.clear()
+  delete document.documentElement.dataset.theme
 })
 
 afterEach(() => {
@@ -234,5 +236,40 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Страны' })).toBeInTheDocument()
     expect(await screen.findByTestId('countries-empty')).toBeInTheDocument()
+  })
+
+  it('сворачивает меню, показывает иконки и запоминает состояние', async () => {
+    const user = userEvent.setup()
+    mockApi({ '/api/v1/auth/me': { body: MANAGER }, '/api/v1/stock': { body: [] } })
+    render(<App />)
+
+    await screen.findByText('Иван Петров')
+    const layout = document.querySelector('.layout') as HTMLElement
+    expect(layout).not.toHaveClass('collapsed')
+
+    await user.click(screen.getByRole('button', { name: 'Свернуть меню' }))
+    expect(layout).toHaveClass('collapsed')
+    expect(localStorage.getItem('erp_lite_sidebar')).toBe('collapsed')
+
+    // В свёрнутом меню у категории остаётся доступное имя, клик раскрывает меню.
+    await user.click(screen.getByRole('button', { name: 'Планирование' }))
+    expect(layout).not.toHaveClass('collapsed')
+    expect(localStorage.getItem('erp_lite_sidebar')).toBe('expanded')
+  })
+
+  it('переключает тёмную тему и запоминает выбор', async () => {
+    const user = userEvent.setup()
+    mockApi({ '/api/v1/auth/me': { body: MANAGER }, '/api/v1/stock': { body: [] } })
+    render(<App />)
+
+    await screen.findByText('Иван Петров')
+    expect(document.documentElement.dataset.theme).not.toBe('dark')
+
+    await user.click(screen.getByRole('button', { name: 'Тёмная тема' }))
+    expect(document.documentElement.dataset.theme).toBe('dark')
+    expect(localStorage.getItem('erp_lite_theme')).toBe('dark')
+
+    await user.click(screen.getByRole('button', { name: 'Светлая тема' }))
+    expect(document.documentElement.dataset.theme).toBe('light')
   })
 })

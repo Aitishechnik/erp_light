@@ -1,10 +1,51 @@
+/* ── Токены оформления ─────────────────────────────────────────────────── */
+
 :root {
   color-scheme: light;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   line-height: 1.5;
-  --border: #dfe3e8;
-  --muted: #6b7280;
-  --accent: #1f6feb;
+  --bg: #f4f5fb;
+  --surface: #ffffff;
+  --surface-2: #fbfbfe;
+  --surface-3: #f0f1f8;
+  --border: #e7e9f3;
+  --border-strong: #dcdff0;
+  --text: #1e1b4b;
+  --text-soft: #4b5165;
+  --muted: #7b8199;
+  --accent: #4f46e5;
+  --accent-solid: #4f46e5;
+  --accent-ink: #4338ca;
+  --accent-soft: #eef0ff;
+  --hover: #f7f7fd;
+  --good: #15803d;
+  --bad: #b42318;
+  --warn: #b45309;
+  --radius: 16px;
+  --radius-sm: 10px;
+  --shadow: 0 8px 22px rgba(30, 27, 75, 0.05);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #101019;
+  --surface: #181826;
+  --surface-2: #1e1e2e;
+  --surface-3: #232336;
+  --border: #2b2b3f;
+  --border-strong: #3a3a52;
+  --text: #ececf5;
+  --text-soft: #c7c9d9;
+  --muted: #a2a6bd;
+  --accent: #8b87f5;
+  --accent-solid: #5b52e8;
+  --accent-ink: #b3afff;
+  --accent-soft: #262449;
+  --hover: #222234;
+  --good: #4ade80;
+  --bad: #f87171;
+  --warn: #fbbf24;
+  --shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
 }
 
 * {
@@ -14,30 +55,91 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: #f7f8fa;
-  color: #111827;
+  background: var(--bg);
+  color: var(--text);
+  transition:
+    background 0.18s ease,
+    color 0.18s ease;
 }
+
+/* ── Каркас и меню ─────────────────────────────────────────────────────── */
 
 .layout {
   display: grid;
-  /* Шире прежних 260px: подпункты стоят с отступом под заголовком раздела,
-     и длинные названия («Настройки приложения») должны влезать в строку. */
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 264px 1fr;
   min-height: 100vh;
+  transition: grid-template-columns 0.18s ease;
+}
+
+.layout.collapsed {
+  grid-template-columns: 76px 1fr;
 }
 
 .sidebar {
-  background: #fff;
-  border-right: 1px solid var(--border);
-  /* Горизонтальный отступ меньше — та же причина: место под подпункты. */
-  padding: 1rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  box-shadow: 1px 0 0 var(--border);
+  padding: 22px 14px 16px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.sidebar.collapsed {
+  padding: 18px 10px 14px;
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 6px 8px;
+}
+
+.sidebar.collapsed .brand-row {
+  justify-content: center;
+  padding-bottom: 12px;
 }
 
 .brand {
   font-weight: 700;
-  font-size: 1.125rem;
-  padding: 0.5rem 0.75rem 1rem;
-  letter-spacing: 0.02em;
+  font-size: 1.15rem;
+  letter-spacing: 0;
+}
+
+.brand span {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: 3px;
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.sidebar nav {
+  flex: 1;
 }
 
 .sidebar ul {
@@ -45,57 +147,70 @@ body {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 0.25rem;
+  gap: 2px;
 }
 
 .nav-item {
   width: 100%;
   text-align: left;
   font: inherit;
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.5rem;
+  font-size: 0.84rem;
+  padding: 0.5rem 0.65rem;
+  margin: 1px 0;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: transparent;
-  color: inherit;
+  color: var(--text-soft);
   cursor: pointer;
 }
 
 .nav-item:hover {
-  background: #f1f3f5;
+  background: var(--hover);
+  color: var(--text);
 }
 
 .nav-group {
-  margin-bottom: 0.15rem;
+  margin-bottom: 2px;
 }
 
 .nav-group-head {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 9px;
   width: 100%;
   text-align: left;
   font: inherit;
+  font-size: 0.84rem;
   font-weight: 600;
-  padding: 0.5rem 0.75rem;
+  padding: 0.5rem 0.65rem;
   border: 1px solid transparent;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: inherit;
+  color: var(--text);
   cursor: pointer;
 }
 
 .nav-group-head:hover {
-  background: #f1f3f5;
+  background: var(--hover);
 }
 
 .nav-group-head.active {
   color: var(--accent);
 }
 
+.nav-group-head svg,
+.nav-item svg {
+  flex: none;
+  opacity: 0.9;
+}
+
+.nav-title {
+  flex: 1;
+}
+
 .chevron {
-  display: inline-block;
-  width: 0.9rem;
-  font-size: 0.75rem;
+  margin-left: auto;
+  font-size: 0.55rem;
   color: var(--muted);
 }
 
@@ -103,28 +218,53 @@ body {
    перебивает отступ и подпункты уезжают левее заголовка раздела. */
 .sidebar ul.nav-sublist {
   list-style: none;
-  margin: 0.15rem 0 0.35rem 1.2rem;
-  padding: 0 0 0 0.25rem;
+  margin: 2px 0 6px 13px;
+  padding: 0 0 0 7px;
   display: grid;
-  gap: 0.15rem;
+  gap: 1px;
   border-left: 1px solid var(--border);
 }
 
 .nav-item.active {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--accent-soft);
+  border-color: transparent;
   color: var(--accent);
   font-weight: 600;
 }
 
+/* Свёрнутое меню: только иконки, подписи и подпункты скрыты. */
+.sidebar.collapsed .brand {
+  display: none;
+}
+
+.sidebar.collapsed .nav-title,
+.sidebar.collapsed .chevron,
+.sidebar.collapsed .nav-sublist {
+  display: none;
+}
+
+.sidebar.collapsed .nav-group-head,
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding: 0.6rem 0;
+}
+
+.sidebar.collapsed .nav-group-head svg,
+.sidebar.collapsed .nav-item svg {
+  width: 20px;
+  height: 20px;
+}
+
 .content {
-  padding: 1.5rem 2rem 3rem;
+  padding: 26px 32px 40px;
   overflow-x: auto;
 }
 
 .page-head h1 {
-  margin: 0 0 0.25rem;
-  font-size: 1.375rem;
+  margin: 0 0 4px;
+  font-size: 1.5rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
 }
 
 /* ── Справка и служебные метки в шапке ─────────────────────────────────── */
@@ -142,8 +282,8 @@ body {
   padding: 0.15rem 0.55rem 0.15rem 0.4rem;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: #f9fafb;
-  color: #374151;
+  background: var(--surface-2);
+  color: var(--text);
   cursor: pointer;
   list-style: none;
   width: fit-content;
@@ -179,7 +319,7 @@ body {
 }
 
 .page-help summary:hover {
-  background: #f1f3f5;
+  background: var(--hover);
 }
 
 .page-help-body {
@@ -187,9 +327,9 @@ body {
   margin-top: 0.4rem;
   padding: 0.6rem 0.8rem;
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: #fff;
-  color: #374151;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
   line-height: 1.45;
 }
 
@@ -208,8 +348,8 @@ body {
   padding: 0.12rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: #f9fafb;
-  color: #374151;
+  background: var(--surface-2);
+  color: var(--text);
   font-size: 0.8rem;
   white-space: nowrap;
 }
@@ -220,12 +360,12 @@ body {
   flex-wrap: wrap;
   gap: 0.35rem 1.25rem;
   margin: 0 0 0.9rem;
-  color: #374151;
+  color: var(--text);
   font-size: 0.9rem;
 }
 
 .page-stats strong {
-  color: #111827;
+  color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 
@@ -236,7 +376,7 @@ body {
   align-items: center;
   gap: 0.35rem 0.9rem;
   margin: 0.15rem 0 0.75rem;
-  color: #374151;
+  color: var(--text);
   font-size: 0.8rem;
 }
 
@@ -254,7 +394,7 @@ body {
   padding: 0.02rem 0.35rem;
   border: 1px solid #b42318;
   border-radius: 0.3rem;
-  color: #b42318;
+  color: var(--bad);
 }
 
 .hint {
@@ -265,32 +405,32 @@ body {
 
 /* Карточка после сохранения остаётся открытой — подтверждаем, что запись прошла. */
 .hint.saved {
-  color: #067647;
+  color: var(--good);
 }
 
 /* Ручная правка итогов растаможки: цветом отделяем от обычных подсказок. */
 .hint.warn {
-  color: #b54708;
+  color: var(--warn);
   background: #fffaeb;
   border: 1px solid #fedf89;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   padding: 0.5rem 0.75rem;
 }
 
 .error {
-  color: #b42318;
+  color: var(--bad);
   background: #fef3f2;
   border: 1px solid #fecdca;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   padding: 0.75rem 1rem;
 }
 
 table {
   border-collapse: collapse;
   width: 100%;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   font-size: 0.9rem;
 }
@@ -304,7 +444,7 @@ td {
 }
 
 th {
-  background: #f9fafb;
+  background: var(--surface-2);
   font-weight: 600;
 }
 
@@ -328,14 +468,14 @@ select {
   padding: 0.35rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: 0.375rem;
-  background: #fff;
+  background: var(--surface);
   color: inherit;
 }
 
 input:disabled,
 select:disabled,
 textarea:disabled {
-  background: #f3f4f6;
+  background: var(--surface-3);
   color: var(--muted);
 }
 
@@ -357,9 +497,9 @@ button.primary {
   gap: 0.4rem;
   width: min(22rem, 90vw);
   padding: 1.5rem;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  border-radius: var(--radius);
 }
 
 .login-card h1 {
@@ -371,8 +511,8 @@ button.primary {
   margin-top: 0.5rem;
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: #fff;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   cursor: pointer;
 }
 
@@ -389,8 +529,8 @@ button.primary {
 .toolbar button {
   padding: 0.35rem 0.75rem;
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: #fff;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   cursor: pointer;
 }
 
@@ -411,8 +551,8 @@ button.primary {
   text-align: left;
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: #fff;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   cursor: pointer;
 }
 
@@ -435,18 +575,18 @@ button.primary {
   padding: 0.05rem 0.4rem;
   border-radius: 999px;
   font-size: 0.75rem;
-  background: #f1f3f5;
+  background: var(--hover);
   color: var(--muted);
 }
 
 .status-approved {
   background: #e7f6ec;
-  color: #067647;
+  color: var(--good);
 }
 
 .status-on_review {
   background: #fff4e5;
-  color: #b25e09;
+  color: var(--warn);
 }
 
 .status-filling {
@@ -456,7 +596,7 @@ button.primary {
 
 .status-revision {
   background: #fff0e5;
-  color: #b54708;
+  color: var(--warn);
 }
 /* ── Итоги месяца: план продаж против факта ────────────────────────────── */
 
@@ -526,7 +666,7 @@ button.primary {
   padding: 0.12rem 0.35rem;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: #f8f9fb;
+  background: var(--surface-2);
   color: var(--text);
   font-size: 0.72rem;
   line-height: 1.25;
@@ -534,7 +674,7 @@ button.primary {
 }
 
 .reason-add {
-  background: #fff;
+  background: var(--surface);
   color: var(--muted);
 }
 
@@ -547,7 +687,7 @@ button.primary {
 }
 
 .reason-editor td {
-  background: #fbfcfe;
+  background: var(--surface-2);
 }
 
 .reason-title {
@@ -584,16 +724,16 @@ button.primary {
 
 .badge-closed {
   background: #e7f6ec;
-  color: #067647;
+  color: var(--good);
 }
 
 .month-confirm,
 .month-decision {
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  border-radius: var(--radius);
   padding: 0.75rem 1rem;
   margin-bottom: 1.25rem;
-  background: #fff;
+  background: var(--surface);
 }
 
 .month-confirm {
@@ -619,7 +759,7 @@ button.primary {
 
 .badge-plan {
   background: #e7f6ec;
-  color: #067647;
+  color: var(--good);
 }
 
 .badge-extra {
@@ -629,12 +769,12 @@ button.primary {
 
 .badge-short {
   background: #fff0e5;
-  color: #b54708;
+  color: var(--warn);
 }
 
 .unmatched-box {
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  border-radius: var(--radius);
   padding: 0.75rem 1rem;
   margin-bottom: 1.25rem;
   background: #fffdf7;
@@ -691,7 +831,7 @@ input.cell {
 .plan-table td:first-child {
   position: sticky;
   left: 0;
-  background: #fff;
+  background: var(--surface);
   z-index: 1;
   white-space: normal;
   min-width: 8rem;
@@ -699,7 +839,7 @@ input.cell {
 }
 
 .plan-table th:first-child {
-  background: #f9fafb;
+  background: var(--surface-2);
 }
 
 /* В корректировке у таблицы есть колонка действий: названию товара нужно больше
@@ -757,7 +897,7 @@ button:disabled,
 .toolbar button:disabled {
   cursor: not-allowed;
   color: var(--muted);
-  background: #f3f4f6;
+  background: var(--surface-3);
   border-color: var(--border);
 }
 
@@ -785,7 +925,7 @@ button.primary:disabled,
   padding: 0.25rem 0.7rem;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   cursor: pointer;
 }
 
@@ -793,7 +933,7 @@ button.primary:disabled,
   padding: 0.2rem 0.6rem;
   border: 1px solid var(--border);
   border-radius: 0.4rem;
-  background: #fff;
+  background: var(--surface);
   cursor: pointer;
 }
 
@@ -808,7 +948,7 @@ button.primary:disabled,
 .inline-form button {
   padding: 0.35rem 0.75rem;
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 
@@ -833,9 +973,9 @@ button.primary:disabled,
   gap: 0.5rem;
   align-content: start;
   padding: 0.9rem 1rem;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.6rem;
+  border-radius: var(--radius);
 }
 
 .import-card h2 {
@@ -855,14 +995,14 @@ button.primary:disabled,
   justify-self: start;
   padding: 0.35rem 0.75rem;
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 
 .import-result {
   margin: 0;
   font-size: 0.9rem;
-  color: #067647;
+  color: var(--good);
 }
 
 .section-title {
@@ -882,8 +1022,8 @@ button.primary:disabled,
 /* Пояснение к загрузке: переносится по словам, иначе длинная строка уезжает за край. */
 .journal-table .journal-note td {
   white-space: normal;
-  background: #fcfcfd;
-  color: #4b5563;
+  background: var(--surface-2);
+  color: var(--text-soft);
 }
 
 /* ── Поступления: календарь и карточка ─────────────────────────────────── */
@@ -919,7 +1059,7 @@ button.primary:disabled,
 }
 
 .calendar-day.other-month {
-  background: #fafbfc;
+  background: var(--surface-2);
   color: var(--muted);
 }
 
@@ -957,7 +1097,7 @@ button.primary:disabled,
   min-width: 22rem;
   padding: 0.35rem;
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   font: inherit;
   color: var(--text);
   resize: vertical;
@@ -965,13 +1105,13 @@ button.primary:disabled,
 
 .status-draft {
   background: #fff4e5;
-  color: #8a4b08;
+  color: var(--warn);
 }
 
 /* Растаможенная партия: спокойный зелёный, отличается от «черновика» и «плана». */
 .status-clearance {
   background: #e6f4ea;
-  color: #1c6b3a;
+  color: var(--good);
   /* Отбивка от номера партии: пробел в разметке схлопывается. */
   margin-left: 0.25rem;
 }
@@ -980,10 +1120,10 @@ button.primary:disabled,
 .customs-box {
   margin: 0.75rem 0;
   padding: 0.75rem 1rem;
-  background: #f8fafc;
+  background: var(--surface-2);
   border: 1px solid var(--border);
   border-left: 4px solid #1c6b3a;
-  border-radius: 0.6rem;
+  border-radius: var(--radius);
 }
 
 /* Редактируемая часть карточки: для ролей без прав она выключена целиком. */
@@ -1002,9 +1142,9 @@ button.primary:disabled,
 .receipt-form {
   padding: 0;
   margin: 0;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.9rem;
+  border-radius: var(--radius);
   overflow: visible;
 }
 
@@ -1045,7 +1185,7 @@ button.primary:disabled,
 }
 
 .receipt-items .product-missing {
-  color: #b42318;
+  color: var(--bad);
 }
 
 .customs-box .toolbar {
@@ -1093,8 +1233,8 @@ button.primary:disabled,
   gap: 6px;
   padding: 0.4rem 0.8rem;
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: #fff;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   color: var(--text);
   font: inherit;
   font-size: 0.875rem;
@@ -1103,7 +1243,7 @@ button.primary:disabled,
 }
 
 .receipts-page button:hover:not(:disabled) {
-  background: #f9fafb;
+  background: var(--surface-2);
 }
 
 .receipts-page button.primary {
@@ -1131,7 +1271,7 @@ button.primary:disabled,
 }
 
 .receipts-page button.mini:hover:not(:disabled) {
-  background: #f1f3f5;
+  background: var(--hover);
   color: var(--text);
 }
 
@@ -1182,14 +1322,14 @@ button.primary:disabled,
 }
 
 .status-source {
-  background: #f1f3f5;
+  background: var(--hover);
   color: var(--muted);
 }
 
 /* Поступление, позиции которого связаны со строками плана закупок. */
 .status-plan {
   background: #eef2ff;
-  color: #3845a5;
+  color: var(--accent);
 }
 
 /* Ссылка на строку плана — компактный выбор под названием товара. */
@@ -1210,14 +1350,14 @@ button.primary:disabled,
   text-overflow: ellipsis;
   border: 1px solid var(--border);
   border-radius: 0.4rem;
-  background: #fff;
+  background: var(--surface);
   color: var(--muted);
   font: inherit;
   font-size: 0.78rem;
 }
 
 .receipt-items .plan-select:disabled {
-  background: #f5f6f8;
+  background: var(--surface-3);
   color: var(--muted);
   opacity: 1;
 }
@@ -1225,7 +1365,7 @@ button.primary:disabled,
 .receipt-items .plan-chip {
   display: block;
   margin-top: 0.25rem;
-  color: #3845a5;
+  color: var(--accent);
   font-size: 0.78rem;
 }
 
@@ -1235,9 +1375,9 @@ button.primary:disabled,
   grid-template-columns: 10rem minmax(15rem, 1.6fr) 6rem 13rem;
   gap: 10px 14px;
   padding: 12px 16px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  border-radius: var(--radius);
 }
 
 .doc-passport .field {
@@ -1284,9 +1424,9 @@ button.primary:disabled,
 .kpi {
   min-width: 0;
   padding: 10px 14px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  border-radius: var(--radius);
 }
 
 .kpi-primary {
@@ -1315,7 +1455,7 @@ button.primary:disabled,
   display: block;
   margin-top: 2px;
   font-size: 11.5px;
-  color: #98a2b3;
+  color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1336,7 +1476,7 @@ button.primary:disabled,
   display: flex;
   gap: 2px;
   padding: 0 8px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-bottom: 0;
   border-radius: 0.75rem 0.75rem 0 0;
@@ -1369,8 +1509,8 @@ button.primary:disabled,
 .tab-count {
   padding: 1px 7px;
   border-radius: 999px;
-  background: #f1f3f5;
-  color: #475467;
+  background: var(--hover);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 600;
 }
@@ -1381,9 +1521,9 @@ button.primary:disabled,
 }
 
 .doc-card {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  border-radius: var(--radius);
   overflow: hidden;
 }
 
@@ -1397,7 +1537,7 @@ button.primary:disabled,
   align-items: center;
   gap: 10px;
   padding: 11px 16px;
-  background: #fcfcfd;
+  background: var(--surface-2);
   border-bottom: 1px solid var(--border);
 }
 
@@ -1423,7 +1563,7 @@ button.primary:disabled,
   gap: 10px;
   padding: 9px 16px;
   border-bottom: 1px solid var(--border);
-  background: #fcfcfd;
+  background: var(--surface-2);
 }
 
 .doc-toolbar-label {
@@ -1437,8 +1577,8 @@ button.primary:disabled,
   align-items: center;
   padding: 0.35rem 0.7rem;
   border: 1px dashed var(--border);
-  border-radius: 0.5rem;
-  background: #fff;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   font-size: 0.8rem;
   color: var(--muted);
   cursor: pointer;
@@ -1495,15 +1635,15 @@ button.primary:disabled,
   grid-template-columns: 1fr 1fr;
   gap: 14px;
   padding: 16px;
-  background: #fcfcfd;
+  background: var(--surface-2);
   border-top: 1px solid var(--border);
 }
 
 .closing-group {
   padding: 6px 14px 8px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.6rem;
+  border-radius: var(--radius);
 }
 
 .closing-group h3 {
@@ -1525,7 +1665,7 @@ button.primary:disabled,
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0 12px;
   padding: 5px 0;
-  border-bottom: 1px dashed #eef0f3;
+  border-bottom: 1px dashed var(--surface-3);
   font-size: 12.5px;
 }
 
@@ -1585,7 +1725,7 @@ button.primary:disabled,
   margin-top: 18px;
   border-radius: 6px;
   overflow: hidden;
-  background: #eef1f5;
+  background: var(--surface-3);
 }
 
 .cost-bar span {
@@ -1632,7 +1772,7 @@ button.primary:disabled,
 
 .cost-legend-item small {
   grid-column: 2;
-  color: #98a2b3;
+  color: var(--muted);
   font-size: 10.5px;
 }
 
@@ -1650,7 +1790,7 @@ button.primary:disabled,
   padding: 10px 16px;
   background: rgba(255, 255, 255, 0.97);
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  border-radius: var(--radius);
   box-shadow: 0 -6px 20px rgba(16, 24, 40, 0.06);
 }
 
@@ -1684,7 +1824,7 @@ button.primary:disabled,
   max-height: calc(100vh - 48px);
   overflow: auto;
   margin: 0;
-  background: #fff;
+  background: var(--surface);
   box-shadow: 0 24px 60px rgba(16, 24, 40, 0.25);
 }
 
@@ -1718,21 +1858,21 @@ button.primary:disabled,
 .receipts-page .doc-card .receipt-expenses td input:hover:not(:disabled),
 .receipts-page .doc-card .receipt-payments td input:hover:not(:disabled) {
   border-color: var(--border);
-  background: #fff;
+  background: var(--surface);
 }
 
 .receipts-page .doc-card .receipt-items td input:focus,
 .receipts-page .doc-card .receipt-expenses td input:focus,
 .receipts-page .doc-card .receipt-payments td input:focus {
   border-color: var(--accent);
-  background: #fff;
+  background: var(--surface);
 }
 
 .receipts-page .doc-card .receipt-items td input:disabled,
 .receipts-page .doc-card .receipt-expenses td input:disabled,
 .receipts-page .doc-card .receipt-payments td input:disabled {
   border-color: transparent;
-  background: #f5f6f8;
+  background: var(--surface-3);
 }
 
 .rate-row button {
@@ -1778,9 +1918,9 @@ button.primary:disabled,
   align-items: center;
   gap: 2px;
   padding: 3px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.6rem;
+  border-radius: var(--radius);
 }
 
 .month-nav button {
@@ -1813,9 +1953,9 @@ button.primary:disabled,
 
 .mini-card {
   padding: 10px 10px 12px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  border-radius: var(--radius);
 }
 
 .mini-dow,
@@ -1827,7 +1967,7 @@ button.primary:disabled,
 .mini-dow {
   padding: 4px 0 6px;
   font-size: 10.5px;
-  color: #98a2b3;
+  color: var(--muted);
   text-align: center;
 }
 
@@ -1848,7 +1988,7 @@ button.primary:disabled,
 }
 
 .mini-days .mini-day:hover {
-  background: #f1f3f5;
+  background: var(--hover);
 }
 
 .mini-days .mini-day.out {
@@ -1878,7 +2018,7 @@ button.primary:disabled,
 }
 
 .mini-days .mini-day.selected .mini-dot {
-  background: #fff;
+  background: var(--surface);
 }
 
 .rail-day {
@@ -1910,8 +2050,8 @@ button.primary:disabled,
   width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 0.7rem;
-  background: #fff;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   text-align: left;
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
 }
@@ -1923,7 +2063,7 @@ button.primary:disabled,
 
 .rail-list .batch-card:hover {
   border-color: #c9d2dd;
-  background: #fff;
+  background: var(--surface);
 }
 
 .rail-list .batch-card.active {
@@ -1962,7 +2102,7 @@ button.primary:disabled,
 .batch-note {
   font-size: 0.7rem;
   font-weight: 400;
-  color: #98a2b3;
+  color: var(--muted);
 }
 
 .work-right {
@@ -1977,9 +2117,9 @@ button.primary:disabled,
   justify-items: center;
   min-height: 24rem;
   padding: 48px 24px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.9rem;
+  border-radius: var(--radius);
   text-align: center;
 }
 
@@ -2007,7 +2147,7 @@ button.primary:disabled,
 .receipt-card .doc-passport {
   grid-template-columns: minmax(15rem, 1.6fr) 10rem 6rem 13rem;
   padding: 12px 16px;
-  background: #fcfcfd;
+  background: var(--surface-2);
   border: 0;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
@@ -2056,7 +2196,7 @@ button.primary:disabled,
   display: block;
   margin-top: 2px;
   font-size: 11px;
-  color: #98a2b3;
+  color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2080,13 +2220,13 @@ button.primary:disabled,
   border: 0;
   border-top: 1px solid var(--border);
   border-radius: 0;
-  background: #fff;
+  background: var(--surface);
   text-align: left;
   box-shadow: none;
 }
 
 .acc .acc-head:hover {
-  background: #fcfcfd;
+  background: var(--surface-2);
 }
 
 .acc:first-child .acc-head {
@@ -2096,7 +2236,7 @@ button.primary:disabled,
 .acc-chev {
   width: 12px;
   font-size: 11px;
-  color: #98a2b3;
+  color: var(--muted);
 }
 
 .acc-title {
@@ -2107,8 +2247,8 @@ button.primary:disabled,
 .acc-count {
   padding: 1px 7px;
   border-radius: 999px;
-  background: #f1f3f5;
-  color: #475467;
+  background: var(--hover);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 600;
 }
@@ -2125,7 +2265,7 @@ button.primary:disabled,
   border: 0;
   border-top: 1px solid #f0f2f5;
   border-radius: 0;
-  background: #fff;
+  background: var(--surface);
 }
 
 .acc-body .doc-card-title,
@@ -2145,7 +2285,7 @@ button.primary:disabled,
   border: 0;
   border-top: 1px solid var(--border);
   border-radius: 0 0 0.9rem 0.9rem;
-  background: #fff;
+  background: var(--surface);
 }
 
 /* Карточка партии тянется вниз: липкие календарь и подвал работают по окну. */
@@ -2194,8 +2334,8 @@ button.primary:disabled,
   gap: 0.5rem 0.75rem;
   padding: 0.65rem 0.9rem;
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: #fff;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   margin-bottom: 1rem;
   font-size: 0.9rem;
 }
@@ -2238,10 +2378,10 @@ button.primary:disabled,
 
 .correction-box {
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   padding: 0.75rem;
   margin-bottom: 1rem;
-  background: #fff;
+  background: var(--surface);
 }
 
 .correction-box h2 {
@@ -2264,7 +2404,7 @@ button.primary:disabled,
   display: grid;
   gap: 0.5rem;
   border: 1px solid #f0c36d;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   padding: 0.75rem 0.9rem;
   margin-bottom: 1rem;
   background: #fff8e6;
@@ -2283,19 +2423,19 @@ button.primary:disabled,
   align-items: baseline;
   gap: 0.35rem 0.75rem;
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   padding: 0.55rem 0.9rem;
   margin-bottom: 1rem;
-  background: #f3f6fb;
+  background: var(--surface-2);
   font-size: 0.9rem;
 }
 
 .source-history {
   margin-bottom: 1rem;
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   padding: 0.5rem 0.75rem;
-  background: #fff;
+  background: var(--surface);
 }
 
 .source-history summary {
@@ -2308,7 +2448,7 @@ button.primary:disabled,
 }
 
 .need-row td {
-  background: #f6f8fb;
+  background: var(--surface-2);
   border-top: 2px solid var(--border);
   padding: 0.55rem 0.6rem;
 }
@@ -2355,36 +2495,36 @@ button.primary:disabled,
 }
 
 .need-state.ok {
-  color: #1a7f37;
+  color: var(--good);
 }
 
 .need-changed {
   background: #fff3cd;
-  color: #8a5a00;
+  color: var(--warn);
   border-color: #f0c36d;
 }
 
 .need-added {
   background: #e7f6ec;
-  color: #1a7f37;
+  color: var(--good);
   border-color: #9fd5b0;
 }
 
 .need-removed {
   background: #fdecea;
-  color: #a61b1b;
+  color: var(--bad);
   border-color: #f3b4ae;
 }
 
 /* Альтернативное сырьё: строка-замена под основной, своей потребности у неё нет. */
 .badge-alt {
   background: #e8f0fe;
-  color: #1f4b99;
+  color: var(--accent);
   border-color: #a9c1f0;
 }
 
 .alt-row td {
-  background: #fbfcff;
+  background: var(--surface-2);
 }
 
 .alt-add {
@@ -2417,7 +2557,7 @@ button.primary:disabled,
     background: #fff3cd;
   }
   to {
-    background: #f6f8fb;
+    background: var(--surface-2);
   }
 }
 
@@ -2433,7 +2573,7 @@ button.primary:disabled,
   padding: 2px 6px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   font-size: 0.78rem;
   white-space: nowrap;
 }
@@ -2458,12 +2598,12 @@ button.primary:disabled,
 }
 
 .purchase-table .month-fact.done {
-  color: #1c6b3a;
+  color: var(--good);
   font-weight: 600;
 }
 
 .purchase-table .month-fact.partial {
-  color: #8a4b08;
+  color: var(--warn);
 }
 
 .purchase-table .month-fact.extra {
@@ -2475,11 +2615,11 @@ button.primary:disabled,
 .schedule-chip.overdue {
   border-color: #e5a3a3;
   background: #fdecea;
-  color: #a61b1b;
+  color: var(--bad);
 }
 
 .schedule-chip.overdue .order {
-  color: #a61b1b;
+  color: var(--bad);
 }
 
 /* Сырьё и поставщик в строке плана не выходят за колонку; полное имя — в title. */
@@ -2494,15 +2634,15 @@ button.primary:disabled,
   padding: 0;
   border: 1px solid #d9dde3;
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface);
   color: var(--muted);
   line-height: 1;
   font-size: 16px;
 }
 
 .row-remove:hover {
-  border-color: #a61b1b;
-  color: #a61b1b;
+  border-color: var(--bad);
+  color: var(--bad);
 }
 
 /* Поставщик — длинное имя из 1С: не даём колонке раздувать таблицу. */
@@ -2545,7 +2685,7 @@ button.primary:disabled,
   padding: 2px 8px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   margin-left: auto;
   font-size: 0.78rem;
   color: var(--muted);
@@ -2554,7 +2694,7 @@ button.primary:disabled,
 .need-state.ok {
   border-color: #9fd5b0;
   background: #e7f6ec;
-  color: #1a7f37;
+  color: var(--good);
 }
 
 /* График заказа в плане: на 1280 px пилюли переносятся, иначе правая колонка уезжает. */
@@ -2572,12 +2712,12 @@ button.primary:disabled,
 }
 
 .purchase-table .month-fact.done {
-  color: #1c6b3a;
+  color: var(--good);
   font-weight: 600;
 }
 
 .purchase-table .month-fact.partial {
-  color: #8a4b08;
+  color: var(--warn);
 }
 
 .purchase-table .month-fact.extra {
@@ -2589,11 +2729,11 @@ button.primary:disabled,
 .schedule-chip.overdue {
   border-color: #e5a3a3;
   background: #fdecea;
-  color: #a61b1b;
+  color: var(--bad);
 }
 
 .schedule-chip.overdue .order {
-  color: #a61b1b;
+  color: var(--bad);
 }
 
 /* Поставщик — длинное имя из 1С: не даём колонке раздувать таблицу. */
@@ -2636,7 +2776,7 @@ button.primary:disabled,
   padding: 2px 8px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   margin-left: auto;
   font-size: 0.78rem;
   color: var(--muted);
@@ -2645,7 +2785,7 @@ button.primary:disabled,
 .need-state.ok {
   border-color: #9fd5b0;
   background: #e7f6ec;
-  color: #1a7f37;
+  color: var(--good);
 }
 
 /* Сетка плана: фиксированные доли, чтобы 12 месяцев графика влезали в 1280 px. */
@@ -2716,7 +2856,7 @@ button.primary:disabled,
   color: var(--text);
   -webkit-text-fill-color: var(--text);
   opacity: 1;
-  background: #fff;
+  background: var(--surface);
 }
 
 .receipts-page .receipt-form .receipt-edit:disabled .edit-only,
@@ -2747,8 +2887,8 @@ button.primary:disabled,
   width: 100%;
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: #fff;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   color: inherit;
   font: inherit;
   text-align: left;
@@ -2794,8 +2934,8 @@ button.primary:disabled,
   max-height: 26rem;
   padding: 0.6rem;
   border: 1px solid var(--border);
-  border-radius: 0.6rem;
-  background: #fff;
+  border-radius: var(--radius);
+  background: var(--surface);
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.16);
 }
 
@@ -2887,7 +3027,7 @@ button.primary:disabled,
 }
 
 .bell-row[role="button"]:hover {
-  background: #f5f7fa;
+  background: var(--surface-2);
 }
 
 .bell-row[role="button"]:focus-visible {
@@ -2911,12 +3051,12 @@ button.primary:disabled,
 
 .badge-critical {
   background: #fdecea;
-  color: #b42318;
+  color: var(--bad);
 }
 
 .badge-info {
   background: #eef2f6;
-  color: #475467;
+  color: var(--muted);
 }
 
 .audit-table {
@@ -2963,7 +3103,7 @@ button.primary:disabled,
 
 /* Ссылка события: цвет и подчёркивание заметно отличают её от простого текста. */
 .audit-link {
-  color: #1d4ed8;
+  color: var(--accent);
   text-decoration: underline;
   text-decoration-color: #9cb4f0;
   text-underline-offset: 2px;
@@ -2980,7 +3120,7 @@ button.primary:disabled,
 
 .mini.danger {
   border-color: #e5484d;
-  color: #b42318;
+  color: var(--bad);
 }
 
 .cleanup-box {
@@ -2991,7 +3131,7 @@ button.primary:disabled,
   margin-bottom: 0.75rem;
   padding: 0.6rem 0.75rem;
   border: 1px solid #f0b26b;
-  border-radius: 0.6rem;
+  border-radius: var(--radius);
   background: #fff8ef;
   font-size: 0.85rem;
 }
@@ -3058,7 +3198,7 @@ button.primary:disabled,
 }
 
 .sched-done {
-  color: #1c6b3a;
+  color: var(--good);
   font-size: 0.82rem;
 }
 
@@ -3122,15 +3262,15 @@ button.primary:disabled,
 }
 
 .sched-quarters .q-order.overdue {
-  color: #b42318;
+  color: var(--bad);
 }
 
 .sched-quarters .q-order.soon {
-  color: #b54708;
+  color: var(--warn);
 }
 
 .sched-quarters .q-note {
-  color: #b54708;
+  color: var(--warn);
   font-size: 0.7rem;
 }
 
@@ -3141,13 +3281,13 @@ button.primary:disabled,
 .sched-switch .mini.active {
   border-color: #2563eb;
   background: #eef4ff;
-  color: #1d4ed8;
+  color: var(--accent);
   font-weight: 600;
 }
 
 .purchase-table .schedule-wide > td {
   padding: 0.4rem 0.5rem 0.6rem;
-  background: #fcfdff;
+  background: var(--surface-2);
   white-space: normal;
 }
 
@@ -3232,7 +3372,7 @@ button.primary:disabled,
 .btn-primary {
   font: inherit;
   padding: 0.5rem 0.9rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--accent);
   background: var(--accent);
   color: #fff;
@@ -3255,11 +3395,11 @@ button.primary:disabled,
 }
 
 .btn-link:hover {
-  background: #f1f3f5;
+  background: var(--hover);
 }
 
 .btn-link.danger {
-  color: #b91c1c;
+  color: var(--bad);
 }
 
 .inline-check {
@@ -3284,9 +3424,9 @@ button.primary:disabled,
   flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.6rem;
+  border-radius: var(--radius);
   padding: 0.6rem 0.8rem;
 }
 
@@ -3296,13 +3436,13 @@ button.primary:disabled,
   padding: 0.3rem 0.45rem;
   border: 1px solid var(--border);
   border-radius: 0.45rem;
-  background: #fff;
+  background: var(--surface);
 }
 
 .task-empty {
-  background: #fff;
+  background: var(--surface);
   border: 1px dashed var(--border);
-  border-radius: 0.6rem;
+  border-radius: var(--radius);
   padding: 2rem;
   text-align: center;
   display: grid;
@@ -3313,9 +3453,9 @@ button.primary:disabled,
 /* Гант */
 
 .gantt {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.6rem;
+  border-radius: var(--radius);
   overflow: hidden;
 }
 
@@ -3329,7 +3469,7 @@ button.primary:disabled,
 
 .gantt-head {
   display: flex;
-  background: #fff;
+  background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
 
@@ -3340,7 +3480,7 @@ button.primary:disabled,
   position: sticky;
   left: 0;
   z-index: 4;
-  background: #fff;
+  background: var(--surface);
   border-right: 1px solid var(--border);
 }
 
@@ -3380,7 +3520,7 @@ button.primary:disabled,
 }
 
 .gantt-day.is-weekend {
-  background: #fafbfc;
+  background: var(--surface-2);
 }
 
 .gantt-day.is-monday {
@@ -3410,7 +3550,7 @@ button.primary:disabled,
 
 .gantt-row-step {
   min-height: 30px;
-  background: #fcfcfd;
+  background: var(--surface-2);
 }
 
 .gantt-label {
@@ -3422,13 +3562,13 @@ button.primary:disabled,
   position: sticky;
   left: 0;
   z-index: 2;
-  background: #fff;
+  background: var(--surface);
   border-right: 1px solid var(--border);
   overflow: hidden;
 }
 
 .gantt-row-step .gantt-label {
-  background: #fcfcfd;
+  background: var(--surface-2);
   font-size: 0.85rem;
   color: var(--muted);
 }
@@ -3525,7 +3665,7 @@ button.primary:disabled,
 .gantt-overdue {
   flex: none;
   font-size: 0.72rem;
-  color: #b91c1c;
+  color: var(--bad);
   background: #fee2e2;
   border-radius: 0.35rem;
   padding: 0.05rem 0.35rem;
@@ -3590,7 +3730,7 @@ button.primary:disabled,
   font-size: 0.7rem;
   padding: 0 0.4rem;
   white-space: nowrap;
-  color: #111827;
+  color: var(--text);
 }
 
 .gantt-bar-step {
@@ -3607,9 +3747,9 @@ button.primary:disabled,
 
 .task-form,
 .task-report-form {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.6rem;
+  border-radius: var(--radius);
   padding: 1rem;
   display: grid;
   gap: 0.75rem;
@@ -3641,8 +3781,8 @@ button.primary:disabled,
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: 0.45rem;
-  background: #fff;
-  color: #111827;
+  background: var(--surface);
+  color: var(--text);
 }
 
 .task-form-row {
@@ -3710,18 +3850,18 @@ button.primary:disabled,
   font-size: 0.78rem;
   padding: 0.2rem 0.55rem;
   border-radius: 999px;
-  background: #f1f3f5;
+  background: var(--hover);
   color: var(--muted);
 }
 
 .task-status.status-in_progress {
   background: #dbeafe;
-  color: #1d4ed8;
+  color: var(--accent);
 }
 
 .task-status.status-postponed {
   background: #fef3c7;
-  color: #92400e;
+  color: var(--warn);
 }
 
 .task-status.status-done {
@@ -3741,7 +3881,7 @@ button.primary:disabled,
   flex: 1;
   height: 8px;
   border-radius: 999px;
-  background: #eef0f3;
+  background: var(--surface-3);
   overflow: hidden;
 }
 
@@ -3752,9 +3892,9 @@ button.primary:disabled,
 }
 
 .task-description {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.6rem;
+  border-radius: var(--radius);
   padding: 0.75rem 1rem;
   white-space: pre-wrap;
   margin: 0;
@@ -3778,9 +3918,9 @@ button.primary:disabled,
 }
 
 .task-step {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   padding: 0.5rem 0.75rem;
   display: flex;
   gap: 0.75rem;
@@ -3795,7 +3935,7 @@ button.primary:disabled,
 }
 
 .task-report {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 0.55rem;
   padding: 0.65rem 0.85rem;
@@ -3814,7 +3954,7 @@ button.primary:disabled,
   font-size: 0.72rem;
   padding: 0.15rem 0.5rem;
   border-radius: 999px;
-  background: #eef0f3;
+  background: var(--surface-3);
   color: var(--muted);
 }
 
@@ -3840,9 +3980,9 @@ button.primary:disabled,
   flex-wrap: wrap;
   gap: 0.9rem;
   align-items: flex-end;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.6rem;
+  border-radius: var(--radius);
   padding: 0.75rem 0.9rem;
 }
 
@@ -3864,17 +4004,17 @@ button.primary:disabled,
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: 0.45rem;
-  background: #fff;
-  color: #111827;
+  background: var(--surface);
+  color: var(--text);
 }
 
 .task-blocked {
   margin: 0;
   background: #fef3c7;
   border: 1px solid #fcd34d;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   padding: 0.6rem 0.8rem;
-  color: #92400e;
+  color: var(--warn);
 }
 
 .task-deps {
@@ -3889,9 +4029,9 @@ button.primary:disabled,
   display: flex;
   gap: 0.6rem;
   align-items: center;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   padding: 0.45rem 0.75rem;
   font-size: 0.9rem;
 }
@@ -3906,9 +4046,9 @@ button.primary:disabled,
   flex-wrap: wrap;
   gap: 0.75rem;
   align-items: flex-end;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 0.6rem;
+  border-radius: var(--radius);
   padding: 0.75rem 0.9rem;
 }
 
@@ -3924,8 +4064,8 @@ button.primary:disabled,
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: 0.45rem;
-  background: #fff;
-  color: #111827;
+  background: var(--surface);
+  color: var(--text);
   min-width: 220px;
 }
 
@@ -3935,5 +4075,433 @@ button.primary:disabled,
   padding: 0.05rem 0.4rem;
   border-radius: 0.35rem;
   background: #fef3c7;
-  color: #92400e;
+  color: var(--warn);
+}
+
+/* ── Подвал меню, тема и свёрнутое состояние ───────────────────────────── */
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.footer-actions .bell {
+  flex: 1;
+  min-width: 0;
+}
+
+.user-block {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 2px;
+  min-width: 0;
+}
+
+.user-avatar {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.user-meta {
+  min-width: 0;
+}
+
+.sidebar-footer .user-name {
+  padding: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-role {
+  color: var(--muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.logout-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.logout-item:hover {
+  color: var(--text);
+}
+
+.sidebar.collapsed .footer-actions {
+  flex-direction: column;
+}
+
+.sidebar.collapsed .footer-actions .bell {
+  flex: none;
+  width: 100%;
+}
+
+.sidebar.collapsed .user-block {
+  justify-content: center;
+  padding: 0;
+}
+
+.sidebar.collapsed .user-meta {
+  display: none;
+}
+
+.sidebar.collapsed .bell-title,
+.sidebar.collapsed .logout-item .nav-title {
+  display: none;
+}
+
+.sidebar.collapsed .bell-button,
+.sidebar.collapsed .logout-item {
+  justify-content: center;
+  padding: 0.55rem 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+.sidebar.collapsed .bell {
+  width: 100%;
+}
+
+/* В свёрнутом меню колокольчик с непрочитанными остаётся заметным. */
+.sidebar.collapsed .bell-button.has-unread {
+  background: var(--accent-soft);
+}
+
+/* ── Концепция C: карточки, таблицы, кнопки ────────────────────────────── */
+
+table {
+  border-radius: var(--radius);
+  border-color: var(--border);
+  box-shadow: var(--shadow);
+  font-size: 0.84rem;
+}
+
+th {
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.7rem 0.65rem;
+}
+
+td {
+  padding: 0.6rem 0.65rem;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.toolbar {
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 1rem;
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+
+.toolbar button,
+.inline-form button,
+.login-card button,
+button.mini,
+button.primary {
+  border-radius: 999px;
+}
+
+.toolbar button,
+.inline-form button,
+.login-card button,
+button.mini {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.toolbar button:hover,
+.inline-form button:hover,
+.login-card button:hover,
+button.mini:hover {
+  background: var(--hover);
+}
+
+button.primary {
+  border-radius: 999px;
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--accent-solid) 28%, transparent);
+}
+
+input,
+select,
+textarea {
+  border-radius: var(--radius-sm);
+  border-color: var(--border);
+  background: var(--surface-2);
+  padding: 0.42rem 0.6rem;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+/* Карточки: мягкая тень и скругление вместо жёсткой рамки. */
+.import-card,
+.login-card,
+.cleanup-box,
+.correction-box,
+.doc-card,
+.receipt-card,
+.bell-panel,
+.focus-card,
+.plan-card,
+.mini-card,
+.unmatched-box,
+.customs-box,
+.month-decision,
+.month-confirm,
+.match-card,
+.account-card,
+.doc-empty {
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.badge {
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.72rem;
+}
+
+.page-help summary {
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.page-help-body {
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+
+/* Колокольчик в подвале меню: компактная метка вместо широкой кнопки. */
+.bell-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.8rem;
+}
+
+.bell-button {
+  border-radius: 12px;
+  padding: 0.5rem 0.6rem;
+  gap: 0.4rem;
+}
+
+.bell-button.has-unread {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.badge-open {
+  background: #e9f7ef;
+  color: #15803d;
+}
+
+.badge-closed {
+  background: var(--surface-3);
+  color: var(--muted);
+}
+
+/* ── Тёмная тема: цветные плашки ───────────────────────────────────────── */
+
+[data-theme="dark"] .hint.warn,
+[data-theme="dark"] .month-confirm,
+[data-theme="dark"] .unmatched-box,
+[data-theme="dark"] .source-alert,
+[data-theme="dark"] .need-changed,
+[data-theme="dark"] .cleanup-box,
+[data-theme="dark"] .task-status.status-postponed,
+[data-theme="dark"] .task-blocked,
+[data-theme="dark"] .badge-wait,
+[data-theme="dark"] .from,
+[data-theme="dark"] .purchase-table .sched-table tr.soon td {
+  background: #2b2416;
+  border-color: #57471f;
+  color: #fcd34d;
+}
+
+[data-theme="dark"] .hint.saved {
+  color: #6ee7a0;
+}
+
+[data-theme="dark"] .error,
+[data-theme="dark"] .need-removed,
+[data-theme="dark"] .schedule-chip.overdue,
+[data-theme="dark"] .badge-critical,
+[data-theme="dark"] .gantt-overdue,
+[data-theme="dark"] .purchase-table .sched-table tr.overdue td {
+  background: #341b1e;
+  border-color: #5c2a2f;
+  color: #fca5a5;
+}
+
+[data-theme="dark"] .status-approved,
+[data-theme="dark"] .status-clearance,
+[data-theme="dark"] .badge-plan,
+[data-theme="dark"] .need-added,
+[data-theme="dark"] .need-state.ok,
+[data-theme="dark"] .badge-open {
+  background: #142b1c;
+  color: #6ee7a0;
+}
+
+[data-theme="dark"] .status-on_review,
+[data-theme="dark"] .status-draft,
+[data-theme="dark"] .status-revision,
+[data-theme="dark"] .badge-short {
+  background: #2e2214;
+  color: #fbbf24;
+}
+
+[data-theme="dark"] .status-filling,
+[data-theme="dark"] .badge-extra,
+[data-theme="dark"] .badge-alt,
+[data-theme="dark"] .status-plan,
+[data-theme="dark"] .sched-switch .mini.active,
+[data-theme="dark"] .focus-row td,
+[data-theme="dark"] .receipt-tabs .tab.active .tab-count {
+  background: #1f2340;
+  color: #b3afff;
+}
+
+[data-theme="dark"] .reason-add,
+[data-theme="dark"] .reason-editor td,
+[data-theme="dark"] .customs-box,
+[data-theme="dark"] .source-info,
+[data-theme="dark"] .alt-row td,
+[data-theme="dark"] .need-row td,
+[data-theme="dark"] .to,
+[data-theme="dark"] .purchase-table .schedule-wide > td,
+[data-theme="dark"] .gantt-day.is-weekend,
+[data-theme="dark"] .calendar-day.other-month {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+[data-theme="dark"] .kpi-primary {
+  background: linear-gradient(180deg, #1f2340, var(--surface));
+}
+
+[data-theme="dark"] .priority-yellow .gantt-bar,
+[data-theme="dark"] .priority-red .gantt-bar {
+  color: #1b1b28;
+}
+
+[data-theme="dark"] .gantt-today {
+  background: #f87171;
+}
+
+[data-theme="dark"] .page-help summary::before {
+  color: var(--muted);
+  border-color: var(--muted);
+}
+
+/* Основная кнопка остаётся акцентной и в тулбарах, и в формах. */
+.toolbar button.primary,
+.inline-form button.primary,
+.login-card button.primary,
+button.primary,
+button.mini.primary {
+  background: var(--accent-solid);
+  border-color: var(--accent-solid);
+  color: #fff;
+}
+
+.toolbar button.primary:hover,
+.inline-form button.primary:hover,
+.login-card button.primary:hover,
+button.primary:hover {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+}
+
+[data-theme="dark"] .badge-info {
+  background: var(--surface-3);
+  color: var(--muted);
+}
+
+[data-theme="dark"] .import-result {
+  color: var(--good);
+}
+
+/* ── Мелкая доводка темы ───────────────────────────────────────────────── */
+
+input[type="file"]::file-selector-button {
+  font: inherit;
+  font-size: 0.8rem;
+  margin-right: 0.55rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+}
+
+input[type="file"]::file-selector-button:hover {
+  background: var(--hover);
+}
+
+.doc-empty {
+  min-height: 18rem;
+}
+
+[data-theme="dark"] {
+  scrollbar-color: #3a3a52 #181826;
+}
+
+.sidebar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+[data-theme="dark"] button:disabled,
+[data-theme="dark"] .toolbar button:disabled,
+[data-theme="dark"] button.primary:disabled {
+  background: var(--surface-3);
+  border-color: var(--border);
+  color: var(--muted);
+  box-shadow: none;
 }

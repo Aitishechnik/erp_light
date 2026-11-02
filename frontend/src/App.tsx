@@ -11,6 +11,18 @@ import {
 import { CounterpartiesPage } from './CounterpartiesPage'
 import { CountriesPage } from './CountriesPage'
 import { ImportsPage } from './ImportsPage'
+import {
+  IconAdmin,
+  IconCatalogs,
+  IconLogout,
+  IconMoon,
+  IconPanel,
+  IconPlanning,
+  IconPurchases,
+  IconReports,
+  IconSun,
+  IconTasks,
+} from './icons'
 import { LoginPage } from './LoginPage'
 import { MessagesPage } from './MessagesPage'
 import { MonthResultsPage } from './MonthResultsPage'
@@ -21,6 +33,13 @@ import { ReceiptsPage } from './ReceiptsPage'
 import { SalesPlansPage } from './SalesPlansPage'
 import { StockPage } from './StockPage'
 import { TasksPage } from './TasksPage'
+import {
+  applyTheme,
+  readSidebarCollapsed,
+  readTheme,
+  saveSidebarCollapsed,
+  type Theme,
+} from './theme'
 
 type SectionId =
   | 'sales'
@@ -132,6 +151,16 @@ const GROUPS: Group[] = [
   },
 ]
 
+/** Иконки категорий: нужны и в развёрнутом меню, и в свёрнутом. */
+const GROUP_ICONS: Record<string, typeof IconPlanning> = {
+  planning: IconPlanning,
+  purchases: IconPurchases,
+  catalogs: IconCatalogs,
+  reports: IconReports,
+  tasks: IconTasks,
+  admin: IconAdmin,
+}
+
 /** Адрес в строке браузера: #/month/2027/1, #/receipt/<id> и т.п. */
 type Route = { section: SectionId; params: string[] }
 
@@ -180,6 +209,25 @@ export function App() {
     GROUPS.find((group) => group.sections.some((section) => section.id === parseHash().section))
       ?.id ?? 'reports',
   )
+  const [theme, setTheme] = useState<Theme>(readTheme)
+  const [collapsed, setCollapsed] = useState<boolean>(readSidebarCollapsed)
+
+  const toggleTheme = () => {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark'
+    setTheme(next)
+    applyTheme(next)
+  }
+
+  const toggleSidebar = () => {
+    const next = !collapsed
+    setCollapsed(next)
+    saveSidebarCollapsed(next)
+  }
+
+  const expandSidebar = () => {
+    setCollapsed(false)
+    saveSidebarCollapsed(false)
+  }
 
   useEffect(() => {
     const onHash = () => {
@@ -239,14 +287,44 @@ export function App() {
     group.sections.some((section) => section.id === current.id),
   )
 
+  const initials =
+    user.full_name
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((part) => part[0])
+      .slice(0, 2)
+      .join('') || '—'
+
   return (
-    <div className="layout">
-      <aside className="sidebar">
-        <div className="brand">erp_lite</div>
+    <div className={collapsed ? 'layout collapsed' : 'layout'}>
+      <aside className={collapsed ? 'sidebar collapsed' : 'sidebar'}>
+        <div className="brand-row">
+          <div className="brand">
+            erp_lite
+            <span aria-hidden="true" />
+          </div>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
+            aria-expanded={!collapsed}
+            onClick={toggleSidebar}
+          >
+            <IconPanel />
+          </button>
+        </div>
         <nav aria-label="Разделы">
           {groups.map((group) => {
             const isOpen = openGroup === group.id
             const hasActive = currentGroup?.id === group.id
+            const Icon = GROUP_ICONS[group.id] ?? IconReports
+            const openSection = () => {
+              const section = group.sections[0]
+              if (!section) return
+              setActive(section.id)
+              window.location.hash = sectionHash(section.id)
+              setRoute({ section: section.id, params: [] })
+            }
             return (
               <div className="nav-group" key={group.id}>
                 {group.direct ? (
@@ -254,15 +332,12 @@ export function App() {
                     type="button"
                     className={hasActive ? 'nav-item active nav-direct' : 'nav-item nav-direct'}
                     aria-current={hasActive ? 'page' : undefined}
-                    onClick={() => {
-                      const section = group.sections[0]
-                      if (!section) return
-                      setActive(section.id)
-                      window.location.hash = sectionHash(section.id)
-                      setRoute({ section: section.id, params: [] })
-                    }}
+                    aria-label={collapsed ? group.title : undefined}
+                    title={collapsed ? group.title : undefined}
+                    onClick={openSection}
                   >
-                    {group.title}
+                    <Icon />
+                    <span className="nav-title">{group.title}</span>
                   </button>
                 ) : (
                   <>
@@ -270,12 +345,22 @@ export function App() {
                       type="button"
                       className={hasActive ? 'nav-group-head active' : 'nav-group-head'}
                       aria-expanded={isOpen}
-                      onClick={() => setOpenGroup(isOpen ? null : group.id)}
+                      aria-label={collapsed ? group.title : undefined}
+                      title={collapsed ? group.title : undefined}
+                      onClick={() => {
+                        if (collapsed) {
+                          expandSidebar()
+                          setOpenGroup(group.id)
+                          return
+                        }
+                        setOpenGroup(isOpen ? null : group.id)
+                      }}
                     >
+                      <Icon />
+                      <span className="nav-title">{group.title}</span>
                       <span className="chevron" aria-hidden="true">
                         {isOpen ? '▾' : '▸'}
                       </span>
-                      {group.title}
                     </button>
                     {isOpen ? (
                       <ul className="nav-sublist">
@@ -304,16 +389,40 @@ export function App() {
           })}
         </nav>
         <div className="sidebar-footer">
-          <NotificationsBell
-            onOpenJournal={() => {
-              setActive('messages')
-              setOpenGroup('admin')
-            }}
-          />
-          <div className="user-name">{user.full_name}</div>
-          <div className="hint">{user.role_title}</div>
-          <button type="button" className="nav-item" onClick={handleLogout}>
-            Выйти
+          <div className="footer-actions">
+            <NotificationsBell
+              onOpenJournal={() => {
+                setActive('messages')
+                setOpenGroup('admin')
+              }}
+            />
+            <button
+              type="button"
+              className="icon-btn theme-toggle"
+              aria-label={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+              title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+              onClick={toggleTheme}
+            >
+              {theme === 'dark' ? <IconSun /> : <IconMoon />}
+            </button>
+          </div>
+          <div className="user-block">
+            <div className="user-avatar" aria-hidden="true">
+              {initials}
+            </div>
+            <div className="user-meta">
+              <div className="user-name">{user.full_name}</div>
+              <div className="user-role">{user.role_title}</div>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="nav-item logout-item"
+            aria-label={collapsed ? 'Выйти' : undefined}
+            onClick={handleLogout}
+          >
+            <IconLogout />
+            <span className="nav-title">Выйти</span>
           </button>
         </div>
       </aside>

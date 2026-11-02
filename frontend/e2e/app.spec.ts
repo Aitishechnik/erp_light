@@ -1746,3 +1746,25 @@ test('таск-трекер: коммерческий ставит задачу,
   await page.getByRole('button', { name: /Служебные сообщения/ }).click()
   await expect(page.getByText(/Задача выполнена — финальный отчёт/)).toBeVisible()
 })
+
+test('меню сворачивается, а тёмная тема запоминается после перезагрузки', async ({ page }) => {
+  await mockSession(page)
+  await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
+
+  await page.goto('/')
+  await expect(page.getByRole('button', { name: 'Свернуть меню' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Свернуть меню' }).click()
+  await expect(page.locator('.layout')).toHaveClass(/collapsed/)
+  await expect(page.getByRole('button', { name: 'Планирование' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Развернуть меню' }).click()
+  await expect(page.locator('.layout')).not.toHaveClass(/collapsed/)
+
+  await page.getByRole('button', { name: 'Тёмная тема' }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+
+  await page.reload()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  await expect(page.getByRole('button', { name: 'Светлая тема' })).toBeVisible()
+})

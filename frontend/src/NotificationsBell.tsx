@@ -167,7 +167,7 @@ export function NotificationsBell({ onOpenJournal }: Props) {
           <path d="M18 8a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6" />
           <path d="M10.3 19a2 2 0 0 0 3.4 0" />
         </svg>
-        <span className="bell-title">Служебные сообщения</span>
+        <span className="bell-title">Сообщения</span>
         {unread > 0 ? (
           <span className="bell-badge" data-testid="bell-badge">
             {unread > 99 ? '99+' : unread}
