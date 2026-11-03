@@ -624,7 +624,6 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
   const [batches, setBatches] = useState<Batch[]>([])
   const [day, setDay] = useState(today)
   const [draft, setDraft] = useState<Draft | null>(null)
-  const [focusId, setFocusId] = useState<string | null>(null)
   /** Слепок сохранённой карточки: по нему видно, есть ли несохранённые правки. */
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null)
   /** Пометка «сохранено»: карточка после сохранения остаётся открытой. */
@@ -1014,6 +1013,11 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
     }
   }
 
+  /** Снять адрес документа: иначе закрытая карточка откроется снова по focus. */
+  const clearReceiptHash = () => {
+    if (window.location.hash.startsWith('#/receipt/')) window.location.hash = '#/receipt'
+  }
+
   const remove = async () => {
     if (!draft?.id) return
     setBusy(true)
@@ -1022,6 +1026,7 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
       setDraft(null)
       setSavedSnapshot(null)
       setSavedHint(null)
+      clearReceiptHash()
       await reload()
     } catch (err) {
       setError(errorMessage(err))
@@ -1057,6 +1062,7 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
     setDraft(null)
     setSavedHint(null)
     setSavedSnapshot(null)
+    clearReceiptHash()
   }
 
   /** Выбрать день в мини-календаре: слева — только его поступления. */
@@ -1087,13 +1093,14 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
   useEffect(() => {
     const id = focus?.[0]
     if (!id || draft?.id === id) return
+    // Закрытая карточка снимает адрес; старый focus не должен открыть её снова.
+    if (window.location.hash !== `#/receipt/${id}`) return
     const open = (batch: Batch) => {
       setMonth(batch.batch_date.slice(0, 7))
       setDay(batch.batch_date)
-      setFocusId(batch.id)
       startEdit(batch)
       window.setTimeout(() => {
-        document.querySelector('[data-testid="receipt-form"]')?.scrollIntoView({ block: 'start' })
+        if (window.scrollY > 0) window.scrollTo({ top: 0 })
       }, 100)
     }
     const local = batches.find((row) => row.id === id)
@@ -1124,6 +1131,7 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
     setCustoms(null)
     setSavedHint(null)
     startEdit(batch)
+    if (window.scrollY > 0) window.scrollTo({ top: 0 })
   }
 
   const dayLabel = `${Number(day.slice(-2))} ${MONTHS_GENITIVE[Number(day.slice(5, 7)) - 1]}`
@@ -1290,188 +1298,118 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
     partsTotal > 0 ? Math.round((part / partsTotal) * 1000) / 10 : 0
   const shareText = (part: number) => String(sharePct(part)).replace('.', ',')
   const paidRub = cost.invoice.paidRub + cost.risk.paidRub
+  const batchDateLabel = draft.date
+    ? `${Number(draft.date.slice(-2))} ${
+        MONTHS_GENITIVE[Number(draft.date.slice(5, 7)) - 1]
+      } ${draft.date.slice(0, 4)}`
+    : '—'
+  const rateBadgeState =
+    currency === 'RUB' ? 'empty' : draft.rateDate ? '' : number(draft.rate) > 0 ? 'manual' : 'empty'
+  const rateBadgeText =
+    currency === 'RUB'
+      ? 'Курс не нужен · рубли'
+      : draft.rateDate
+        ? `Курс ЦБ на ${ruDate(draft.rateDate)} · ${formatRate(number(draft.rate))} ₽`
+        : number(draft.rate) > 0
+          ? `Курс введён вручную · ${formatRate(number(draft.rate))} ₽`
+          : 'Курс не задан'
+  const paidPct = cost.total > 0 ? Math.round((paidRub / cost.total) * 100) : 0
 
   return (
-    <section className="receipts-page" data-testid="receipt-doc">
-      {pageHead}
+    <section className="receipts-page receipt-doc-page" data-testid="receipt-doc">
       {error ? (
         <p className="error" role="alert">
           {error}
         </p>
       ) : null}
-      <div className="workplace">
-        {rail}
-        <div className="work-right">
-          <form
-            className={
-              focusId && draft?.id === focusId
-                ? 'receipt-form receipt-card focus-card'
-                : 'receipt-form receipt-card'
-            }
-            onSubmit={submit}
-            data-testid="receipt-form"
-          >
-            <fieldset className="receipt-edit" disabled={!mayEdit}>
-              <header className="doc-header">
-                <div className="doc-header-main">
-                  <div className="doc-title-row">
-                    <h2
-                      className="doc-title"
-                      data-testid="receipt-number"
-                      aria-label="Номер поступления"
-                    >
-                      {draft.number}
-                    </h2>
-                    {draft.isDraft ? <span className="badge status-draft">черновик</span> : null}
-                    {draft.customsDate ? (
-                      <span className="badge status-clearance" data-testid="customs-badge">
-                        растаможена {ruDate(draft.customsDate)}
-                        {draft.customsRate ? ` · курс ${trim(draft.customsRate)}` : ''}
-                      </span>
-                    ) : null}
-                    {!draft.isDraft && !draft.customsDate && draft.id ? (
-                      <span className="badge status-filling">в работе</span>
-                    ) : null}
-                    {draft.id ? <span className="badge status-source">из 1С</span> : null}
-                  </div>
-                  {savedHint && !dirty ? (
-                    <p className="hint saved" data-testid="receipt-saved">
-                      {savedHint}
-                    </p>
-                  ) : null}
-                  {draft.isDraft ? (
-                    <p className="hint" data-testid="draft-hint">
-                      Черновик из выгрузки 1С: заполнены номер, дата, поставщик и комментарий.
-                      Загрузите файл «Партия» из 1С или добавьте позиции вручную — и поступление
-                      станет обычным. Если закупка шла по плану, свяжите позиции со строками плана
-                      закупок.
-                    </p>
-                  ) : null}
-                </div>
-                <div className="doc-header-actions">
-                  {mayEdit && draft.customsDate === '' ? (
-                    <button
-                      type="button"
-                      className="primary"
-                      data-testid="customs-start"
-                      disabled={busy || dirty || !draft.id || draft.items.length === 0}
-                      onClick={() => void openCustoms()}
-                    >
-                      Растаможить
-                    </button>
-                  ) : mayCancelCustoms ? (
-                    <button
-                      type="button"
-                      data-testid="customs-cancel"
-                      disabled={busy || dirty}
-                      onClick={() => void dropCustoms()}
-                    >
-                      Отменить растаможку
-                    </button>
-                  ) : null}
-                </div>
-              </header>
-
-              <fieldset
-                className="doc-passport receipt-edit"
-                disabled={!mayEdit}
-                aria-label="Реквизиты поступления"
-              >
-                <label className="field">
-                  Поставщик
-                  <select
-                    aria-label="Поставщик"
-                    value={draft.supplierId}
-                    onChange={(event) => setDraft({ ...draft, supplierId: event.target.value })}
-                  >
-                    <option value="">— не выбран —</option>
-                    {suppliers.map((row) => (
-                      <option key={row.id} value={row.id}>
-                        {row.name}
-                      </option>
-                    ))}
-                    <option value="__manual__">— ввести вручную —</option>
-                  </select>
-                </label>
-                {draft.supplierId === '__manual__' ? (
-                  <label className="field">
-                    Название поставщика
-                    <input
-                      aria-label="Название поставщика"
-                      value={draft.supplierText}
-                      onChange={(event) => setDraft({ ...draft, supplierText: event.target.value })}
-                    />
-                  </label>
-                ) : null}
-                <label className="field">
-                  Дата
-                  <input
-                    type="date"
-                    aria-label="Дата поступления"
-                    value={draft.date}
-                    onChange={(event) => setDraft({ ...draft, date: event.target.value })}
-                    required
-                  />
-                </label>
-                <label className="field">
-                  Валюта
-                  <input
-                    aria-label="Валюта"
-                    value={draft.currency}
-                    // Фикс таможни посчитан в валюте партии: после растаможки её не меняем,
-                    // а пока открыто окно — тем более: суммы посчитаны в этой валюте.
-                    disabled={cleared || locked}
-                    onChange={(event) => setDraft({ ...draft, currency: event.target.value })}
-                  />
-                </label>
-                <div className="field">
-                  <span>Курс остатка, ₽</span>
-                  <div className="rate-row">
-                    <input
-                      aria-label="Курс"
-                      value={draft.rate}
-                      onChange={(event) =>
-                        // Курс вписан руками — дата курса ЦБ больше не применима.
-                        setDraft({ ...draft, rate: event.target.value, rateDate: '' })
-                      }
-                    />
-                    <button
-                      type="button"
-                      className="edit-only"
-                      aria-label="Обновить курс ЦБ"
-                      onClick={() => void fillRate()}
-                    >
-                      Курс ЦБ
-                    </button>
-                  </div>
-                </div>
-                <label className="field doc-comment">
-                  Комментарий
-                  <textarea
-                    aria-label="Комментарий"
-                    rows={2}
-                    value={draft.comment}
-                    onChange={(event) => setDraft({ ...draft, comment: event.target.value })}
-                  />
-                </label>
-              </fieldset>
-
-              {rateHint ? <p className="hint">{rateHint}</p> : null}
-              {/* Каким курсом и на какую дату оценён незакрытый остаток. */}
-              <p className="hint doc-rate-caption" data-testid="receipt-cbr-rate">
-                {rateCaption}
+      <header className="doc-page-head">
+        <div className="doc-page-head-main">
+          <div className="doc-crumbs">
+            <button type="button" className="back-link" onClick={closeDocument}>
+              ← Поступления
+            </button>
+            <span className="sep">/</span>
+            <span>{batchDateLabel}</span>
+          </div>
+          <div className="doc-page-title-row">
+            <h1 className="doc-page-title">
+              <span className="doc-page-kicker">Партия</span>
+              <span data-testid="receipt-number">{draft.number}</span>
+            </h1>
+            {draft.isDraft ? <span className="badge status-draft">черновик</span> : null}
+            {draft.customsDate ? (
+              <span className="badge status-clearance" data-testid="customs-badge">
+                растаможена {ruDate(draft.customsDate)}
+                {draft.customsRate ? ` · курс ${trim(draft.customsRate)}` : ''}
+              </span>
+            ) : null}
+            {!draft.isDraft && !draft.customsDate && draft.id ? (
+              <span className="badge status-filling">в работе</span>
+            ) : null}
+            {draft.id ? <span className="badge status-source">из 1С</span> : null}
+          </div>
+          {savedHint && !dirty ? (
+            <p className="hint saved" data-testid="receipt-saved">
+              {savedHint}
+            </p>
+          ) : null}
+          {draft.isDraft ? (
+            <p className="hint" data-testid="draft-hint">
+              Черновик из выгрузки 1С: заполнены номер, дата, поставщик и комментарий. Загрузите
+              файл «Партия» из 1С или добавьте позиции вручную — и поступление станет обычным. Если
+              закупка шла по плану, свяжите позиции со строками плана закупок.
+            </p>
+          ) : null}
+          <details className="page-help">
+            <summary>Как считается себестоимость</summary>
+            <div className="page-help-body">
+              <p>
+                Себестоимость = сумма по инвойсу + Risk + пошлина + НДС + общие расходы. Незакрытый
+                остаток оценивается по актуальному курсу ЦБ.
               </p>
+              <p data-testid="receipt-cbr-rate">{rateCaption}</p>
+            </div>
+          </details>
+        </div>
+        <div className="doc-page-actions">
+          {mayEdit && draft.customsDate === '' ? (
+            <button
+              type="button"
+              className="primary"
+              data-testid="customs-start"
+              disabled={busy || dirty || !draft.id || draft.items.length === 0}
+              onClick={() => void openCustoms()}
+            >
+              Растаможить
+            </button>
+          ) : mayCancelCustoms ? (
+            <button
+              type="button"
+              data-testid="customs-cancel"
+              disabled={busy || dirty}
+              onClick={() => void dropCustoms()}
+            >
+              Отменить растаможку
+            </button>
+          ) : null}
+        </div>
+      </header>
 
-              {dirty ? (
-                // Таможня считает суммы по сохранённым строкам: с несохранёнными правками
-                // карточка после растаможки вернулась бы к состоянию на сервере.
-                <p className="hint" data-testid="customs-dirty">
-                  В карточке есть несохранённые изменения. Сначала сохраните поступление — потом
-                  растаможка посчитает суммы по сохранённым строкам.
-                </p>
-              ) : null}
+      {rateHint ? <p className="hint doc-page-hint">{rateHint}</p> : null}
+      {dirty ? (
+        // Таможня считает суммы по сохранённым строкам: с несохранёнными правками
+        // карточка после растаможки вернулась бы к состоянию на сервере.
+        <p className="hint warn doc-page-warn" data-testid="customs-dirty">
+          В карточке есть несохранённые изменения. Сначала сохраните поступление — потом растаможка
+          посчитает суммы по сохранённым строкам.
+        </p>
+      ) : null}
 
-              <section className="numbers" aria-label="Итоги партии">
+      <div className="workplace doc-workplace">
+        <div className="work-right">
+          <form className="receipt-form batch-doc" onSubmit={submit} data-testid="receipt-form">
+            <fieldset className="receipt-edit batch-doc-body" disabled={!mayEdit}>
+              <section className="numbers doc-card kpi-row" aria-label="Итоги партии">
                 <div className="numbers-cell numbers-main">
                   <span className="numbers-label">Себестоимость</span>
                   <span className="numbers-value" data-testid="receipt-total">
@@ -1495,7 +1433,7 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                 <div className="numbers-cell">
                   <span className="numbers-label">Оплачено</span>
                   <span className="numbers-value">{money(paidRub)} ₽</span>
-                  <span className="numbers-sub">инвойс и Risk</span>
+                  <span className="numbers-sub">{paidPct}% от суммы · инвойс и Risk</span>
                 </div>
                 <div className="numbers-cell">
                   <span className="numbers-label">Остаток</span>
@@ -1504,6 +1442,106 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                   </span>
                   <span className="numbers-sub">не закрыто платежами</span>
                 </div>
+              </section>
+
+              <section className="doc-card passport-card">
+                <header className="doc-card-head">
+                  <h2 className="doc-card-title">Реквизиты партии</h2>
+                  <span className="spacer" />
+                  <span className={['doc-rate-badge', rateBadgeState].filter(Boolean).join(' ')}>
+                    {rateBadgeText}
+                  </span>
+                </header>
+                <fieldset
+                  className="doc-passport receipt-edit"
+                  disabled={!mayEdit}
+                  aria-label="Реквизиты поступления"
+                >
+                  <label className="field">
+                    Поставщик
+                    <select
+                      aria-label="Поставщик"
+                      title={
+                        suppliers.find((row) => row.id === draft.supplierId)?.name ??
+                        draft.supplierText ??
+                        'Поставщик'
+                      }
+                      value={draft.supplierId}
+                      onChange={(event) => setDraft({ ...draft, supplierId: event.target.value })}
+                    >
+                      <option value="">— не выбран —</option>
+                      {suppliers.map((row) => (
+                        <option key={row.id} value={row.id}>
+                          {row.name}
+                        </option>
+                      ))}
+                      <option value="__manual__">— ввести вручную —</option>
+                    </select>
+                  </label>
+                  {draft.supplierId === '__manual__' ? (
+                    <label className="field">
+                      Название поставщика
+                      <input
+                        aria-label="Название поставщика"
+                        value={draft.supplierText}
+                        onChange={(event) =>
+                          setDraft({ ...draft, supplierText: event.target.value })
+                        }
+                      />
+                    </label>
+                  ) : null}
+                  <label className="field">
+                    Дата
+                    <input
+                      type="date"
+                      aria-label="Дата поступления"
+                      value={draft.date}
+                      onChange={(event) => setDraft({ ...draft, date: event.target.value })}
+                      required
+                    />
+                  </label>
+                  <label className="field">
+                    Валюта
+                    <input
+                      aria-label="Валюта"
+                      value={draft.currency}
+                      // Фикс таможни посчитан в валюте партии: после растаможки её не меняем,
+                      // а пока открыто окно — тем более: суммы посчитаны в этой валюте.
+                      disabled={cleared || locked}
+                      onChange={(event) => setDraft({ ...draft, currency: event.target.value })}
+                    />
+                  </label>
+                  <div className="field">
+                    <span>Курс остатка, ₽</span>
+                    <div className="rate-row">
+                      <input
+                        aria-label="Курс"
+                        value={draft.rate}
+                        onChange={(event) =>
+                          // Курс вписан руками — дата курса ЦБ больше не применима.
+                          setDraft({ ...draft, rate: event.target.value, rateDate: '' })
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="edit-only"
+                        aria-label="Обновить курс ЦБ"
+                        onClick={() => void fillRate()}
+                      >
+                        Курс ЦБ
+                      </button>
+                    </div>
+                  </div>
+                  <label className="field doc-comment">
+                    Комментарий
+                    <textarea
+                      aria-label="Комментарий"
+                      rows={2}
+                      value={draft.comment}
+                      onChange={(event) => setDraft({ ...draft, comment: event.target.value })}
+                    />
+                  </label>
+                </fieldset>
               </section>
 
               <div className="accordions">
@@ -1531,7 +1569,6 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                       <div className="doc-toolbar">
                         {draft.id && mayEdit && !cleared ? (
                           <div className="items-import" data-testid="batch-items-import">
-                            <span className="doc-toolbar-label">Позиции из 1С (файл «Партия»)</span>
                             <label className="file-pick">
                               Выбрать файл
                               <input
@@ -1548,15 +1585,16 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                               />
                             </label>
                             <span className="file-pick-name">
-                              {itemsFile ? itemsFile.name : 'файл не выбран'}
+                              {itemsFile ? itemsFile.name : 'файл «Партия», .xlsx'}
                             </span>
                             <button
                               type="button"
+                              aria-label="Загрузить позиции из 1С"
                               title="Из файла берутся товар и количество"
                               disabled={busy || locked || !itemsFile}
                               onClick={() => void loadItems()}
                             >
-                              {busy ? 'Загрузка…' : 'Загрузить позиции из 1С'}
+                              {busy ? 'Загрузка…' : 'Загрузить'}
                             </button>
                           </div>
                         ) : null}
@@ -1602,12 +1640,12 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                       ) : null}
 
                       <div className="table-scroll">
-                        <table className="receipt-items" data-testid="receipt-items">
+                        <table className="receipt-items batch-table" data-testid="receipt-items">
                           <thead>
                             <tr>
                               <th scope="col">Товар</th>
                               <th scope="col" className="num">
-                                Стоимость за ед., {currencyLabel(draft.currency)}
+                                Инвойс, {currencyLabel(draft.currency)}/ед.
                               </th>
                               <th scope="col" className="num">
                                 Кол‑во
@@ -1622,7 +1660,7 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                                 Risk, {currencyLabel(draft.currency)}
                               </th>
                               <th scope="col" className="num">
-                                Цена за ед., ₽
+                                Себестоимость, ₽/ед.
                               </th>
                               <th scope="col" className="num">
                                 Сумма, ₽
@@ -2656,7 +2694,7 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
               </span>
               <span className="spacer" />
               <button type="button" onClick={closeDocument}>
-                {mayEdit ? 'Отмена' : 'Закрыть'}
+                Закрыть
               </button>
               {mayEdit ? (
                 <>
@@ -2669,7 +2707,12 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                     Сохранить
                   </button>
                   {draft.id ? (
-                    <button type="button" disabled={busy || locked} onClick={() => void remove()}>
+                    <button
+                      type="button"
+                      className="mini"
+                      disabled={busy || locked}
+                      onClick={() => void remove()}
+                    >
                       Удалить
                     </button>
                   ) : null}

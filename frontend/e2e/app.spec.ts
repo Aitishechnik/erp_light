@@ -1077,7 +1077,8 @@ test('растаможка партии: проценты превращаютс
   // Проценты в строках исчезли: вместо полей — зафиксированные рубли.
   await expect(page.getByLabel('Пошлина i0')).toHaveCount(0)
   await expect(page.getByLabel('НДС i0')).toHaveCount(0)
-  // Пометка видна в списке дня слева.
+  // После закрытия документа пометка видна и в списке дня.
+  await page.getByRole('button', { name: 'Закрыть' }).click()
   await expect(page.getByTestId('clearance-badge')).toBeVisible()
 
   expect(sent[0]?.rate).toBe('80')
