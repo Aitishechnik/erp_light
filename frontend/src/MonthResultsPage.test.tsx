@@ -478,4 +478,39 @@ describe('Закрытие месяца и решение', () => {
     expect(screen.queryByRole('button', { name: 'Закрыть месяц' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Сохранить решение' })).toBeNull()
   })
+
+  it('показывает первые 150 строк и догружает остальные по кнопке', async () => {
+    const user = userEvent.setup()
+    const base: MonthRow = {
+      client_id: 'c1',
+      client_name: 'Азбука Вкуса',
+      manager_id: 'm1',
+      manager_name: 'Менеджер по продажам (демо)',
+      product_id: 'p1',
+      product_name: 'Финики',
+      unit: 'кг',
+      plan_quantity: '100.000',
+      fact_quantity: '80.000',
+      fact_amount: '8000.00',
+      deviation: '-20.000',
+      group: 'plan',
+      manager_mismatch: false,
+    }
+    const rows: MonthRow[] = Array.from({ length: 160 }, (_, index) => ({
+      ...base,
+      product_id: `p-${index}`,
+      product_name: `Товар ${String(index).padStart(3, '0')}`,
+    }))
+    setup({ ...RESULT, rows, unmatched: [] })
+    await screen.findByTestId('month-table')
+
+    expect(screen.getByTestId('month-limit')).toHaveTextContent('Показано 150 из 160')
+    expect(within(screen.getByTestId('month-table')).queryByText('Товар 159')).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Показать ещё 150' }))
+    await waitFor(() => {
+      expect(screen.queryByTestId('month-limit')).toBeNull()
+    })
+    expect(within(screen.getByTestId('month-table')).getByText('Товар 159')).toBeInTheDocument()
+  })
 })

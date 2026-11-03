@@ -179,6 +179,8 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
   })
   const [decisionComment, setDecisionComment] = useState('')
   const [transferResult, setTransferResult] = useState<TransferDrafts | null>(null)
+  /** Сколько строк таблицы уже показано: «Показать ещё» добавляет по VISIBLE_LIMIT. */
+  const [limit, setLimit] = useState(VISIBLE_LIMIT)
 
   const mayMatch = MATCH_ROLES.includes(user.role)
   const mayReason = REASON_ROLES.includes(user.role)
@@ -252,7 +254,15 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
       )
   }, [result, onlyDeviation, onlyNoReason, manager, search])
 
-  const shown = visible.slice(0, VISIBLE_LIMIT)
+  // Сменили фильтр — снова показываем первую порцию, а не всё сразу.
+  const filtersKey = `${year}-${month}-${manager}-${search}-${onlyDeviation}-${onlyNoReason}`
+  const [limitKey, setLimitKey] = useState(filtersKey)
+  if (limitKey !== filtersKey) {
+    setLimitKey(filtersKey)
+    setLimit(VISIBLE_LIMIT)
+  }
+
+  const shown = visible.slice(0, limit)
 
   const byManager = useMemo(() => {
     const map = new Map<string, { name: string; lines: number; extra: number; short: number }>()
@@ -905,11 +915,19 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
             </div>
           ) : null}
 
-          {visible.length > VISIBLE_LIMIT ? (
-            <p className="hint" data-testid="month-limit">
-              Показаны первые {VISIBLE_LIMIT} строки из {visible.length} — уточните менеджера или
-              поиск.
-            </p>
+          {visible.length > limit ? (
+            <div className="table-more">
+              <span className="hint" data-testid="month-limit">
+                Показано {shown.length} из {visible.length} строк
+              </span>
+              <button
+                type="button"
+                className="mini"
+                onClick={() => setLimit((value) => value + VISIBLE_LIMIT)}
+              >
+                Показать ещё {VISIBLE_LIMIT}
+              </button>
+            </div>
           ) : null}
         </>
       ) : null}

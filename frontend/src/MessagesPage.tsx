@@ -12,6 +12,9 @@ import { PageHelp } from './PageHelp'
 
 type Props = { user: SessionUser }
 
+/** Сколько событий журнала просим за раз: «Показать ещё» догружает столько же. */
+const JOURNAL_PAGE = 100
+
 function plural(count: number, forms: [string, string, string]): string {
   const mod10 = count % 10
   const mod100 = count % 100
@@ -52,18 +55,21 @@ export function MessagesPage({ user }: Props) {
   const [onlyMessages, setOnlyMessages] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(false)
   const [cleanup, setCleanup] = useState<{ year: number; events: number } | null>(null)
 
   useEffect(() => {
     let alive = true
     Promise.all([
-      fetchJournal({ limit: 100 }),
+      fetchJournal({ limit: JOURNAL_PAGE }),
       fetchMessages({ limit: 100 }),
       fetchCleanupSuggestion().catch(() => null),
     ])
       .then(([journal, inbox, suggestion]) => {
         if (!alive) return
         setRows(journal)
+        setHasMore(journal.length >= JOURNAL_PAGE)
         setMessages(inbox.rows)
         setUnread(inbox.unread)
         setCleanup(suggestion)
@@ -90,6 +96,25 @@ export function MessagesPage({ user }: Props) {
     )
   }, [rows, messages, search, onlyMessages])
 
+  /** Журнал длиннее одной порции: догружаем следующую, старые сверху вниз. */
+  const loadMore = async () => {
+    const oldest = rows[rows.length - 1]
+    if (!oldest) return
+    setLoadingMore(true)
+    try {
+      const older = await fetchJournal({ limit: JOURNAL_PAGE, before: oldest.created_at })
+      setRows((current) => {
+        const seen = new Set(current.map((row) => row.id))
+        return [...current, ...older.filter((row) => !seen.has(row.id))]
+      })
+      setHasMore(older.length >= JOURNAL_PAGE)
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
   const readAll = async () => {
     setBusy(true)
     try {
@@ -113,7 +138,7 @@ export function MessagesPage({ user }: Props) {
     try {
       const done = await cleanupJournal(cleanup.year)
       setCleanup(null)
-      setRows(await fetchJournal({ limit: 100 }))
+      setRows(await fetchJournal({ limit: JOURNAL_PAGE }))
       setError(`Журнал за ${cleanup.year} год очищен: удалено записей ${done.deleted}`)
     } catch (err) {
       setError(errorMessage(err))
@@ -239,6 +264,21 @@ export function MessagesPage({ user }: Props) {
           </table>
         </div>
       )}
+      {hasMore ? (
+        <div className="table-more">
+          <span className="hint" data-testid="journal-shown">
+            Показаны последние {rows.length} событий
+          </span>
+          <button
+            type="button"
+            className="mini"
+            disabled={loadingMore}
+            onClick={() => void loadMore()}
+          >
+            {loadingMore ? 'Загрузка…' : `Показать ещё ${JOURNAL_PAGE}`}
+          </button>
+        </div>
+      ) : null}
     </section>
   )
 }

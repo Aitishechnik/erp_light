@@ -28,9 +28,14 @@ const STATUS_TITLES: Record<string, string> = {
   failed: 'ошибка',
 }
 
+/** Сколько загрузок показываем сразу и прибавляем кнопкой; больше 200 сервер не отдаёт. */
+const IMPORTS_PAGE = 20
+const MAX_IMPORTS_LIMIT = 200
+
 export function ImportsPage({ user }: { user?: SessionUser }) {
   const [kinds, setKinds] = useState<ImportKind[]>([])
   const [journal, setJournal] = useState<ImportSession[]>([])
+  const [limit, setLimit] = useState(IMPORTS_PAGE)
   const [files, setFiles] = useState<Record<string, File | null>>({})
   const [results, setResults] = useState<Record<string, ImportSession>>({})
   const [busyKind, setBusyKind] = useState<string | null>(null)
@@ -38,13 +43,16 @@ export function ImportsPage({ user }: { user?: SessionUser }) {
 
   const reload = useCallback(async () => {
     try {
-      const [loadedKinds, loadedJournal] = await Promise.all([fetchImportKinds(), fetchImports(20)])
+      const [loadedKinds, loadedJournal] = await Promise.all([
+        fetchImportKinds(),
+        fetchImports(limit),
+      ])
       setKinds(loadedKinds)
       setJournal(loadedJournal)
     } catch (err) {
       setError(errorMessage(err))
     }
-  }, [])
+  }, [limit])
 
   useEffect(() => {
     void reload()
@@ -186,6 +194,21 @@ export function ImportsPage({ user }: { user?: SessionUser }) {
           )}
         </tbody>
       </table>
+
+      {journal.length >= limit && limit < MAX_IMPORTS_LIMIT ? (
+        <div className="table-more">
+          <span className="hint" data-testid="imports-shown">
+            Показаны последние {journal.length} загрузок
+          </span>
+          <button
+            type="button"
+            className="mini"
+            onClick={() => setLimit((value) => Math.min(value + IMPORTS_PAGE, MAX_IMPORTS_LIMIT))}
+          >
+            Показать ещё {IMPORTS_PAGE}
+          </button>
+        </div>
+      ) : null}
     </section>
   )
 }

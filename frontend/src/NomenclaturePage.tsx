@@ -1,8 +1,9 @@
-import { type FormEvent, useCallback, useEffect, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   createProduct,
   errorMessage,
-  fetchProducts,
+  fetchProduct,
+  fetchProductsPage,
   PRODUCT_KIND_FILTER_TITLES,
   PRODUCT_KIND_LABELS,
   PRODUCT_KINDS,
@@ -12,41 +13,106 @@ import {
 import { PageHelp } from './PageHelp'
 
 const EMPTY_FORM = { code: '', name: '', kind: 'material', unit: 'шт' }
-const VISIBLE_LIMIT = 100
 
-/** Объект из сообщения показываем первым, даже если он за пределами первых ста. */
-function withFocusFirst<T extends { id: string }>(
-  filtered: T[],
-  all: T[],
-  focusId: string | undefined,
-  limit: number,
-): T[] {
-  if (!focusId) return filtered.slice(0, limit)
-  const target = filtered.find((row) => row.id === focusId) ?? all.find((row) => row.id === focusId)
-  if (!target) return filtered.slice(0, limit)
-  return [target, ...filtered.filter((row) => row.id !== focusId).slice(0, limit - 1)]
-}
+/** Сколько строк просим за раз: кнопка «Показать ещё» добавляет столько же. */
+const PAGE_SIZE = 100
+
+/** Поиск с задержкой: каждый символ не должен дёргать сервер. */
+const SEARCH_DELAY_MS = 300
 
 export function NomenclaturePage({ focusId }: { focusId?: string }) {
   const [rows, setRows] = useState<Product[]>([])
+  const [total, setTotal] = useState(0)
   const [form, setForm] = useState(EMPTY_FORM)
   const [kindFilter, setKindFilter] = useState('')
   const [search, setSearch] = useState('')
+  const [needle, setNeedle] = useState('')
   const [showInactive, setShowInactive] = useState(false)
+  const [focusRow, setFocusRow] = useState<Product | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-
-  const reload = useCallback(async () => {
-    try {
-      setRows(await fetchProducts())
-    } catch (err) {
-      setError(errorMessage(err))
-    }
-  }, [])
+  const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  // Ответ на устаревший запрос не должен затирать свежий список.
+  const requestId = useRef(0)
 
   useEffect(() => {
-    void reload()
-  }, [reload])
+    const timer = setTimeout(() => setNeedle(search), SEARCH_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  const loadFirstPage = useCallback(async () => {
+    const id = ++requestId.current
+    setLoading(true)
+    try {
+      const page = await fetchProductsPage({
+        search: needle,
+        kinds: kindFilter ? [kindFilter] : undefined,
+        includeInactive: showInactive,
+        limit: PAGE_SIZE,
+      })
+      if (id !== requestId.current) return
+      setRows(page.items)
+      setTotal(page.total)
+      setError(null)
+    } catch (err) {
+      if (id !== requestId.current) return
+      setError(errorMessage(err))
+    } finally {
+      if (id === requestId.current) setLoading(false)
+    }
+  }, [needle, kindFilter, showInactive])
+
+  useEffect(() => {
+    void loadFirstPage()
+  }, [loadFirstPage])
+
+  // Объект из сообщения тянем отдельно: он может лежать и за первой сотней.
+  useEffect(() => {
+    if (!focusId) {
+      setFocusRow(null)
+      return
+    }
+    let alive = true
+    fetchProduct(focusId)
+      .then((row) => {
+        if (alive) setFocusRow(row)
+      })
+      .catch(() => {
+        if (alive) setFocusRow(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [focusId])
+
+  /** Строка из сообщения показывается первой и не дублируется в порции. */
+  const visible = useMemo(() => {
+    if (!focusRow) return rows
+    return [focusRow, ...rows.filter((row) => row.id !== focusRow.id)]
+  }, [rows, focusRow])
+
+  const loadMore = async () => {
+    setLoadingMore(true)
+    try {
+      const page = await fetchProductsPage({
+        search: needle,
+        kinds: kindFilter ? [kindFilter] : undefined,
+        includeInactive: showInactive,
+        limit: PAGE_SIZE,
+        offset: rows.length,
+      })
+      setRows((current) => {
+        const seen = new Set(current.map((row) => row.id))
+        return [...current, ...page.items.filter((row) => !seen.has(row.id))]
+      })
+      setTotal(page.total)
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -55,7 +121,7 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
     try {
       await createProduct(form)
       setForm({ ...EMPTY_FORM, kind: form.kind, unit: form.unit })
-      await reload()
+      await loadFirstPage()
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -67,8 +133,15 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
     setBusy(true)
     setError(null)
     try {
-      await updateProduct(product.id, { is_active: !product.is_active })
-      await reload()
+      const updated = await updateProduct(product.id, { is_active: !product.is_active })
+      const stillShown = showInactive || updated.is_active
+      setRows((current) =>
+        stillShown
+          ? current.map((row) => (row.id === updated.id ? updated : row))
+          : current.filter((row) => row.id !== updated.id),
+      )
+      setFocusRow((current) => (current?.id === updated.id ? updated : current))
+      if (!stillShown) setTotal((value) => Math.max(0, value - 1))
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -76,24 +149,16 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
     }
   }
 
-  const needle = search.trim().toLowerCase()
-  const filtered = rows
-    .filter((row) => (kindFilter ? row.kind === kindFilter : true))
-    .filter((row) => (showInactive ? true : row.is_active))
-    .filter((row) =>
-      needle
-        ? row.name.toLowerCase().includes(needle) || row.code.toLowerCase().includes(needle)
-        : true,
-    )
-  const visible = withFocusFirst(filtered, rows, focusId, VISIBLE_LIMIT)
-
   useEffect(() => {
-    if (!focusId) return
+    if (!focusRow) return
     const frame = requestAnimationFrame(() => {
-      document.querySelector('tr.focus-row')?.scrollIntoView({ block: 'center' })
+      const row = document.querySelector('tr.focus-row')
+      if (row && typeof row.scrollIntoView === 'function') {
+        row.scrollIntoView({ block: 'center' })
+      }
     })
     return () => cancelAnimationFrame(frame)
-  }, [focusId])
+  }, [focusRow])
 
   return (
     <section>
@@ -180,8 +245,7 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
         </label>
         <span className="sep" />
         <span className="hint">
-          Найдено: <strong data-testid="products-count">{filtered.length}</strong>
-          {filtered.length > VISIBLE_LIMIT ? `, показаны первые ${VISIBLE_LIMIT}` : null}
+          Найдено: <strong data-testid="products-count">{total}</strong>
         </span>
       </div>
 
@@ -199,8 +263,8 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
         <tbody>
           {visible.length === 0 ? (
             <tr>
-              <td colSpan={6} className="hint">
-                Номенклатуры не найдено.
+              <td colSpan={6} className="hint" data-testid="products-empty">
+                {loading ? 'Загрузка…' : 'Номенклатуры не найдено.'}
               </td>
             </tr>
           ) : (
@@ -230,6 +294,22 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
           )}
         </tbody>
       </table>
+
+      {!loading && rows.length < total ? (
+        <div className="table-more">
+          <span className="hint" data-testid="products-shown">
+            Показано {rows.length} из {total}
+          </span>
+          <button
+            type="button"
+            className="mini"
+            onClick={() => void loadMore()}
+            disabled={loadingMore}
+          >
+            {loadingMore ? 'Загрузка…' : `Показать ещё ${PAGE_SIZE}`}
+          </button>
+        </div>
+      ) : null}
     </section>
   )
 }

@@ -538,6 +538,19 @@ button.primary {
   flex: 1;
 }
 
+/* «Показать ещё»: таблица отдаёт порцию, остальное — по кнопке, без тупика. */
+.table-more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.table-more .hint {
+  margin: 0;
+}
+
 .plan-list {
   display: flex;
   flex-wrap: wrap;
