@@ -1,5 +1,7 @@
 """Справочники: контрагенты и номенклатура — заведение, правка, права."""
 
+from typing import Any
+
 from fastapi.testclient import TestClient
 
 
@@ -75,6 +77,21 @@ def test_product_can_be_created_and_edited(client: TestClient, login) -> None:
     assert updated.status_code == 200, updated.text
     assert updated.json()["name"] == "Краска белая 20 кг"
     assert updated.json()["kind"] == "finished"
+
+
+def test_products_can_be_filtered_by_several_kinds(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    """Меню планирования запрашивает только сырьё и готовую продукцию."""
+    login("sales")
+    all_rows = client.get("/api/v1/products?include_inactive=false").json()
+    kinds = {row["kind"] for row in all_rows}
+    assert kinds == {"material", "raw", "finished"}
+
+    planning = client.get("/api/v1/products?kinds=raw,finished").json()
+    assert {row["kind"] for row in planning} == {"raw", "finished"}
+    assert all(row["kind"] != "material" for row in planning)
+    assert client.get("/api/v1/products?kinds=unknown").status_code == 400
 
 
 def test_unknown_product_kind_is_rejected(client: TestClient, login) -> None:

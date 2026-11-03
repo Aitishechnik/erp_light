@@ -8,7 +8,7 @@ import {
   deleteSalesPlanCorrection,
   errorMessage,
   fetchCounterparties,
-  fetchProducts,
+  fetchPlanningProducts,
   fetchSalesPlanCorrections,
   fetchSalesPlans,
   fetchUsers,
@@ -241,7 +241,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
 
   useEffect(() => {
     void reload()
-    fetchProducts()
+    fetchPlanningProducts()
       .then((rows) => setProducts(rows.filter((product) => product.is_active)))
       .catch(() => setProducts([]))
     fetchCounterparties({ role: 'customer', includeInactive: true })

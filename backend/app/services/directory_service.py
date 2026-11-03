@@ -138,10 +138,14 @@ def update_counterparty(
 # ── Номенклатура ───────────────────────────────────────────────────────────
 
 
-def list_products(db: Session, *, kind: str | None = None) -> list[Product]:
+def list_products(
+    db: Session, *, kind: str | None = None, kinds: list[str] | None = None
+) -> list[Product]:
+    """Номенклатура по коду. ``kinds`` — несколько видов сразу (списки выбора)."""
     statement = select(Product).order_by(Product.code)
-    if kind:
-        statement = statement.where(Product.kind == kind)
+    selected = kinds if kinds is not None else ([kind] if kind else None)
+    if selected:
+        statement = statement.where(Product.kind.in_(selected))
     return list(db.execute(statement).scalars().all())
 
 

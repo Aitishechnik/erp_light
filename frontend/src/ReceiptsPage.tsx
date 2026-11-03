@@ -17,6 +17,7 @@ import {
   formatMoney,
   isAdmin,
   type PaymentCategory,
+  PLANNING_PRODUCT_KINDS,
   type Product,
   type PurchasePlan,
   type Role,
@@ -629,6 +630,9 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
   /** Пометка «сохранено»: карточка после сохранения остаётся открытой. */
   const [savedHint, setSavedHint] = useState<string | null>(null)
   const [suppliers, setSuppliers] = useState<Counterparty[]>([])
+  /** Все позиции справочника: по ним узнаём уже сохранённые строки партии. */
+  const [allProducts, setAllProducts] = useState<Product[]>([])
+  /** Подсказки поля «Товар»: только сырьё и готовая продукция, без материалов. */
   const [products, setProducts] = useState<Product[]>([])
   /** Утверждённые планы закупок: из них выбирается строка для позиции. */
   const [plans, setPlans] = useState<PurchasePlan[]>([])
@@ -679,8 +683,15 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
       })
       .catch(() => setSuppliers([]))
     fetchProducts()
-      .then((rows) => setProducts(rows.filter((product) => product.is_active)))
-      .catch(() => setProducts([]))
+      .then((rows) => {
+        const active = rows.filter((product) => product.is_active)
+        setAllProducts(active)
+        setProducts(active.filter((product) => PLANNING_PRODUCT_KINDS.includes(product.kind)))
+      })
+      .catch(() => {
+        setAllProducts([])
+        setProducts([])
+      })
   }, [])
 
   useEffect(() => {
@@ -1656,7 +1667,7 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                                         onChange={(event) => {
                                           // В поле — название; код под полем всегда тот, что уйдёт на сервер.
                                           const title = event.target.value
-                                          const found = findProduct(products, title)
+                                          const found = findProduct(allProducts, title)
                                           // Сменили товар — чужая строка плана больше не подходит.
                                           const keepPlan =
                                             found !== undefined &&
@@ -1701,7 +1712,7 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                                   <PlanLink
                                     item={item}
                                     lines={planLineOptions}
-                                    products={products}
+                                    products={allProducts}
                                     mayEdit={mayEdit}
                                     disabled={locked}
                                     onChange={(planItemId, label) =>

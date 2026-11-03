@@ -578,4 +578,36 @@ describe('SalesPlansPage', () => {
     expect(table).toHaveTextContent('20 шт')
     expect(table).not.toHaveTextContent('Изменений нет')
   })
+
+  it('в плане менеджера нет материалов — только сырьё и готовая продукция', async () => {
+    mockApi(
+      routes({
+        '/api/v1/products': {
+          body: [
+            ...PRODUCTS,
+            {
+              id: 'material-1',
+              code: 'MAT-1',
+              name: 'Крышка от коробки',
+              kind: 'material',
+              unit: 'шт',
+              is_active: true,
+            },
+          ],
+        },
+        '/api/v1/sales-plan-corrections': { body: [] },
+        '/api/v1/sales-plans': { body: [plan({ status: 'draft', status_title: 'Черновик' })] },
+      }),
+    )
+    render(<SalesPlansPage user={MANAGER} />)
+
+    const select = await screen.findByLabelText('Добавить товар')
+    await waitFor(() => {
+      expect(calls().some((url) => url.includes('kinds=raw,finished'))).toBe(true)
+    })
+    expect(
+      within(select).queryByRole('option', { name: /Крышка от коробки/ }),
+    ).not.toBeInTheDocument()
+    expect(within(select).getByRole('option', { name: /Товар 2/ })).toBeInTheDocument()
+  })
 })

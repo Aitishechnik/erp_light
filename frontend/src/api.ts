@@ -718,8 +718,19 @@ export function fetchManagers(): Promise<SessionUser[]> {
   return request<SessionUser[]>('/api/v1/users/managers')
 }
 
-export function fetchProducts(): Promise<Product[]> {
-  return request<Product[]>('/api/v1/products')
+/** Виды номенклатуры, доступные в планировании: только сырьё и готовая продукция. */
+export const PLANNING_PRODUCT_KINDS: readonly string[] = ['raw', 'finished']
+
+export function fetchProducts(options?: { kinds?: readonly string[] }): Promise<Product[]> {
+  const kinds = options?.kinds?.length ? `?kinds=${options.kinds.join(',')}` : ''
+  return request<Product[]>(`/api/v1/products${kinds}`)
+}
+
+/** Номенклатура для меню планирования: материалы в списки не попадают. */
+export function fetchPlanningProducts(): Promise<Product[]> {
+  return fetchProducts({ kinds: PLANNING_PRODUCT_KINDS }).then((rows) =>
+    rows.filter((row) => PLANNING_PRODUCT_KINDS.includes(row.kind)),
+  )
 }
 
 export function createProduct(payload: ProductIn): Promise<Product> {

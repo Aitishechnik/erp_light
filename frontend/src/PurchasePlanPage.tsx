@@ -713,7 +713,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
 
   useEffect(() => {
     void reload()
-    fetchProducts()
+    fetchProducts({ kinds: ['raw'] })
       .then((rows) => setProducts(rows.filter((row) => row.is_active && row.kind === 'raw')))
       .catch(() => setProducts([]))
     fetchCountries()

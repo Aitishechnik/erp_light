@@ -5,7 +5,7 @@ import {
   createTransferDrafts,
   errorMessage,
   fetchMonthResult,
-  fetchProducts,
+  fetchPlanningProducts,
   formatDate,
   formatMoney,
   formatQuantity,
@@ -200,7 +200,7 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
 
   useEffect(() => {
     if (!mayMatch) return
-    fetchProducts()
+    fetchPlanningProducts()
       .then(setProducts)
       .catch(() => setProducts([]))
   }, [mayMatch])

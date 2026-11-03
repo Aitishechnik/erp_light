@@ -518,7 +518,7 @@ test('менеджер заполняет план продаж по клиен�
   let submitted = false
   await mockSession(page)
   await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
-  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/products**', (route) => route.fulfill({ json: PRODUCTS }))
   await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [CLIENT] }))
   await page.route('**/api/v1/sales-plans/*/submit', (route) => {
     submitted = true
@@ -826,7 +826,7 @@ test('менеджер предлагает корректировку утве�
       ],
     }),
   )
-  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/products**', (route) => route.fulfill({ json: PRODUCTS }))
   await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [CLIENT] }))
   await page.route('**/api/v1/sales-plan-corrections**', (route) => {
     if (route.request().method() === 'POST') {
@@ -852,7 +852,7 @@ test('поступление из 1С открывается в календар
       : route.fulfill({ json: [{ ...RECEIPT, batch_date: localToday() }] }),
   )
   await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [] }))
-  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/products**', (route) => route.fulfill({ json: PRODUCTS }))
   await page.route('**/api/v1/purchase-plans**', (route) => route.fulfill({ json: [] }))
   await page.route('**/api/v1/rates/USD', (route) =>
     route.fulfill({
@@ -935,7 +935,7 @@ test('пошлина, Risk и общие расходы считаются в к
     return route.fulfill({ json: [{ ...RECEIPT, batch_date: localToday() }] })
   })
   await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [] }))
-  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/products**', (route) => route.fulfill({ json: PRODUCTS }))
   await page.route('**/api/v1/purchase-plans**', (route) => route.fulfill({ json: [] }))
   await page.route('**/api/v1/rates/USD', (route) =>
     route.fulfill({
@@ -1024,7 +1024,7 @@ test('растаможка партии: проценты превращаютс
     return route.fulfill({ json: [sent.length > 0 ? cleared : taxed] })
   })
   await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [] }))
-  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/products**', (route) => route.fulfill({ json: PRODUCTS }))
   // Курс на дату растаможки приходит с query — шаблон с «**» его тоже ловит.
   // ЦБ отвечает своим курсом на каждую дату: остаток — актуальный, таможня — на свою дату.
   await page.route('**/api/v1/rates/USD**', (route) => {
@@ -1153,7 +1153,7 @@ test('закупщик грузит позиции партии из файла 
       : route.fulfill({ json: [draft] }),
   )
   await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [] }))
-  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/products**', (route) => route.fulfill({ json: PRODUCTS }))
 
   await page.goto('/')
   await openSection(page, 'Закупки', 'Поступления')
@@ -1248,7 +1248,7 @@ const MONTH_RESULT = {
 test('итоги месяца: план против факта и очередь сопоставления', async ({ page }) => {
   await mockSession(page, COMMERCIAL)
   await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
-  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/products**', (route) => route.fulfill({ json: PRODUCTS }))
   await page.route('**/api/v1/month-results**', (route) => route.fulfill({ json: MONTH_RESULT }))
   await page.goto('/')
 
@@ -1272,7 +1272,7 @@ test('итоги месяца: план против факта и очеред�
 test('причина отклонения сохраняется из строки итогов', async ({ page }) => {
   await mockSession(page, COMMERCIAL)
   await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
-  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/products**', (route) => route.fulfill({ json: PRODUCTS }))
   await page.route('**/api/v1/month-results**', (route) => route.fulfill({ json: MONTH_RESULT }))
   await page.route('**/api/v1/month-results/**/reasons', (route) =>
     route.fulfill({
@@ -1313,7 +1313,7 @@ test('месяц закрывается и показывает снимок', a
 
   await mockSession(page, COMMERCIAL)
   await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
-  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/products**', (route) => route.fulfill({ json: PRODUCTS }))
   // Маршруты проверяются с конца: общий регистрируем первым, закрытие — последним.
   await page.route('**/api/v1/month-results**', (route) => route.fulfill({ json: state() }))
   await page.route('**/api/v1/month-results/**/close', (route) => {
@@ -1422,7 +1422,7 @@ test('прочтение одного сообщения уменьшает сч
 test('ссылка из журнала открывает объект и подсвечивает строку', async ({ page }) => {
   await mockSession(page, EXECUTIVE)
   await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
-  await page.route('**/api/v1/products', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/products**', (route) => route.fulfill({ json: PRODUCTS }))
   await page.route('**/api/v1/audit/cleanup', (route) => route.fulfill({ json: null }))
   await page.route('**/api/v1/messages**', (route) =>
     route.fulfill({
