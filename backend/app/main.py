@@ -67,9 +67,6 @@ def create_app(*, verify_db: bool = True) -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-        # Таблицам нужен счётчик «Показано 100 из 1689»: без этого браузер
-        # не отдаёт заголовок при запросе с другого источника.
-        expose_headers=["X-Total-Count"],
     )
     app.include_router(api_router, prefix="/api/v1")
 

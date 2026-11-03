@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.deps import CurrentUser, DbSession, require_roles
 from app.models.auth import User
@@ -55,36 +55,23 @@ def _out(row: Counterparty) -> CounterpartyOut:
 def list_counterparties(
     user: CurrentUser,
     db: DbSession,
-    response: Response,
     role: str | None = Query(
         default=None, description="customer | local_supplier | import_supplier"
     ),
     include_inactive: bool = Query(default=False, description="Показать и отключённых"),
-    search: str | None = Query(default=None, description="Поиск по наименованию"),
-    limit: int | None = Query(
-        default=None, ge=1, le=500, description="Сколько строк вернуть; без него — все"
-    ),
-    offset: int = Query(default=0, ge=0, description="Сколько строк пропустить"),
 ) -> list[CounterpartyOut]:
     """Контрагенты: покупатели, локальные и импортные поставщики.
 
-    Без ``limit`` отдаёт всех — так им пользуются списки выбора в карточках.
-    Таблица просит порциями и берёт общее число из ``X-Total-Count``.
+    Список отдаётся целиком: фильтры и сортировка — на стороне таблицы.
     """
     if role is not None and role not in ROLE_FIELDS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Роль контрагента: customer, local_supplier или import_supplier",
         )
-    rows, total = service.page_counterparties(
-        db,
-        role_field=ROLE_FIELDS.get(role) if role else None,
-        include_inactive=include_inactive,
-        search=search,
-        limit=limit,
-        offset=offset,
+    rows = service.list_counterparties(
+        db, role_field=ROLE_FIELDS.get(role) if role else None, include_inactive=include_inactive
     )
-    response.headers["X-Total-Count"] = str(total)
     return [_out(row) for row in rows]
 
 

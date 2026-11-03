@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import ColumnElement, func, or_, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -55,38 +55,6 @@ def list_counterparties(
     if not include_inactive:
         statement = statement.where(Counterparty.is_active.is_(True))
     return list(db.execute(statement).scalars().all())
-
-
-def page_counterparties(
-    db: Session,
-    *,
-    role_field: str | None = None,
-    include_inactive: bool = False,
-    search: str | None = None,
-    limit: int | None = None,
-    offset: int = 0,
-) -> tuple[list[Counterparty], int]:
-    """Порция справочника и сколько всего нашлось — для кнопки «показать ещё».
-
-    ``limit`` не задан — отдаём все строки, как раньше: так работает выбор
-    контрагента в карточках, которому нужен полный список.
-    """
-    conditions: list[ColumnElement[bool]] = []
-    if role_field is not None:
-        conditions.append(getattr(Counterparty, role_field).is_(True))
-    if not include_inactive:
-        conditions.append(Counterparty.is_active.is_(True))
-    needle = (search or "").strip()
-    if needle:
-        conditions.append(Counterparty.name.icontains(needle, autoescape=True))
-
-    total = db.execute(
-        select(func.count()).select_from(Counterparty).where(*conditions)
-    ).scalar_one()
-    statement = select(Counterparty).where(*conditions).order_by(Counterparty.name)
-    if limit is not None:
-        statement = statement.offset(offset).limit(limit)
-    return list(db.execute(statement).scalars().all()), int(total)
 
 
 def get_counterparty(db: Session, counterparty_id: uuid.UUID) -> Counterparty:
@@ -179,42 +147,6 @@ def list_products(
     if selected:
         statement = statement.where(Product.kind.in_(selected))
     return list(db.execute(statement).scalars().all())
-
-
-def page_products(
-    db: Session,
-    *,
-    kinds: list[str] | None = None,
-    include_inactive: bool = True,
-    search: str | None = None,
-    limit: int | None = None,
-    offset: int = 0,
-) -> tuple[list[Product], int]:
-    """Порция номенклатуры и сколько всего нашлось.
-
-    Поиск идёт по коду и наименованию на сервере: иначе он видел бы только
-    первые загруженные строки. ``limit`` не задан — отдаём все строки, как
-    раньше (списки выбора в планах и поступлениях).
-    """
-    conditions: list[ColumnElement[bool]] = []
-    if kinds:
-        conditions.append(Product.kind.in_(kinds))
-    if not include_inactive:
-        conditions.append(Product.is_active.is_(True))
-    needle = (search or "").strip()
-    if needle:
-        conditions.append(
-            or_(
-                Product.code.icontains(needle, autoescape=True),
-                Product.name.icontains(needle, autoescape=True),
-            )
-        )
-
-    total = db.execute(select(func.count()).select_from(Product).where(*conditions)).scalar_one()
-    statement = select(Product).where(*conditions).order_by(Product.code)
-    if limit is not None:
-        statement = statement.offset(offset).limit(limit)
-    return list(db.execute(statement).scalars().all()), int(total)
 
 
 def get_product(db: Session, product_id: uuid.UUID) -> Product:
