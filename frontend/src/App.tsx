@@ -310,7 +310,7 @@ export function App() {
             aria-expanded={!collapsed}
             onClick={toggleSidebar}
           >
-            <IconPanel />
+            <IconPanel collapsed={collapsed} />
           </button>
         </div>
         <nav aria-label="Разделы">

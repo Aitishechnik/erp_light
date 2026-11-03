@@ -66,12 +66,16 @@ export function IconAdmin(props: SVGProps<SVGSVGElement>) {
   )
 }
 
-export function IconPanel(props: SVGProps<SVGSVGElement>) {
+export function IconPanel({
+  collapsed = false,
+  ...props
+}: SVGProps<SVGSVGElement> & { collapsed?: boolean }) {
   return (
     <svg {...base} {...props}>
       <rect x="3" y="4" width="18" height="16" rx="3" />
       <path d="M9 4v16" />
-      <path d="m14 9-3 3 3 3" />
+      {/* Развёрнутое меню сворачивается влево, свёрнутое раскрывается вправо. */}
+      <path d={collapsed ? 'm11 9 3 3-3 3' : 'm14 9-3 3 3 3'} />
     </svg>
   )
 }

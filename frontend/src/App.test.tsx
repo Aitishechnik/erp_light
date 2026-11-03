@@ -247,9 +247,20 @@ describe('App', () => {
     const layout = document.querySelector('.layout') as HTMLElement
     expect(layout).not.toHaveClass('collapsed')
 
-    await user.click(screen.getByRole('button', { name: 'Свернуть меню' }))
+    const collapseToggle = screen.getByRole('button', { name: 'Свернуть меню' })
+    expect(collapseToggle.querySelector('svg path:last-of-type')).toHaveAttribute(
+      'd',
+      'm14 9-3 3 3 3',
+    )
+    await user.click(collapseToggle)
     expect(layout).toHaveClass('collapsed')
     expect(localStorage.getItem('erp_lite_sidebar')).toBe('collapsed')
+    // Свёрнутое меню раскрывается стрелкой вправо, а не той же левой.
+    expect(
+      screen
+        .getByRole('button', { name: 'Развернуть меню' })
+        .querySelector('svg path:last-of-type'),
+    ).toHaveAttribute('d', 'm11 9 3 3-3 3')
 
     // В свёрнутом меню у категории остаётся доступное имя, клик раскрывает меню.
     await user.click(screen.getByRole('button', { name: 'Планирование' }))
