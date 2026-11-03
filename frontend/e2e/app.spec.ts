@@ -1767,4 +1767,11 @@ test('меню сворачивается, а тёмная тема запоми
   await page.reload()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
   await expect(page.getByRole('button', { name: 'Светлая тема' })).toBeVisible()
+
+  // Панель сообщений живёт в верхней панели и не обрезается меню.
+  await page.getByLabel(/Служебные сообщения/).click()
+  const panel = await page.locator('.bell-panel').boundingBox()
+  expect(panel).not.toBeNull()
+  expect(panel!.x).toBeGreaterThan(250)
+  expect(panel!.x + panel!.width).toBeLessThanOrEqual(page.viewportSize()!.width)
 })

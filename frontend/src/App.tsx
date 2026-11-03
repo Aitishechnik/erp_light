@@ -388,86 +388,87 @@ export function App() {
             )
           })}
         </nav>
-        <div className="sidebar-footer">
-          <div className="footer-actions">
-            <NotificationsBell
-              onOpenJournal={() => {
-                setActive('messages')
-                setOpenGroup('admin')
-              }}
-            />
-            <button
-              type="button"
-              className="icon-btn theme-toggle"
-              aria-label={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
-              title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
-              onClick={toggleTheme}
-            >
-              {theme === 'dark' ? <IconSun /> : <IconMoon />}
-            </button>
-          </div>
-          <div className="user-block">
+      </aside>
+
+      <div className="workspace">
+        <header className="topbar">
+          <NotificationsBell
+            onOpenJournal={() => {
+              setActive('messages')
+              setOpenGroup('admin')
+            }}
+          />
+          <button
+            type="button"
+            className="icon-btn theme-toggle"
+            aria-label={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+            title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+            onClick={toggleTheme}
+          >
+            {theme === 'dark' ? <IconSun /> : <IconMoon />}
+          </button>
+          <div className="profile">
             <div className="user-avatar" aria-hidden="true">
               {initials}
             </div>
-            <div className="user-meta">
+            <div className="profile-meta">
               <div className="user-name">{user.full_name}</div>
               <div className="user-role">{user.role_title}</div>
             </div>
           </div>
           <button
             type="button"
-            className="nav-item logout-item"
-            aria-label={collapsed ? 'Выйти' : undefined}
+            className="icon-btn logout-icon"
+            aria-label="Выйти"
+            title="Выйти"
             onClick={handleLogout}
           >
             <IconLogout />
-            <span className="nav-title">Выйти</span>
           </button>
-        </div>
-      </aside>
+        </header>
 
-      <main className={current.id === 'receipts' ? 'content content-receipts' : 'content'}>
-        {current.id === 'stock' && current.ready ? <StockPage /> : null}
-        {current.id === 'sales' && current.ready ? (
-          <SalesPlansPage user={user} focus={focus} />
-        ) : null}
-        {current.id === 'annual' && current.ready ? (
-          <AnnualSalesPlanPage user={user} focus={focus} />
-        ) : null}
-        {current.id === 'purchase' && current.ready ? (
-          <PurchasePlanPage user={user} focus={focus} />
-        ) : null}
-        {current.id === 'nomenclature' && current.ready ? (
-          <NomenclaturePage focusId={focus[0]} />
-        ) : null}
-        {current.id === 'counterparties' && current.ready ? (
-          <CounterpartiesPage user={user} focusId={focus[0]} />
-        ) : null}
-        {current.id === 'countries' && current.ready ? (
-          <CountriesPage user={user} focusId={focus[0]} />
-        ) : null}
-        {current.id === 'month' && current.ready ? (
-          <MonthResultsPage user={user} focus={focus} />
-        ) : null}
-        {current.id === 'receipts' && current.ready ? (
-          <ReceiptsPage user={user} focus={focus} />
-        ) : null}
-        {current.id === 'imports' && current.ready ? <ImportsPage user={user} /> : null}
-        {current.id === 'messages' && current.ready ? <MessagesPage user={user} /> : null}
-        {current.id === 'tasks' && current.ready ? <TasksPage user={user} focus={focus} /> : null}
-        {!current.ready ? (
-          <section>
-            <header className="page-head">
-              <h1>{current.title}</h1>
-            </header>
-            <div className="empty-state">
-              <strong>Модуль ещё не реализован.</strong>
-              <span>Раздел появится в одном из следующих обновлений.</span>
-            </div>
-          </section>
-        ) : null}
-      </main>
+        <main className={current.id === 'receipts' ? 'content content-receipts' : 'content'}>
+          {current.id === 'stock' && current.ready ? <StockPage /> : null}
+          {current.id === 'sales' && current.ready ? (
+            <SalesPlansPage user={user} focus={focus} />
+          ) : null}
+          {current.id === 'annual' && current.ready ? (
+            <AnnualSalesPlanPage user={user} focus={focus} />
+          ) : null}
+          {current.id === 'purchase' && current.ready ? (
+            <PurchasePlanPage user={user} focus={focus} />
+          ) : null}
+          {current.id === 'nomenclature' && current.ready ? (
+            <NomenclaturePage focusId={focus[0]} />
+          ) : null}
+          {current.id === 'counterparties' && current.ready ? (
+            <CounterpartiesPage user={user} focusId={focus[0]} />
+          ) : null}
+          {current.id === 'countries' && current.ready ? (
+            <CountriesPage user={user} focusId={focus[0]} />
+          ) : null}
+          {current.id === 'month' && current.ready ? (
+            <MonthResultsPage user={user} focus={focus} />
+          ) : null}
+          {current.id === 'receipts' && current.ready ? (
+            <ReceiptsPage user={user} focus={focus} />
+          ) : null}
+          {current.id === 'imports' && current.ready ? <ImportsPage user={user} /> : null}
+          {current.id === 'messages' && current.ready ? <MessagesPage user={user} /> : null}
+          {current.id === 'tasks' && current.ready ? <TasksPage user={user} focus={focus} /> : null}
+          {!current.ready ? (
+            <section>
+              <header className="page-head">
+                <h1>{current.title}</h1>
+              </header>
+              <div className="empty-state">
+                <strong>Модуль ещё не реализован.</strong>
+                <span>Раздел появится в одном из следующих обновлений.</span>
+              </div>
+            </section>
+          ) : null}
+        </main>
+      </div>
     </div>
   )
 }

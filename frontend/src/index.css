@@ -4666,3 +4666,171 @@ input[type="radio"] {
 .status-chip {
   border-color: var(--border-strong);
 }
+
+/* ── Верхняя панель: сообщения, тема и профиль вне меню ────────────────── */
+
+.workspace {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 32px 10px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.topbar .bell {
+  position: relative;
+  margin: 0;
+}
+
+.topbar .bell-button {
+  width: auto;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.topbar .bell-title {
+  display: none;
+}
+
+.topbar .bell-badge {
+  top: -3px;
+  right: -3px;
+}
+
+.topbar .bell-panel {
+  top: calc(100% + 8px);
+  right: 0;
+  bottom: auto;
+  left: auto;
+}
+
+.profile {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 12px 4px 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.profile .user-avatar {
+  width: 28px;
+  height: 28px;
+}
+
+.profile-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.profile .user-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.profile .user-role {
+  font-size: 0.68rem;
+}
+
+.logout-icon {
+  color: var(--muted);
+}
+
+.logout-icon:hover {
+  color: var(--text);
+}
+
+.content {
+  padding-top: 12px;
+}
+
+/* Пункт «Задачи» без подпунктов — тоже флекс, иначе иконка уезжает влево. */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+@media (max-width: 1150px) {
+  .profile-meta {
+    display: none;
+  }
+
+  .profile {
+    padding: 4px;
+  }
+}
+
+/* Верхняя панель: одинаковая высота у всех элементов, бейдж не закрывает иконку. */
+.topbar .icon-btn {
+  width: 34px;
+  height: 34px;
+}
+
+.topbar .bell-button {
+  height: 34px;
+  padding: 8px 10px;
+}
+
+.topbar .bell-badge {
+  top: -6px;
+  right: -8px;
+  min-width: 1.05rem;
+  padding: 0 4px;
+  font-size: 0.62rem;
+  line-height: 1.2;
+  border: 2px solid var(--surface);
+}
+
+.topbar .profile {
+  height: 34px;
+  padding: 3px 12px 3px 3px;
+}
+
+.topbar .profile .user-avatar {
+  width: 26px;
+  height: 26px;
+  font-size: 10px;
+}
+
+/* Шапка панели сообщений: заголовок и счётчик друг под другом, «Закрыть» справа. */
+.bell-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 2px 10px;
+}
+
+.bell-head strong {
+  grid-column: 1;
+  font-size: 0.95rem;
+  line-height: 1.25;
+}
+
+.bell-head .bell-count {
+  grid-column: 1;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.bell-head button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
