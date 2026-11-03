@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.api.deps import CurrentUser, DbSession, require_roles
 from app.models.auth import User
@@ -40,18 +40,45 @@ def _parse_kinds(raw: str) -> list[str]:
 def list_products(
     user: CurrentUser,
     db: DbSession,
+    response: Response,
     kind: str | None = Query(default=None, description="material | raw | finished"),
     kinds: str | None = Query(
         default=None,
         description="Виды через запятую: raw,finished. Приоритетнее kind",
     ),
     include_inactive: bool = Query(default=True, description="Показать и неактивные"),
+    search: str | None = Query(default=None, description="Поиск по коду или наименованию"),
+    limit: int | None = Query(
+        default=None, ge=1, le=500, description="Сколько строк вернуть; без него — все"
+    ),
+    offset: int = Query(default=0, ge=0, description="Сколько строк пропустить"),
 ) -> list[Product]:
+    """Список номенклатуры.
+
+    Без ``limit`` отдаёт всё — так им пользуются списки выбора в планах.
+    Таблица просит порциями и получает общее число в заголовке
+    ``X-Total-Count``: по нему показывает «Показано 100 из 1689».
+    """
     selected = _parse_kinds(kinds) if kinds is not None else ([kind] if kind else None)
-    rows = service.list_products(db, kinds=selected)
-    if not include_inactive:
-        rows = [row for row in rows if row.is_active]
+    rows, total = service.page_products(
+        db,
+        kinds=selected,
+        include_inactive=include_inactive,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    response.headers["X-Total-Count"] = str(total)
     return rows
+
+
+@router.get("/products/{product_id}", response_model=ProductOut)
+def get_product(product_id: uuid.UUID, user: CurrentUser, db: DbSession) -> Product:
+    """Одна позиция: по ней таблица показывает объект из сообщения."""
+    try:
+        return service.get_product(db, product_id)
+    except DirectoryError as exc:
+        raise _fail(exc) from exc
 
 
 @router.post("/products", response_model=ProductOut, status_code=status.HTTP_201_CREATED)

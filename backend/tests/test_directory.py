@@ -136,3 +136,80 @@ def test_admin_can_edit_directories(client: TestClient, login) -> None:
         ).status_code
         == 201
     )
+
+
+# ── Порции и поиск: таблицы показывают «100 из 1689» и грузят дальше ────────
+
+
+def test_products_come_in_pages_with_total(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    login("sales")
+    first = client.get("/api/v1/products?include_inactive=false&limit=2")
+    assert first.status_code == 200, first.text
+    assert first.headers["X-Total-Count"] == "5"
+    assert [row["code"] for row in first.json()] == ["FIN-1", "FIN-2"]
+
+    second = client.get("/api/v1/products?include_inactive=false&limit=2&offset=2")
+    assert [row["code"] for row in second.json()] == ["MAT-1", "RAW-1"]
+    assert second.headers["X-Total-Count"] == "5"
+
+    # Порция до самого конца: лишних строк не выдумываем, счётчик тот же.
+    tail = client.get("/api/v1/products?include_inactive=false&limit=2&offset=4")
+    assert [row["code"] for row in tail.json()] == ["RAW-2"]
+    assert tail.headers["X-Total-Count"] == "5"
+
+
+def test_products_search_finds_by_code_and_name(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    login("sales")
+    by_name = client.get("/api/v1/products?include_inactive=false&search=арахис")
+    assert [row["code"] for row in by_name.json()] == ["RAW-1"]
+    assert by_name.headers["X-Total-Count"] == "1"
+
+    by_code = client.get("/api/v1/products?include_inactive=false&search=fin-")
+    assert [row["code"] for row in by_code.json()] == ["FIN-1", "FIN-2"]
+
+    # Отключённая позиция находится поиском, только если её показали.
+    hidden = client.get("/api/v1/products?include_inactive=false&search=старое")
+    assert hidden.json() == []
+    shown = client.get("/api/v1/products?include_inactive=true&search=старое")
+    assert [row["code"] for row in shown.json()] == ["RAW-3"]
+
+
+def test_product_and_counterparty_can_be_opened_by_id(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    """Объект из сообщения открывается по ссылке, даже если он вне первой сотни."""
+    login("sales")
+    product = catalog["raw2"]
+    opened = client.get(f"/api/v1/products/{product.id}")
+    assert opened.status_code == 200, opened.text
+    assert opened.json()["code"] == "RAW-2"
+
+    counterparty = catalog["customer"]
+    got = client.get(f"/api/v1/counterparties/{counterparty.id}")
+    assert got.status_code == 200, got.text
+    assert got.json()["name"] == "ООО Ромашка"
+
+    missing = "00000000-0000-0000-0000-000000000000"
+    assert client.get(f"/api/v1/products/{missing}").status_code == 404
+    assert client.get(f"/api/v1/counterparties/{missing}").status_code == 404
+
+
+def test_counterparties_come_in_pages_and_search(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    login("sales")
+    page = client.get("/api/v1/counterparties?limit=2")
+    assert page.headers["X-Total-Count"] == "3"
+    assert [row["name"] for row in page.json()] == ["ООО Импорт", "ООО Локальный"]
+
+    found = client.get("/api/v1/counterparties?search=ромашка")
+    assert [row["name"] for row in found.json()] == ["ООО Ромашка"]
+    assert found.headers["X-Total-Count"] == "1"
+
+    # Без limit список по-прежнему целый: им пользуются карточки.
+    all_rows = client.get("/api/v1/counterparties")
+    assert len(all_rows.json()) == 3
