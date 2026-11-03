@@ -7,7 +7,7 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models.auth import User
+from app.models.auth import User, is_admin
 from app.services.auth import SESSION_COOKIE, resolve_session
 
 DbSession = Annotated[Session, Depends(get_db)]
@@ -30,10 +30,10 @@ CurrentUser = Annotated[User, Depends(current_user)]
 
 
 def require_roles(*roles: str) -> Callable[[User], User]:
-    """Проверка роли: пускает только перечисленные роли, иначе 403."""
+    """Проверка роли: пускает перечисленные роли и администратора, иначе 403."""
 
     def dependency(user: CurrentUser) -> User:
-        if user.role not in roles:
+        if user.role not in roles and not is_admin(user):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Недостаточно прав для этого действия",

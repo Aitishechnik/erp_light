@@ -101,6 +101,21 @@ describe('AnnualSalesPlanPage', () => {
     })
   })
 
+  it('администратор тоже отправляет годовой план на согласование', async () => {
+    const user = userEvent.setup()
+    mockApi({
+      'POST **/annual-sales-plans': { body: annual({ status: 'on_review' }) },
+      '/annual-sales-plans': { body: annual() },
+    })
+    render(<AnnualSalesPlanPage user={EXECUTIVE} />)
+
+    expect(await screen.findByTestId('annual-status')).toHaveTextContent('Не отправлен')
+    await user.click(screen.getByRole('button', { name: 'Отправить на финальное согласование' }))
+    await waitFor(() => {
+      expect(calls().some((url) => url.includes('/annual-sales-plans/'))).toBe(true)
+    })
+  })
+
   it('генеральный директор финально согласует план', async () => {
     const user = userEvent.setup()
     mockApi({

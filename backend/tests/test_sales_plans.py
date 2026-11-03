@@ -323,3 +323,34 @@ def test_duplicate_row_is_rejected(
     )
     assert response.status_code == 400
     assert "две строки" in response.json()["detail"]
+
+
+def test_admin_manages_any_sales_plan(
+    client: TestClient, login, products: list[Product], clients: list[Counterparty]
+) -> None:
+    """Исполнительный директор создаёт, правит, отправляет и утверждает планы."""
+    login("sales")
+    manager_id = client.get("/api/v1/auth/me").json()["id"]
+
+    login("executive")
+    plan = _create_plan(client, TODAY.year, manager_id=manager_id)
+    assert plan["manager_id"] == manager_id
+    saved = client.put(
+        f"/api/v1/sales-plans/{plan['id']}/items",
+        json={"items": [_item(products[0], TODAY.month, "15", clients[0])]},
+    )
+    assert saved.status_code == 200, saved.text
+    assert client.delete(f"/api/v1/sales-plans/{plan['id']}").status_code == 204
+
+    plan = _create_plan(client, TODAY.year, manager_id=manager_id)
+    assert (
+        client.put(
+            f"/api/v1/sales-plans/{plan['id']}/items",
+            json={"items": [_item(products[0], TODAY.month, "20", clients[0])]},
+        ).status_code
+        == 200
+    )
+    assert client.post(f"/api/v1/sales-plans/{plan['id']}/submit").status_code == 200
+    approved = client.post(f"/api/v1/sales-plans/{plan['id']}/approve")
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == "approved"

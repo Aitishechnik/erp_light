@@ -526,7 +526,7 @@ def test_reason_permissions(
     assert foreign.status_code == 404
 
     login("executive")
-    denied = client.put(
+    allowed = client.put(
         "/api/v1/month-results/2026/10/reasons",
         json={
             "client_id": rows["ООО Ромашка"]["client_id"],
@@ -534,7 +534,8 @@ def test_reason_permissions(
             "reason": "price",
         },
     )
-    assert denied.status_code == 403
+    assert allowed.status_code == 200, allowed.text
+    assert allowed.json()["author_name"] == "Исполнительный директор (демо)"
 
 
 def _closed_month(client: TestClient, db_session: Session, catalog: dict[str, Any]) -> None:

@@ -30,6 +30,14 @@ export type SessionUser = {
   role_title: string
 }
 
+/** Исполнительный директор выполняет функции администратора. */
+export const ADMIN_ROLES: Role[] = ['executive_director']
+
+/** Администратор: грузит любые выгрузки 1С и правит любые данные. */
+export function isAdmin(user?: SessionUser | null): boolean {
+  return user != null && ADMIN_ROLES.includes(user.role)
+}
+
 export type Product = {
   id: string
   code: string

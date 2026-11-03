@@ -40,6 +40,11 @@ ROLE_TITLES = {
     ROLE_EXECUTIVE_DIRECTOR: "Исполнительный директор",
 }
 
+# Исполнительный директор выполняет функции администратора: грузит любые выгрузки
+# 1С и правит любые данные. Отдельной роли «администратор» намеренно нет — ролей
+# по-прежнему шесть.
+ADMIN_ROLES = (ROLE_EXECUTIVE_DIRECTOR,)
+
 
 class User(Base):
     """Сотрудник с одной ролью."""
@@ -59,6 +64,11 @@ class User(Base):
     sessions: Mapped[list[AuthSession]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+
+
+def is_admin(user: User) -> bool:
+    """Функции администратора: полный доступ к загрузкам 1С и правке данных."""
+    return user.role in ADMIN_ROLES
 
 
 class AuthSession(Base):

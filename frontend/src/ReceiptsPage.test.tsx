@@ -880,6 +880,20 @@ describe('ReceiptsPage — позиции из файла «Партия»', () 
     expect(screen.getByTestId('product-code-i0')).toHaveTextContent('код ТОВ1')
   })
 
+  it('администратор правит поступление наравне с закупщиками', async () => {
+    const user = userEvent.setup()
+    const admin: SessionUser = { ...IMPORT_USER, role: 'executive_director' }
+    mockApi(routes())
+    render(<ReceiptsPage user={admin} />)
+
+    await screen.findByTestId('receipts-calendar')
+    await openBatch(user)
+
+    expect(screen.getByRole('button', { name: 'Сохранить' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Удалить' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Добавить строку' })).not.toBeDisabled()
+  })
+
   it('менеджер по продажам видит поступление только для чтения', async () => {
     const user = userEvent.setup()
     const sales: SessionUser = { ...IMPORT_USER, role: 'sales_manager' }

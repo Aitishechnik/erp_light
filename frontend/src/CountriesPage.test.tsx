@@ -21,6 +21,14 @@ const IMPORTER: SessionUser = {
   role_title: 'Менеджер по закупкам (импорт)',
 }
 
+const ADMIN: SessionUser = {
+  id: 'ed-1',
+  login: 'executive',
+  full_name: 'Ольга Директорова',
+  role: 'executive_director',
+  role_title: 'Исполнительный директор',
+}
+
 const COUNTRIES: Country[] = [
   { id: 'th-1', name: 'Таиланд', delivery_days: 90, is_active: true, source: 'manual' },
   { id: 'cn-1', name: 'Китай', delivery_days: 65, is_active: false, source: 'manual' },
@@ -116,6 +124,20 @@ describe('CountriesPage', () => {
     await user.type(screen.getByLabelText('Название страны'), 'Таиланд')
     await user.click(screen.getByRole('button', { name: 'Добавить' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('уже есть в справочнике')
+  })
+
+  it('администратор заводит и правит страны', async () => {
+    const user = userEvent.setup()
+    mockApi(routes({ 'POST /api/v1/countries': { body: COUNTRIES[0] } }))
+    render(<CountriesPage user={ADMIN} />)
+
+    expect(await screen.findByTestId('countries-table')).toHaveTextContent('Таиланд')
+    await user.type(screen.getByLabelText('Название страны'), 'Вьетнам')
+    await user.click(screen.getByRole('button', { name: 'Добавить' }))
+    await waitFor(() => {
+      expect(postBodies().some((body) => body.includes('Вьетнам'))).toBe(true)
+    })
+    expect(screen.queryByText('Только просмотр')).not.toBeInTheDocument()
   })
 
   it('импорт-менеджер видит справочник только для чтения', async () => {

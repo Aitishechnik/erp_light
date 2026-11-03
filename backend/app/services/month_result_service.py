@@ -20,7 +20,12 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.auth import ROLE_COMMERCIAL_DIRECTOR, ROLE_SALES_MANAGER, User
+from app.models.auth import (
+    ROLE_COMMERCIAL_DIRECTOR,
+    ROLE_EXECUTIVE_DIRECTOR,
+    ROLE_SALES_MANAGER,
+    User,
+)
 from app.models.counterparties import Counterparty
 from app.models.domain import Product
 from app.models.planning import SalesPlan
@@ -267,8 +272,9 @@ class ReasonError(Exception):
         self.status_code = status_code
 
 
-# Кто ставит причины: менеджер по своим строкам и коммерческий директор по всем.
-REASON_ROLES = (ROLE_SALES_MANAGER, ROLE_COMMERCIAL_DIRECTOR)
+# Кто ставит причины: менеджер по своим строкам, коммерческий директор
+# и администратор (исполнительный директор) — по всем.
+REASON_ROLES = (ROLE_SALES_MANAGER, ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR)
 MAX_COMMENT = 500
 
 

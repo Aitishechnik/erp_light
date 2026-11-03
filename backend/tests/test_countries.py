@@ -48,7 +48,7 @@ def test_country_validation(client: TestClient, login) -> None:
     assert _create(client, "", 30).status_code == 422
 
 
-def test_only_purchase_director_edits_countries(client: TestClient, login) -> None:
+def test_countries_edit_purchase_director_and_admin(client: TestClient, login) -> None:
     login("import")
     assert client.get("/api/v1/countries").status_code == 200
     assert _create(client).status_code == 403
@@ -57,17 +57,23 @@ def test_only_purchase_director_edits_countries(client: TestClient, login) -> No
     assert client.get("/api/v1/countries").status_code == 200
     assert _create(client).status_code == 403
 
-    login("executive")
-    assert client.get("/api/v1/countries").status_code == 200
-    assert _create(client).status_code == 403
-
     login("purchase")
     created = _create(client)
     assert created.status_code == 201
     country_id = created.json()["id"]
 
-    login("import")
+    # Исполнительный директор — администратор: заводит и правит страны наравне
+    # с директором по закупкам.
+    login("executive")
+    assert client.get("/api/v1/countries").status_code == 200
+    assert _create(client, "Китай", 65).status_code == 201
     assert (
         client.patch(f"/api/v1/countries/{country_id}", json={"delivery_days": 10}).status_code
+        == 200
+    )
+
+    login("import")
+    assert (
+        client.patch(f"/api/v1/countries/{country_id}", json={"delivery_days": 20}).status_code
         == 403
     )

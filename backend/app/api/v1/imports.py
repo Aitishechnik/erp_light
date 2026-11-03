@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 
 from app.api.deps import CurrentUser, DbSession
+from app.models.auth import is_admin
 from app.models.domain import ImportSession
 from app.schemas.imports import ImportKindOut, ImportSessionOut
 from app.services import import_service as service
@@ -75,12 +76,13 @@ def upload(
     """Загрузить файл выгрузки. Повторная загрузка не создаёт дублей.
 
     Права зависят от типа: справочники грузят продажи/коммерция/закупки, импортные
-    поступления — только закупки.
+    поступления — только закупки. Исполнительный директор как администратор грузит
+    любой тип.
     """
     spec = KINDS.get(kind)
     if spec is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Неизвестный тип загрузки: {kind}")
-    if user.role not in spec.roles:
+    if user.role not in spec.roles and not is_admin(user):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Недостаточно прав для этого действия")
     content = file.file.read()
     try:

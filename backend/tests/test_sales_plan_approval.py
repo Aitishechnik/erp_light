@@ -555,3 +555,28 @@ def test_correction_keeps_frozen_months_untouched(
     )
     assert blocked.status_code == 409, blocked.text
     assert "Замороженные месяцы" in blocked.json()["detail"]
+
+
+def test_admin_submits_annual_plan(
+    client: TestClient,
+    login,
+    db_session: Session,
+) -> None:
+    """Исполнительный директор как администратор отправляет годовой план сам."""
+    products = [
+        Product(code="SKU-A", name="Товар A", kind="finished", unit="шт"),
+        Product(code="SKU-B", name="Товар B", kind="finished", unit="шт"),
+        Product(code="SKU-C", name="Товар C", kind="finished", unit="шт"),
+    ]
+    client_row = Counterparty(name="ООО Ромашка", name_key="ооо ромашка", is_customer=True)
+    db_session.add_all([*products, client_row])
+    db_session.commit()
+    _make_all_plans(client, login, products, client_row)
+
+    login("executive")
+    submitted = client.post(f"/api/v1/annual-sales-plans/{YEAR}/submit")
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["status"] == "on_review"
+    approved = client.post(f"/api/v1/annual-sales-plans/{YEAR}/approve")
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == "approved"

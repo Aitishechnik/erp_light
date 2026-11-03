@@ -7,6 +7,7 @@ import {
   errorMessage,
   fetchCounterparties,
   fetchManagers,
+  isAdmin,
   type SessionUser,
   updateCounterparty,
 } from './api'
@@ -46,11 +47,11 @@ const ROLE_FILTERS: { value: '' | CounterpartyRole; title: string }[] = [
   { value: 'import_supplier', title: 'Импортные поставщики' },
 ]
 
-/** Кто может менять справочник: те же роли, что и на бэкенде. */
+/** Кто может менять справочник: те же роли, что и на бэкенде, плюс администратор. */
 const WRITE_ROLES: string[] = ['sales_manager', 'commercial_director', 'purchase_director']
 
 export function CounterpartiesPage({ user, focusId }: { user?: SessionUser; focusId?: string }) {
-  const mayEdit = !user || WRITE_ROLES.includes(user.role)
+  const mayEdit = !user || isAdmin(user) || WRITE_ROLES.includes(user.role)
   const [rows, setRows] = useState<Counterparty[]>([])
   const [managers, setManagers] = useState<SessionUser[]>([])
   const [role, setRole] = useState<'' | CounterpartyRole>('')

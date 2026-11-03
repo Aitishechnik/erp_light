@@ -56,7 +56,11 @@ def test_kinds_are_listed(client: TestClient) -> None:
     receipts = next(row for row in kinds if row["kind"] == "import_receipts")
     assert receipts["title"] == "Импортные поступления"
     assert receipts["columns"] == ["Номер", "Дата", "Контрагент", "Комментарий"]
-    assert receipts["roles"] == ["purchase_director", "import_manager"]
+    assert receipts["roles"] == [
+        "purchase_director",
+        "import_manager",
+        "executive_director",
+    ]
     sales = next(row for row in kinds if row["kind"] == "sales")
     assert sales["title"] == "Продажи за месяц"
     assert sales["roles"] == ["commercial_director", "executive_director"]
@@ -292,6 +296,30 @@ def test_import_requires_write_role(client: TestClient, login) -> None:
     login("import")
     response = upload(client, "customers", "Покупатели.xlsx", xlsx(("Наименование",), ("Тест",)))
     assert response.status_code == 403
+
+
+def test_executive_director_uploads_any_kind(client: TestClient, login) -> None:
+    """Исполнительный директор — администратор: ему доступны все карточки загрузки."""
+    login("executive")
+    kinds = client.get("/api/v1/imports/kinds").json()
+    assert all("executive_director" in row["roles"] for row in kinds)
+
+    customers = upload(
+        client, "customers", "Покупатели.xlsx", xlsx(("Наименование",), ("Админ Клиент",))
+    )
+    assert customers.status_code == 200, customers.text
+
+    receipts = upload(
+        client,
+        "import_receipts",
+        "Поступления.xlsx",
+        xlsx(
+            ("Номер", "Дата", "Контрагент", "Комментарий"),
+            ("ИТ-АДМИН", "13.10.2026", "Фирма", ""),
+        ),
+    )
+    assert receipts.status_code == 200, receipts.text
+    assert receipts.json()["rows_created"] == 1
 
 
 def test_journal_keeps_both_uploads(client: TestClient, login) -> None:

@@ -26,6 +26,7 @@ from app.models.auth import (
     ROLE_IMPORT_MANAGER,
     ROLE_PURCHASE_DIRECTOR,
     User,
+    is_admin,
 )
 from app.models.countries import Country
 from app.models.domain import Batch, BatchItem, Product
@@ -54,7 +55,7 @@ from app.services import purchase_need as need
 from app.services.plan_freeze import editable_months
 from app.services.purchase_need import NeedChange, NeedPosition
 
-EDITORS = (ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER)
+EDITORS = (ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER, ROLE_EXECUTIVE_DIRECTOR)
 VIEWERS = (ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER, ROLE_EXECUTIVE_DIRECTOR)
 
 
@@ -1018,7 +1019,7 @@ def request_revision(db: Session, user: User, plan_id: uuid.UUID, reason: str) -
 
 
 def delete_plan(db: Session, user: User, plan_id: uuid.UUID) -> None:
-    if user.role != ROLE_PURCHASE_DIRECTOR:
+    if user.role != ROLE_PURCHASE_DIRECTOR and not is_admin(user):
         raise PlanError("Удалить план закупок может только директор по закупкам", status_code=403)
     _lock(db, plan_id)
     plan = _require(db, plan_id)

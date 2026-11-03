@@ -771,7 +771,8 @@ def test_roles_approval_and_revision_request(
     assert client.get("/api/v1/purchase-plans").status_code == 403
     login("executive")
     assert client.get("/api/v1/purchase-plans").status_code == 200
-    assert _save(client, plan["id"], []).status_code == 403
+    # Администратор ведёт план наравне с закупщиками.
+    assert _save(client, plan["id"], [_item(catalog, quantity="40")]).status_code == 200
     assert client.post(f"/api/v1/purchase-plans/{plan['id']}/approve").status_code == 409
 
     login("purchase")
@@ -799,8 +800,12 @@ def test_roles_approval_and_revision_request(
 
     login("import")
     assert client.delete(f"/api/v1/purchase-plans/{plan['id']}").status_code == 403
-    login("purchase")
+    # Администратор удаляет черновик; проверяем и штатное удаление закупщиком.
+    login("executive")
     assert client.delete(f"/api/v1/purchase-plans/{plan['id']}").status_code == 204
+    recreated = _create_plan(client, login)
+    login("purchase")
+    assert client.delete(f"/api/v1/purchase-plans/{recreated['id']}").status_code == 204
 
 
 def test_source_revision_diff_and_acknowledge(

@@ -585,14 +585,15 @@ describe('PurchasePlanPage', () => {
     })
   })
 
-  it('на черновике исполнительный директор только смотрит', async () => {
+  it('администратор ведёт черновик плана наравне с закупщиками', async () => {
     mockApi(routes())
     render(<PurchasePlanPage user={EXECUTIVE} />)
 
     expect(await screen.findByTestId('purchase-status')).toHaveTextContent('Черновик')
-    expect(screen.queryByRole('button', { name: 'Сохранить' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Добавить сырьё FIN-1' })).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Количество FIN-1 1')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Сохранить' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Добавить сырьё FIN-1' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Количество FIN-1 1')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Удалить' })).toBeInTheDocument()
   })
 
   it('создаёт план на год, если его ещё нет', async () => {

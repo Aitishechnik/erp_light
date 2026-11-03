@@ -164,7 +164,7 @@ KINDS: dict[str, ImportKind] = {
         title="Импортные поступления",
         entity="batches",
         columns=("Номер", "Дата", "Контрагент", "Комментарий"),
-        roles=(ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER),
+        roles=(ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER, ROLE_EXECUTIVE_DIRECTOR),
         note=(
             "Создаёт черновики поступлений для календаря: номер, дата, поставщик и "
             "комментарий. Позиции и платежи дозаполняются в карточке."
@@ -176,7 +176,7 @@ KINDS: dict[str, ImportKind] = {
         entity="batch_items",
         columns=("Номенклатура", "Количество"),
         optional_columns=("Ед.",),
-        roles=(ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER),
+        roles=(ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER, ROLE_EXECUTIVE_DIRECTOR),
         note=(
             "Файл «Партия» из 1С: в поступление попадают товар и количество. "
             "Загружается из карточки поступления, а не с этой страницы."

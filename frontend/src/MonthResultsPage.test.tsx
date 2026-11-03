@@ -14,6 +14,12 @@ const COMMERCIAL: SessionUser = {
 }
 
 const PURCHASE: SessionUser = { ...COMMERCIAL, id: 'u2', role: 'purchase_director' }
+const ADMIN: SessionUser = {
+  ...COMMERCIAL,
+  id: 'u3',
+  role: 'executive_director',
+  role_title: 'Исполнительный директор',
+}
 
 const PRODUCTS: Product[] = [
   {
@@ -272,6 +278,25 @@ describe('Причины отклонений', () => {
             String(url).includes('/month-results/') &&
             String(url).includes('client_id=c1'),
         )
+      expect(call).toBeTruthy()
+    })
+  })
+
+  it('администратор ставит причину по любой строке', async () => {
+    const user = userEvent.setup()
+    setup(RESULT, ADMIN)
+    const table = await screen.findByTestId('month-table')
+
+    const [addReason] = within(table).getAllByRole('button', { name: '+ причина' })
+    if (!addReason) throw new Error('нет кнопки «+ причина»')
+    await user.click(addReason)
+    await user.selectOptions(screen.getByLabelText('Причина отклонения'), 'quality')
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }))
+
+    await waitFor(() => {
+      const call = vi
+        .mocked(fetch)
+        .mock.calls.find(([, init]) => (init?.method ?? 'GET').toUpperCase() === 'PUT')
       expect(call).toBeTruthy()
     })
   })

@@ -285,6 +285,15 @@ def test_roles_split_directory_and_receipts(client: TestClient, login) -> None:
     )
     assert denied.status_code == 403
 
+    # Администратор (исполнительный директор) грузит оба вида.
+    login("executive")
+    assert upload(client, row("ИТ-3")).status_code == 200
+    admin_customers = client.post(
+        "/api/v1/imports/customers",
+        files={"file": ("Покупатели.xlsx", xlsx(("Наименование",), ("В",)), XLSX_TYPE)},
+    )
+    assert admin_customers.status_code == 200, admin_customers.text
+
 
 def test_journal_remembers_receipts_kind(client: TestClient) -> None:
     upload(client, row("ИТ-30"))

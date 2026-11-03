@@ -12,6 +12,7 @@ import {
   formatDate,
   formatMoney,
   formatQuantity,
+  isAdmin,
   MONTH_TITLES,
   type Product,
   type PurchasePlan,
@@ -682,19 +683,22 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
   const [flashId, setFlashId] = useState<string | null>(null)
 
   const plan = plans.find((row) => row.year === year) ?? null
-  const isEditor = user.role === 'purchase_director' || user.role === 'import_manager'
+  const isPurchaser = user.role === 'purchase_director' || user.role === 'import_manager'
+  // Администратор (исполнительный директор) ведёт план наравне с закупщиками.
+  const isEditor = isPurchaser || isAdmin(user)
   const isExecutive = user.role === 'executive_director'
   const yearEditable = (plan?.editable_months.length ?? 0) > 0
   const canEdit = plan !== null && plan.status === 'draft' && isEditor && yearEditable
   const canSubmit = canEdit && drafts.length > 0 && plan?.source.state !== 'changed'
   const canApprove = plan !== null && plan.status === 'on_review' && isExecutive
   const canReopen = plan !== null && plan.status === 'approved' && isExecutive
-  const canDelete = plan !== null && plan.status === 'draft' && user.role === 'purchase_director'
+  const canDelete =
+    plan !== null && plan.status === 'draft' && (user.role === 'purchase_director' || isAdmin(user))
   const sourceChanged = plan?.source.state === 'changed' || plan?.source.state === 'no_snapshot'
   const canRequestRevision =
     plan !== null &&
     plan.status === 'approved' &&
-    isEditor &&
+    isPurchaser &&
     sourceChanged &&
     plan.source.revision_requested_at === null
   const canAcknowledge = plan !== null && plan.status !== 'approved' && isEditor && sourceChanged
@@ -1135,9 +1139,6 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
               >
                 Удалить
               </button>
-            ) : null}
-            {isExecutive && plan.status === 'draft' ? (
-              <span className="status-chip">План ещё заполняется</span>
             ) : null}
             {isEditor && plan.status === 'approved' ? (
               <span className="status-chip" data-testid="plan-approved-chip">

@@ -19,6 +19,7 @@ from app.models.auth import (
     ROLE_PURCHASE_DIRECTOR,
     ROLE_SALES_MANAGER,
     User,
+    is_admin,
 )
 from app.models.planning import (
     SALES_PLAN_APPROVAL_STATUS_TITLES,
@@ -229,7 +230,7 @@ def _require(db: Session, year: int) -> SalesPlanApproval:
 
 
 def submit(db: Session, user: User, year: int) -> AnnualSalesPlanOut:
-    if user.role != ROLE_COMMERCIAL_DIRECTOR:
+    if user.role != ROLE_COMMERCIAL_DIRECTOR and not is_admin(user):
         raise AnnualPlanError(
             "Отправляет годовой план только коммерческий директор", status_code=403
         )

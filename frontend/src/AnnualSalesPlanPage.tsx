@@ -5,6 +5,7 @@ import {
   errorMessage,
   fetchAnnualSalesPlan,
   formatQuantity,
+  isAdmin,
   MONTH_TITLES,
   rejectAnnualSalesPlan,
   reopenAnnualSalesPlan,
@@ -24,6 +25,7 @@ export function AnnualSalesPlanPage({ user, focus }: { user: SessionUser; focus?
 
   const isCommercial = user.role === 'commercial_director'
   const isExecutive = user.role === 'executive_director'
+  const hasAdmin = isAdmin(user)
 
   const reload = useCallback(async () => {
     try {
@@ -68,7 +70,7 @@ export function AnnualSalesPlanPage({ user, focus }: { user: SessionUser; focus?
   }
 
   const canSubmit =
-    isCommercial &&
+    (isCommercial || hasAdmin) &&
     annual.all_approved &&
     (annual.status === 'draft' || annual.status === 'revision')
   const canApprove = isExecutive && annual.status === 'on_review'

@@ -200,6 +200,25 @@ describe('SalesPlansPage', () => {
     })
   })
 
+  it('администратор правит и утверждает план, а не только смотрит', async () => {
+    const user = userEvent.setup()
+    mockApi(
+      routes({
+        '/api/v1/sales-plans/plan-1/approve': { body: plan({ status: 'approved' }) },
+        '/api/v1/sales-plans': { body: [plan()] },
+        '/api/v1/sales-plan-corrections': { body: [] },
+      }),
+    )
+    render(<SalesPlansPage user={EXECUTIVE} />)
+
+    expect(await screen.findByRole('button', { name: 'Сохранить' })).toBeInTheDocument()
+    expect(screen.queryByText('Только просмотр')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Утвердить' }))
+    await waitFor(() => {
+      expect(calls().some((url) => url.includes('/sales-plans/plan-1/approve'))).toBe(true)
+    })
+  })
+
   it('закупщик видит план только на просмотр', async () => {
     mockApi(
       routes({
@@ -421,7 +440,7 @@ describe('SalesPlansPage', () => {
     })
   })
 
-  it('исполнительный директор предлагает корректировку плана менеджера', async () => {
+  it('администратор исправляет утверждённый план через корректировку', async () => {
     const user = userEvent.setup()
     mockApi(
       routes({
@@ -434,7 +453,7 @@ describe('SalesPlansPage', () => {
     )
     render(<SalesPlansPage user={EXECUTIVE} />)
 
-    await user.click(await screen.findByRole('button', { name: 'Предложить корректировку' }))
+    await user.click(await screen.findByRole('button', { name: 'Исправить утверждённый план' }))
     await waitFor(() => {
       expect(calls().some((url) => url.includes('/sales-plan-corrections'))).toBe(true)
     })

@@ -5,6 +5,7 @@ import {
   fetchImports,
   type ImportKind,
   type ImportSession,
+  isAdmin,
   type SessionUser,
   uploadImport,
 } from './api'
@@ -89,7 +90,7 @@ export function ImportsPage({ user }: { user?: SessionUser }) {
 
       <div className="import-cards">
         {kinds
-          .filter((kind) => !user || kind.roles.includes(user.role))
+          .filter((kind) => !user || isAdmin(user) || kind.roles.includes(user.role))
           .map((kind) => {
             const result = results[kind.kind]
             return (

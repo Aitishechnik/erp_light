@@ -107,3 +107,15 @@ def test_import_manager_cannot_edit_directories(client: TestClient, login) -> No
 def test_purchase_director_can_edit_directories(client: TestClient, login) -> None:
     login("purchase")
     assert client.post("/api/v1/counterparties", json={"name": "Закупки ООО"}).status_code == 201
+
+
+def test_admin_can_edit_directories(client: TestClient, login) -> None:
+    """Исполнительный директор правит справочники как администратор."""
+    login("executive")
+    assert client.post("/api/v1/counterparties", json={"name": "Админ ООО"}).status_code == 201
+    assert (
+        client.post(
+            "/api/v1/products", json={"code": "ТОВ-АДМИН", "name": "Товар админа"}
+        ).status_code
+        == 201
+    )

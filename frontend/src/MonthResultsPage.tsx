@@ -45,8 +45,8 @@ const GROUP_TITLES: Record<MonthRow['group'], string> = {
 }
 
 const MATCH_ROLES = ['commercial_director', 'executive_director']
-/** Кто ставит причины: менеджер по своим строкам и коммерческий директор по всем. */
-const REASON_ROLES = ['sales_manager', 'commercial_director']
+/** Кто ставит причины: менеджер по своим строкам, коммерческий директор и админ — по всем. */
+const REASON_ROLES = ['sales_manager', 'commercial_director', 'executive_director']
 /** Кто закрывает месяц и принимает решение. */
 const CLOSE_ROLES = ['commercial_director', 'executive_director']
 

@@ -370,6 +370,10 @@ def test_only_purchase_roles_may_load_items(client: TestClient, login, db_sessio
     login("purchase")
     assert upload_items(client, batch_id, part_row(1, "Арахис в глазури", "1")).status_code == 200
 
+    # Администратор грузит позиции партии наравне с закупщиками.
+    login("executive")
+    assert upload_items(client, batch_id, part_row(1, "Арахис в глазури", "2")).status_code == 200
+
 
 def test_page_does_not_offer_batch_items(client: TestClient) -> None:
     """На «Загрузке данных» отдельной карточки нет, а общая загрузка такие файлы не берёт."""

@@ -53,7 +53,20 @@ const PRODUCTS: Product[] = [
   },
 ]
 
-const DIRECTORY_ROLES: Role[] = ['sales_manager', 'commercial_director', 'purchase_director']
+const DIRECTORY_ROLES: Role[] = [
+  'sales_manager',
+  'commercial_director',
+  'purchase_director',
+  'executive_director',
+]
+
+const ADMIN: SessionUser = {
+  id: 'ed-1',
+  login: 'executive',
+  full_name: 'Ольга Директорова',
+  role: 'executive_director',
+  role_title: 'Исполнительный директор',
+}
 
 const KINDS: ImportKind[] = [
   {
@@ -77,7 +90,7 @@ const KINDS: ImportKind[] = [
     title: 'Импортные поступления',
     entity: 'batches',
     columns: ['Номер', 'Дата', 'Контрагент', 'Комментарий'],
-    roles: ['purchase_director', 'import_manager'],
+    roles: ['purchase_director', 'import_manager', 'executive_director'],
     note: 'Создаёт черновики поступлений для календаря',
   },
 ]
@@ -196,6 +209,16 @@ describe('CounterpartiesPage', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('уже есть')
   })
+
+  it('администратор может менять контрагентов', async () => {
+    mockApi({ '/api/v1/counterparties': { body: COUNTERPARTIES } })
+    render(<CounterpartiesPage user={ADMIN} />)
+
+    await screen.findByTestId('counterparties-table')
+    expect(screen.getByLabelText('Наименование контрагента')).toBeInTheDocument()
+    expect(screen.getByLabelText('Менеджер клиента ООО Ромашка')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Отключить' })).toBeInTheDocument()
+  })
 })
 
 describe('NomenclaturePage', () => {
@@ -288,6 +311,18 @@ describe('ImportsPage', () => {
     expect(card).toHaveTextContent('черновики поступлений')
     expect(screen.queryByTestId('import-card-customers')).toBeNull()
     expect(screen.queryByTestId('import-card-nomenclature')).toBeNull()
+  })
+
+  it('администратор видит все карточки загрузки', async () => {
+    mockApi({
+      '/api/v1/imports/kinds': { body: KINDS },
+      '/api/v1/imports?limit=20': { body: [] },
+    })
+    render(<ImportsPage user={ADMIN} />)
+
+    expect(await screen.findByTestId('import-card-customers')).toBeInTheDocument()
+    expect(screen.getByTestId('import-card-nomenclature')).toBeInTheDocument()
+    expect(screen.getByTestId('import-card-import_receipts')).toBeInTheDocument()
   })
 
   it('загружает файл и показывает итог', async () => {

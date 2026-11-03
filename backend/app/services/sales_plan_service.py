@@ -21,6 +21,7 @@ from app.models.auth import (
     ROLE_PURCHASE_DIRECTOR,
     ROLE_SALES_MANAGER,
     User,
+    is_admin,
 )
 from app.models.counterparties import Counterparty
 from app.models.planning import (
@@ -84,8 +85,9 @@ def _check_view(user: User, plan: SalesPlan) -> None:
 
 
 def _check_commercial_director(user: User) -> None:
-    if user.role != ROLE_COMMERCIAL_DIRECTOR:
-        raise PlanError("Действие доступно только коммерческому директору", status_code=403)
+    """Действия коммерческого директора; администратор может всё то же самое."""
+    if user.role != ROLE_COMMERCIAL_DIRECTOR and not is_admin(user):
+        raise PlanError("Действие доступно коммерческому директору", status_code=403)
 
 
 def _check_clients(db: Session, client_ids: set[uuid.UUID]) -> None:
@@ -161,10 +163,10 @@ def get_plan(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
 
 
 def create_plan(db: Session, user: User, payload: SalesPlanCreate) -> SalesPlanOut:
-    """Менеджер создаёт свой план; коммерческий директор — на любого менеджера."""
+    """Менеджер создаёт свой план; коммерческий директор или админ — на любого."""
     if user.role == ROLE_SALES_MANAGER:
         manager_id = user.id
-    elif user.role == ROLE_COMMERCIAL_DIRECTOR:
+    elif user.role == ROLE_COMMERCIAL_DIRECTOR or is_admin(user):
         if payload.manager_id is None:
             raise PlanError("Укажите менеджера, на которого создаётся план")
         manager_id = payload.manager_id
@@ -212,7 +214,7 @@ def update_items(
     if is_owner:
         if plan.status not in EDITABLE_BY_OWNER:
             raise PlanError("План на проверке или утверждён — правки недоступны", status_code=409)
-    elif user.role != ROLE_COMMERCIAL_DIRECTOR:
+    elif user.role != ROLE_COMMERCIAL_DIRECTOR and not is_admin(user):
         raise PlanError("Правка плана вам недоступна", status_code=403)
 
     check_months_editable(plan.year, {item.month for item in items})
@@ -275,9 +277,10 @@ def send_to_fill(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
 
 
 def submit(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
-    """Менеджер отправляет свой план на проверку."""
+    """Менеджер отправляет свой план на проверку; администратор — любой."""
     plan = _require(db, plan_id)
-    if not (user.role == ROLE_SALES_MANAGER and plan.manager_id == user.id):
+    is_owner = user.role == ROLE_SALES_MANAGER and plan.manager_id == user.id
+    if not (is_owner or is_admin(user)):
         raise PlanError("Отправить план может только его менеджер", status_code=403)
     if plan.status not in EDITABLE_BY_OWNER:
         raise PlanError("План уже на проверке или утверждён", status_code=409)
@@ -324,10 +327,10 @@ def reject(db: Session, user: User, plan_id: uuid.UUID, reason: str) -> SalesPla
 
 
 def delete_plan(db: Session, user: User, plan_id: uuid.UUID) -> None:
-    """Удаление черновика: коммерческий директор или владелец плана."""
+    """Удаление черновика: коммерческий директор, администратор или владелец."""
     plan = _require(db, plan_id)
     is_owner = user.role == ROLE_SALES_MANAGER and plan.manager_id == user.id
-    if not (is_owner or user.role == ROLE_COMMERCIAL_DIRECTOR):
+    if not (is_owner or user.role == ROLE_COMMERCIAL_DIRECTOR or is_admin(user)):
         raise PlanError("Удалить план вам недоступно", status_code=403)
     if plan.status not in EDITABLE_BY_OWNER:
         raise PlanError("Удалить можно только черновик или план на заполнении", status_code=409)

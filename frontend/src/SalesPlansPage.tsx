@@ -13,6 +13,7 @@ import {
   fetchSalesPlans,
   fetchUsers,
   formatQuantity,
+  isAdmin,
   MONTH_SHORT,
   MONTH_TITLES,
   type Product,
@@ -218,6 +219,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
 
   const isCommercialDirector = user.role === 'commercial_director'
   const isExecutive = user.role === 'executive_director'
+  const hasAdmin = isAdmin(user)
   const yearPlans = plans.filter((plan) => plan.year === year)
   const plan = yearPlans.find((row) => row.id === selectedId) ?? null
   const isOwner = plan !== null && plan.manager_id === user.id
@@ -245,7 +247,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
     fetchCounterparties({ role: 'customer', includeInactive: true })
       .then(setClients)
       .catch(() => setClients([]))
-    if (isCommercialDirector) {
+    if (isCommercialDirector || hasAdmin) {
       fetchUsers('sales_manager')
         .then((rows) => {
           setManagers(rows)
@@ -253,7 +255,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
         })
         .catch(() => setManagers([]))
     }
-  }, [reload, isCommercialDirector])
+  }, [reload, isCommercialDirector, hasAdmin])
 
   useEffect(() => {
     const next = plan ? draftsFromPlan(plan) : {}
@@ -375,24 +377,25 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
     editable.reduce((sum, month) => sum + Number(normalize(row.months[month] ?? '') || 0), 0)
 
   const planClients = Object.keys(drafts)
+  const mayManage = isCommercialDirector || hasAdmin
   const canEdit =
     plan !== null &&
     plan.status !== 'approved' &&
-    (isCommercialDirector || (isOwner && ['draft', 'filling'].includes(plan.status)))
-  const canSubmit = plan !== null && isOwner && ['draft', 'filling'].includes(plan.status)
-  const canApprove = plan !== null && isCommercialDirector && plan.status === 'on_review'
+    (mayManage || (isOwner && ['draft', 'filling'].includes(plan.status)))
+  const canSubmit =
+    plan !== null && (isOwner || hasAdmin) && ['draft', 'filling'].includes(plan.status)
+  const canApprove = plan !== null && mayManage && plan.status === 'on_review'
   const canDelete =
-    plan !== null && ['draft', 'filling'].includes(plan.status) && (isCommercialDirector || isOwner)
+    plan !== null && ['draft', 'filling'].includes(plan.status) && (mayManage || isOwner)
 
   const openCorrection =
     corrections.find((row) => row.status === 'draft' || row.status === 'on_review') ?? null
-  const canProposeCorrection = isOwner || isCommercialDirector || isExecutive
+  const canProposeCorrection = isOwner || mayManage || isExecutive
   const canCreateCorrection =
     plan !== null && canProposeCorrection && plan.status === 'approved' && openCorrection === null
   const correctionEditable =
     correction !== null && correction.status === 'draft' && canProposeCorrection
-  const canReviewCorrection =
-    correction !== null && correction.status === 'on_review' && isCommercialDirector
+  const canReviewCorrection = correction !== null && correction.status === 'on_review' && mayManage
 
   const correctionEditableMonths = plan?.editable_months ?? []
   const correctionClients = Object.keys(correctionDrafts)
@@ -566,7 +569,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
             →
           </button>
           <span className="sep" />
-          {isCommercialDirector ? (
+          {mayManage ? (
             <>
               <select
                 aria-label="Менеджер"
@@ -663,7 +666,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
                 Отправить на проверку
               </button>
             ) : null}
-            {isCommercialDirector && plan.status === 'draft' ? (
+            {mayManage && plan.status === 'draft' ? (
               <button
                 type="button"
                 disabled={busy}
@@ -711,7 +714,6 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
                 Удалить
               </button>
             ) : null}
-            {isExecutive ? <span className="status-chip">Только просмотр</span> : null}
           </div>
 
           {plan.notes ? <p className="hint">Примечания: {plan.notes}</p> : null}
@@ -733,9 +735,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
                     disabled={busy}
                     onClick={startCorrection}
                   >
-                    {isCommercialDirector
-                      ? 'Исправить утверждённый план'
-                      : 'Предложить корректировку'}
+                    {mayManage ? 'Исправить утверждённый план' : 'Предложить корректировку'}
                   </button>
                 ) : null}
               </div>

@@ -15,6 +15,7 @@ import {
   fetchPurchasePlans,
   fetchRate,
   formatMoney,
+  isAdmin,
   type PaymentCategory,
   type Product,
   type PurchasePlan,
@@ -647,10 +648,10 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
   // префикс другой — иначе React получает два элемента с одинаковым ключом.
   const keyCounter = useRef(1)
   const nextKey = (prefix: string) => `${prefix}new${keyCounter.current++}`
-  const mayEdit = !user || ITEM_IMPORT_ROLES.includes(user.role)
+  const mayEdit = !user || isAdmin(user) || ITEM_IMPORT_ROLES.includes(user.role)
   // Позиции из 1С и строку плана грузят те же роли, что правят карточку.
-  // Отмена растаможки — директору по закупкам (как решено в контракте, §4).
-  const mayCancelCustoms = !user || user.role === 'purchase_director'
+  // Отмена растаможки — директору по закупкам и администратору (контракт, §4).
+  const mayCancelCustoms = !user || isAdmin(user) || user.role === 'purchase_director'
 
   const reload = useCallback(async () => {
     const first = `${month}-01`

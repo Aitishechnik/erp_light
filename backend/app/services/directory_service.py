@@ -1,7 +1,8 @@
 """Справочники: контрагенты и номенклатура — ручное заведение и правка.
 
-Читать справочники может любой вошедший, менять — продажи, коммерция и закупки.
-Основное наполнение приходит загрузкой выгрузок 1С (см. import_service).
+Читать справочники может любой вошедший, менять — продажи, коммерция, закупки
+и исполнительный директор (администратор). Основное наполнение приходит
+загрузкой выгрузок 1С (см. import_service).
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.models.auth import (
     ROLE_COMMERCIAL_DIRECTOR,
+    ROLE_EXECUTIVE_DIRECTOR,
     ROLE_PURCHASE_DIRECTOR,
     ROLE_SALES_MANAGER,
     User,
@@ -23,8 +25,13 @@ from app.models.domain import PRODUCT_KINDS, Product
 from app.schemas.counterparties import CounterpartyIn, CounterpartyUpdate
 from app.schemas.domain import ProductIn, ProductUpdate
 
-# Кто заводит и правит справочники.
-DIRECTORY_WRITE_ROLES = (ROLE_SALES_MANAGER, ROLE_COMMERCIAL_DIRECTOR, ROLE_PURCHASE_DIRECTOR)
+# Кто заводит и правит справочники. Исполнительный директор — как администратор.
+DIRECTORY_WRITE_ROLES = (
+    ROLE_SALES_MANAGER,
+    ROLE_COMMERCIAL_DIRECTOR,
+    ROLE_PURCHASE_DIRECTOR,
+    ROLE_EXECUTIVE_DIRECTOR,
+)
 
 
 class DirectoryError(Exception):
