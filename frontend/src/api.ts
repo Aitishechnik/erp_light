@@ -623,7 +623,7 @@ export const SALES_PLAN_ROLES: Role[] = [
   'import_manager',
 ]
 
-async function requestRaw(url: string, init?: RequestInit): Promise<Response> {
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const isFormData = init?.body instanceof FormData
   const response = await fetch(url, {
     credentials: 'same-origin',
@@ -640,31 +640,8 @@ async function requestRaw(url: string, init?: RequestInit): Promise<Response> {
     }
     throw new ApiError(detail, response.status)
   }
-  return response
-}
-
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await requestRaw(url, init)
   if (response.status === 204) return undefined as T
   return (await response.json()) as T
-}
-
-/** Порция строк таблицы и сколько всего нашлось — для «Показать ещё». */
-export type Page<T> = { items: T[]; total: number }
-
-/**
- * Ответ списка с общим числом в заголовке ``X-Total-Count``.
- *
- * Тело остаётся обычным массивом: списки выбора в карточках получают те же
- * данные, что и раньше. Нет заголовка (старый ответ, мок в тестах) — считаем,
- * что показано всё.
- */
-async function requestPage<T>(url: string, init?: RequestInit): Promise<Page<T>> {
-  const response = await requestRaw(url, init)
-  const items = (await response.json()) as T[]
-  const header = response.headers.get('X-Total-Count')
-  const total = header === null ? items.length : Number(header)
-  return { items, total: Number.isFinite(total) ? total : items.length }
 }
 
 export function fetchStock(signal?: AbortSignal): Promise<StockRow[]> {
@@ -756,31 +733,6 @@ export function fetchPlanningProducts(): Promise<Product[]> {
   )
 }
 
-/**
- * Порция таблицы номенклатуры с поиском на сервере.
- *
- * `limit` и `offset` — сколько строк показать и сколько пропустить; без них
- * сервер отдаёт всё (так работает список выбора в планах).
- */
-export function fetchProductsPage(options?: {
-  search?: string
-  kinds?: readonly string[]
-  includeInactive?: boolean
-  limit?: number
-  offset?: number
-}): Promise<Page<Product>> {
-  const params = new URLSearchParams()
-  if (options?.kinds?.length) params.set('kinds', options.kinds.join(','))
-  // У номенклатуры сервер по умолчанию отдаёт и отключённые — говорим явно.
-  params.set('include_inactive', options?.includeInactive ? 'true' : 'false')
-  const search = options?.search?.trim()
-  if (search) params.set('search', search)
-  if (options?.limit != null) params.set('limit', String(options.limit))
-  if (options?.offset) params.set('offset', String(options.offset))
-  const query = params.toString()
-  return requestPage<Product>(`/api/v1/products${query ? `?${query}` : ''}`)
-}
-
 /** Одна позиция номенклатуры: объект из сообщения открывается по ссылке. */
 export function fetchProduct(productId: string): Promise<Product> {
   return request<Product>(`/api/v1/products/${productId}`)
@@ -819,25 +771,6 @@ export function createCounterparty(payload: CounterpartyIn): Promise<Counterpart
     method: 'POST',
     body: JSON.stringify(payload),
   })
-}
-
-/** Порция таблицы контрагентов с поиском на сервере. */
-export function fetchCounterpartiesPage(options?: {
-  role?: CounterpartyRole
-  includeInactive?: boolean
-  search?: string
-  limit?: number
-  offset?: number
-}): Promise<Page<Counterparty>> {
-  const params = new URLSearchParams()
-  if (options?.role) params.set('role', options.role)
-  if (options?.includeInactive) params.set('include_inactive', 'true')
-  const search = options?.search?.trim()
-  if (search) params.set('search', search)
-  if (options?.limit != null) params.set('limit', String(options.limit))
-  if (options?.offset) params.set('offset', String(options.offset))
-  const query = params.toString()
-  return requestPage<Counterparty>(`/api/v1/counterparties${query ? `?${query}` : ''}`)
 }
 
 /** Один контрагент: объект из сообщения открывается по ссылке. */
@@ -1329,16 +1262,10 @@ export function cleanupJournal(year: number): Promise<{ deleted: number }> {
 }
 
 /** Журнал действий: директор видит всё, остальные — свои действия. */
-/** Журнал действий; ``before`` — курсор «старше этой даты» для «показать ещё». */
-export function fetchJournal(params?: {
-  limit?: number
-  action?: string
-  before?: string
-}): Promise<AuditEvent[]> {
+export function fetchJournal(params?: { limit?: number; action?: string }): Promise<AuditEvent[]> {
   const query = new URLSearchParams()
   if (params?.limit) query.set('limit', String(params.limit))
   if (params?.action) query.set('action', params.action)
-  if (params?.before) query.set('before', params.before)
   const suffix = query.toString() ? `?${query.toString()}` : ''
   return request<AuditEvent[]>(`/api/v1/audit${suffix}`)
 }

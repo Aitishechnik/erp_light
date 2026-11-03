@@ -60,9 +60,6 @@ function targetValue(year: number, month: number): string {
   return `${year}-${String(month).padStart(2, '0')}`
 }
 
-/** Сколько строк рисуем разом: дальше — фильтр или поиск. */
-const VISIBLE_LIMIT = 150
-
 /** Исполнение плана: процент считаем только там, где план есть. */
 function share(fact: string, plan: string): string {
   const planned = Number(plan)
@@ -179,8 +176,6 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
   })
   const [decisionComment, setDecisionComment] = useState('')
   const [transferResult, setTransferResult] = useState<TransferDrafts | null>(null)
-  /** Сколько строк таблицы уже показано: «Показать ещё» добавляет по VISIBLE_LIMIT. */
-  const [limit, setLimit] = useState(VISIBLE_LIMIT)
 
   const mayMatch = MATCH_ROLES.includes(user.role)
   const mayReason = REASON_ROLES.includes(user.role)
@@ -253,16 +248,6 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
           : true,
       )
   }, [result, onlyDeviation, onlyNoReason, manager, search])
-
-  // Сменили фильтр — снова показываем первую порцию, а не всё сразу.
-  const filtersKey = `${year}-${month}-${manager}-${search}-${onlyDeviation}-${onlyNoReason}`
-  const [limitKey, setLimitKey] = useState(filtersKey)
-  if (limitKey !== filtersKey) {
-    setLimitKey(filtersKey)
-    setLimit(VISIBLE_LIMIT)
-  }
-
-  const shown = visible.slice(0, limit)
 
   const byManager = useMemo(() => {
     const map = new Map<string, { name: string; lines: number; extra: number; short: number }>()
@@ -800,7 +785,7 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
                       </td>
                     </tr>
                   ) : (
-                    shown.map((row) => {
+                    visible.map((row) => {
                       const key = `${row.client_id}:${row.product_id}`
                       return (
                         <Fragment key={key}>
@@ -912,21 +897,6 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
                   )}
                 </tbody>
               </table>
-            </div>
-          ) : null}
-
-          {visible.length > limit ? (
-            <div className="table-more">
-              <span className="hint" data-testid="month-limit">
-                Показано {shown.length} из {visible.length} строк
-              </span>
-              <button
-                type="button"
-                className="mini"
-                onClick={() => setLimit((value) => value + VISIBLE_LIMIT)}
-              >
-                Показать ещё {VISIBLE_LIMIT}
-              </button>
             </div>
           ) : null}
         </>

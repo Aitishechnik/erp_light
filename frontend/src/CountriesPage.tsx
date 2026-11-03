@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useEffect, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   type Country,
   createCountry,
@@ -9,8 +9,13 @@ import {
   updateCountry,
 } from './api'
 import { PageHelp } from './PageHelp'
+import { SortableTh } from './SortableTh'
+import { type SortState, sortRows, toggleSort } from './tableSort'
 
 const EMPTY_FORM = { name: '', delivery_days: '30' }
+
+/** По умолчанию — по названию страны. */
+const DEFAULT_SORT: SortState = { column: 'name', direction: 'asc' }
 
 function parseDays(raw: string): number | null {
   const value = Number(raw)
@@ -20,6 +25,7 @@ function parseDays(raw: string): number | null {
 export function CountriesPage({ user, focusId }: { user: SessionUser; focusId?: string }) {
   const [rows, setRows] = useState<Country[]>([])
   const [search, setSearch] = useState('')
+  const [sort, setSort] = useState<SortState>(DEFAULT_SORT)
   const [showInactive, setShowInactive] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [editing, setEditing] = useState<string | null>(null)
@@ -111,6 +117,15 @@ export function CountriesPage({ user, focusId }: { user: SessionUser; focusId?: 
 
   const needle = search.trim().toLowerCase()
   const filtered = rows.filter((row) => (needle ? row.name.toLowerCase().includes(needle) : true))
+  const sorted = useMemo(
+    () =>
+      sortRows(filtered, sort, (row, column) => {
+        if (column === 'days') return row.delivery_days
+        if (column === 'state') return row.is_active
+        return row.name
+      }),
+    [filtered, sort],
+  )
 
   return (
     <section>
@@ -180,11 +195,25 @@ export function CountriesPage({ user, focusId }: { user: SessionUser; focusId?: 
       <table data-testid="countries-table">
         <thead>
           <tr>
-            <th scope="col">Название</th>
-            <th scope="col" className="num">
-              Срок доставки
-            </th>
-            <th scope="col">Состояние</th>
+            <SortableTh
+              column="name"
+              title="Название"
+              sort={sort}
+              onSort={(column) => setSort((current) => toggleSort(current, column))}
+            />
+            <SortableTh
+              column="days"
+              title="Срок доставки"
+              sort={sort}
+              onSort={(column) => setSort((current) => toggleSort(current, column))}
+              className="num"
+            />
+            <SortableTh
+              column="state"
+              title="Состояние"
+              sort={sort}
+              onSort={(column) => setSort((current) => toggleSort(current, column))}
+            />
             {canEdit ? <th scope="col" aria-label="Действия" /> : null}
           </tr>
         </thead>
@@ -196,7 +225,7 @@ export function CountriesPage({ user, focusId }: { user: SessionUser; focusId?: 
               </td>
             </tr>
           ) : (
-            filtered.map((row) => {
+            sorted.map((row) => {
               const isEditing = editing === row.id
               return (
                 <tr

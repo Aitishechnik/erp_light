@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Country, SessionUser } from './api'
@@ -60,6 +60,30 @@ function postBodies(): string[] {
 }
 
 describe('CountriesPage', () => {
+  it('сортирует по сроку доставки по возрастанию и убыванию', async () => {
+    const user = userEvent.setup()
+    mockApi(routes())
+    render(<CountriesPage user={DIRECTOR} />)
+
+    const table = await screen.findByTestId('countries-table')
+    // По умолчанию — по названию: Китай, Таиланд.
+    const names = () =>
+      within(table)
+        .getAllByRole('row')
+        .slice(1)
+        .map((row) => within(row).getAllByRole('cell')[0]?.textContent ?? '')
+    expect(names()).toEqual(['Китай', 'Таиланд'])
+
+    const header = screen.getByRole('columnheader', { name: 'Срок доставки' })
+    await user.click(within(header).getByRole('button'))
+    expect(header).toHaveAttribute('aria-sort', 'ascending')
+    expect(names()).toEqual(['Китай', 'Таиланд'])
+
+    await user.click(within(header).getByRole('button'))
+    expect(header).toHaveAttribute('aria-sort', 'descending')
+    expect(names()).toEqual(['Таиланд', 'Китай'])
+  })
+
   it('директор по закупкам заводит страну со сроком доставки', async () => {
     const user = userEvent.setup()
     mockApi(routes({ 'POST /api/v1/countries': { body: COUNTRIES[0] } }))
@@ -88,10 +112,8 @@ describe('CountriesPage', () => {
     )
     render(<CountriesPage user={DIRECTOR} />)
 
-    await screen.findByTestId('countries-table')
-    const editButton = screen.getAllByRole('button', { name: 'Изменить' })[0]
-    if (!editButton) throw new Error('нет кнопки «Изменить»')
-    await user.click(editButton)
+    const row = await screen.findByTestId('country-row-th-1')
+    await user.click(within(row).getByRole('button', { name: 'Изменить' }))
     await user.clear(screen.getByLabelText('Срок доставки Таиланд'))
     await user.type(screen.getByLabelText('Срок доставки Таиланд'), '100')
     await user.click(screen.getByRole('button', { name: 'Сохранить' }))
@@ -100,9 +122,7 @@ describe('CountriesPage', () => {
       expect(patchBodies().some((body) => body.includes('"delivery_days":100'))).toBe(true)
     })
 
-    const toggleButton = screen.getAllByRole('button', { name: 'Отключить' })[0]
-    if (!toggleButton) throw new Error('нет кнопки «Отключить»')
-    await user.click(toggleButton)
+    await user.click(within(row).getByRole('button', { name: 'Отключить' }))
     await waitFor(() => {
       expect(patchBodies().some((body) => body.includes('"is_active":false'))).toBe(true)
     })

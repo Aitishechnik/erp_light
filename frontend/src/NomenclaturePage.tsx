@@ -1,9 +1,9 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type FormEvent, memo, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   createProduct,
   errorMessage,
   fetchProduct,
-  fetchProductsPage,
+  fetchProducts,
   PRODUCT_KIND_FILTER_TITLES,
   PRODUCT_KIND_LABELS,
   PRODUCT_KINDS,
@@ -11,63 +11,76 @@ import {
   updateProduct,
 } from './api'
 import { PageHelp } from './PageHelp'
+import { SortableTh } from './SortableTh'
+import { type SortState, sortRows, toggleSort } from './tableSort'
 
 const EMPTY_FORM = { code: '', name: '', kind: 'material', unit: 'шт' }
 
-/** Сколько строк просим за раз: кнопка «Показать ещё» добавляет столько же. */
-const PAGE_SIZE = 100
+/** Сортировка по умолчанию — как в 1С: по коду позиции. */
+const DEFAULT_SORT: SortState = { column: 'code', direction: 'asc' }
 
-/** Поиск с задержкой: каждый символ не должен дёргать сервер. */
-const SEARCH_DELAY_MS = 300
+/**
+ * Строка таблицы вынесена в memo-компонент: при сортировке React двигает
+ * готовые строки, а не перерисовывает полторы тысячи строк заново.
+ */
+const ProductRow = memo(function ProductRow({
+  product,
+  busy,
+  focused,
+  onToggle,
+}: {
+  product: Product
+  busy: boolean
+  focused: boolean
+  onToggle: (product: Product) => void
+}) {
+  return (
+    <tr className={focused ? 'focus-row' : undefined}>
+      <td>{product.code}</td>
+      <td>{product.name}</td>
+      <td>{PRODUCT_KIND_LABELS[product.kind] ?? product.kind}</td>
+      <td>{product.unit}</td>
+      <td>
+        <span className={product.is_active ? 'badge status-approved' : 'badge'}>
+          {product.is_active ? 'Активна' : 'Отключена'}
+        </span>
+      </td>
+      <td>
+        <button type="button" className="mini" disabled={busy} onClick={() => onToggle(product)}>
+          {product.is_active ? 'Отключить' : 'Включить'}
+        </button>
+      </td>
+    </tr>
+  )
+})
 
 export function NomenclaturePage({ focusId }: { focusId?: string }) {
   const [rows, setRows] = useState<Product[]>([])
-  const [total, setTotal] = useState(0)
   const [form, setForm] = useState(EMPTY_FORM)
   const [kindFilter, setKindFilter] = useState('')
   const [search, setSearch] = useState('')
-  const [needle, setNeedle] = useState('')
   const [showInactive, setShowInactive] = useState(false)
+  const [sort, setSort] = useState<SortState>(DEFAULT_SORT)
   const [focusRow, setFocusRow] = useState<Product | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
-  // Ответ на устаревший запрос не должен затирать свежий список.
-  const requestId = useRef(0)
 
-  useEffect(() => {
-    const timer = setTimeout(() => setNeedle(search), SEARCH_DELAY_MS)
-    return () => clearTimeout(timer)
-  }, [search])
-
-  const loadFirstPage = useCallback(async () => {
-    const id = ++requestId.current
-    setLoading(true)
+  const reload = useCallback(async () => {
     try {
-      const page = await fetchProductsPage({
-        search: needle,
-        kinds: kindFilter ? [kindFilter] : undefined,
-        includeInactive: showInactive,
-        limit: PAGE_SIZE,
-      })
-      if (id !== requestId.current) return
-      setRows(page.items)
-      setTotal(page.total)
-      setError(null)
+      setRows(await fetchProducts())
     } catch (err) {
-      if (id !== requestId.current) return
       setError(errorMessage(err))
     } finally {
-      if (id === requestId.current) setLoading(false)
+      setLoading(false)
     }
-  }, [needle, kindFilter, showInactive])
+  }, [])
 
   useEffect(() => {
-    void loadFirstPage()
-  }, [loadFirstPage])
+    void reload()
+  }, [reload])
 
-  // Объект из сообщения тянем отдельно: он может лежать и за первой сотней.
+  // Объект из сообщения тянем отдельно: он может быть отключён и скрыт фильтром.
   useEffect(() => {
     if (!focusId) {
       setFocusRow(null)
@@ -86,34 +99,6 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
     }
   }, [focusId])
 
-  /** Строка из сообщения показывается первой и не дублируется в порции. */
-  const visible = useMemo(() => {
-    if (!focusRow) return rows
-    return [focusRow, ...rows.filter((row) => row.id !== focusRow.id)]
-  }, [rows, focusRow])
-
-  const loadMore = async () => {
-    setLoadingMore(true)
-    try {
-      const page = await fetchProductsPage({
-        search: needle,
-        kinds: kindFilter ? [kindFilter] : undefined,
-        includeInactive: showInactive,
-        limit: PAGE_SIZE,
-        offset: rows.length,
-      })
-      setRows((current) => {
-        const seen = new Set(current.map((row) => row.id))
-        return [...current, ...page.items.filter((row) => !seen.has(row.id))]
-      })
-      setTotal(page.total)
-    } catch (err) {
-      setError(errorMessage(err))
-    } finally {
-      setLoadingMore(false)
-    }
-  }
-
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setBusy(true)
@@ -121,7 +106,7 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
     try {
       await createProduct(form)
       setForm({ ...EMPTY_FORM, kind: form.kind, unit: form.unit })
-      await loadFirstPage()
+      await reload()
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -129,25 +114,51 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
     }
   }
 
-  const toggle = async (product: Product) => {
+  const toggle = useCallback(async (product: Product) => {
     setBusy(true)
     setError(null)
     try {
       const updated = await updateProduct(product.id, { is_active: !product.is_active })
-      const stillShown = showInactive || updated.is_active
-      setRows((current) =>
-        stillShown
-          ? current.map((row) => (row.id === updated.id ? updated : row))
-          : current.filter((row) => row.id !== updated.id),
-      )
+      setRows((current) => current.map((row) => (row.id === updated.id ? updated : row)))
       setFocusRow((current) => (current?.id === updated.id ? updated : current))
-      if (!stillShown) setTotal((value) => Math.max(0, value - 1))
     } catch (err) {
       setError(errorMessage(err))
     } finally {
       setBusy(false)
     }
-  }
+  }, [])
+
+  const needle = search.trim().toLowerCase()
+  const filtered = useMemo(
+    () =>
+      rows
+        .filter((row) => (kindFilter ? row.kind === kindFilter : true))
+        .filter((row) => (showInactive ? true : row.is_active))
+        .filter((row) =>
+          needle
+            ? row.name.toLowerCase().includes(needle) || row.code.toLowerCase().includes(needle)
+            : true,
+        ),
+    [rows, kindFilter, showInactive, needle],
+  )
+
+  const sorted = useMemo(
+    () =>
+      sortRows(filtered, sort, (row, column) => {
+        if (column === 'kind') return PRODUCT_KIND_LABELS[row.kind] ?? row.kind
+        if (column === 'state') return row.is_active
+        return row[column as 'code' | 'name' | 'unit']
+      }),
+    [filtered, sort],
+  )
+
+  // Объект из сообщения не должен теряться за фильтром: открываем его в списке.
+  useEffect(() => {
+    if (!focusRow) return
+    setSearch('')
+    setKindFilter('')
+    if (!focusRow.is_active) setShowInactive(true)
+  }, [focusRow])
 
   useEffect(() => {
     if (!focusRow) return
@@ -159,6 +170,13 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
     })
     return () => cancelAnimationFrame(frame)
   }, [focusRow])
+
+  const filtersActive = search !== '' || kindFilter !== '' || showInactive
+  const resetFilters = () => {
+    setSearch('')
+    setKindFilter('')
+    setShowInactive(false)
+  }
 
   return (
     <section>
@@ -216,7 +234,7 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
         </button>
       </form>
 
-      <div className="toolbar">
+      <div className="toolbar filter-bar">
         <select
           aria-label="Фильтр по виду"
           value={kindFilter}
@@ -243,73 +261,83 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
           />
           показывать отключённые
         </label>
-        <span className="sep" />
-        <span className="hint">
-          Найдено: <strong data-testid="products-count">{total}</strong>
-        </span>
       </div>
 
-      <table data-testid="products-table">
-        <thead>
-          <tr>
-            <th scope="col">Код</th>
-            <th scope="col">Наименование</th>
-            <th scope="col">Вид</th>
-            <th scope="col">Ед.</th>
-            <th scope="col">Состояние</th>
-            <th scope="col" aria-label="Действия" />
-          </tr>
-        </thead>
-        <tbody>
-          {visible.length === 0 ? (
+      <div className="filter-summary">
+        <span className="filter-count" data-testid="products-filter-count">
+          Найдено: <strong data-testid="products-count">{filtered.length}</strong>
+          {filtered.length !== rows.length ? (
+            <span className="filter-total"> из {rows.length}</span>
+          ) : null}
+        </span>
+        <button
+          type="button"
+          className="mini filter-reset"
+          onClick={resetFilters}
+          disabled={!filtersActive}
+        >
+          Сбросить
+        </button>
+      </div>
+
+      <div className="table-scroll">
+        <table data-testid="products-table">
+          <thead>
             <tr>
-              <td colSpan={6} className="hint" data-testid="products-empty">
-                {loading ? 'Загрузка…' : 'Номенклатуры не найдено.'}
-              </td>
+              <SortableTh
+                column="code"
+                title="Код"
+                sort={sort}
+                onSort={(column) => setSort((current) => toggleSort(current, column))}
+              />
+              <SortableTh
+                column="name"
+                title="Наименование"
+                sort={sort}
+                onSort={(column) => setSort((current) => toggleSort(current, column))}
+              />
+              <SortableTh
+                column="kind"
+                title="Вид"
+                sort={sort}
+                onSort={(column) => setSort((current) => toggleSort(current, column))}
+              />
+              <SortableTh
+                column="unit"
+                title="Ед."
+                sort={sort}
+                onSort={(column) => setSort((current) => toggleSort(current, column))}
+              />
+              <SortableTh
+                column="state"
+                title="Состояние"
+                sort={sort}
+                onSort={(column) => setSort((current) => toggleSort(current, column))}
+              />
+              <th scope="col" aria-label="Действия" />
             </tr>
-          ) : (
-            visible.map((product) => (
-              <tr key={product.id} className={product.id === focusId ? 'focus-row' : undefined}>
-                <td>{product.code}</td>
-                <td>{product.name}</td>
-                <td>{PRODUCT_KIND_LABELS[product.kind] ?? product.kind}</td>
-                <td>{product.unit}</td>
-                <td>
-                  <span className={product.is_active ? 'badge status-approved' : 'badge'}>
-                    {product.is_active ? 'Активна' : 'Отключена'}
-                  </span>
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className="mini"
-                    disabled={busy}
-                    onClick={() => toggle(product)}
-                  >
-                    {product.is_active ? 'Отключить' : 'Включить'}
-                  </button>
+          </thead>
+          <tbody>
+            {sorted.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="hint" data-testid="products-empty">
+                  {loading ? 'Загрузка…' : 'Номенклатуры не найдено.'}
                 </td>
               </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-
-      {!loading && rows.length < total ? (
-        <div className="table-more">
-          <span className="hint" data-testid="products-shown">
-            Показано {rows.length} из {total}
-          </span>
-          <button
-            type="button"
-            className="mini"
-            onClick={() => void loadMore()}
-            disabled={loadingMore}
-          >
-            {loadingMore ? 'Загрузка…' : `Показать ещё ${PAGE_SIZE}`}
-          </button>
-        </div>
-      ) : null}
+            ) : (
+              sorted.map((product) => (
+                <ProductRow
+                  key={product.id}
+                  product={product}
+                  busy={busy}
+                  focused={product.id === focusId}
+                  onToggle={toggle}
+                />
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </section>
   )
 }

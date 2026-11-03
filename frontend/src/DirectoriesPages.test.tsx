@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Counterparty, ImportKind, ImportSession, Product, Role, SessionUser } from './api'
-import { type MockResponse, mockApi } from './apiMock'
+import { mockApi } from './apiMock'
 import { CounterpartiesPage } from './CounterpartiesPage'
 import { ImportsPage } from './ImportsPage'
 import { NomenclaturePage } from './NomenclaturePage'
@@ -122,70 +122,18 @@ function bodies(): string[] {
   )
 }
 
-/** Параметры запроса: серверные фильтры и порции видны в адресе. */
-function query(url: string): URLSearchParams {
-  return new URL(url, 'http://localhost').searchParams
-}
-
-/**
- * Сервер номенклатуры: те же правила, что у настоящего API, — поиск, вид,
- * отключённые и порция с общим числом в заголовке.
- */
-function productsServer(rows: Product[]) {
-  return (url: string): MockResponse => {
-    const params = query(url)
-    const kinds = params.get('kinds')?.split(',') ?? []
-    const includeInactive = params.get('include_inactive') === 'true'
-    const search = (params.get('search') ?? '').toLowerCase()
-    const limit = Number(params.get('limit') ?? rows.length)
-    const offset = Number(params.get('offset') ?? 0)
-    const found = rows
-      .filter((row) => includeInactive || row.is_active)
-      .filter((row) => kinds.length === 0 || kinds.includes(row.kind))
-      .filter(
-        (row) =>
-          search === '' ||
-          row.name.toLowerCase().includes(search) ||
-          row.code.toLowerCase().includes(search),
-      )
-      .sort((left, right) => left.code.localeCompare(right.code))
-    return {
-      body: found.slice(offset, offset + limit),
-      headers: { 'X-Total-Count': String(found.length) },
-    }
-  }
-}
-
-/** Сервер контрагентов: роль, отключённые, поиск и порция. */
-function counterpartiesServer(rows: Counterparty[]) {
-  return (url: string): MockResponse => {
-    const params = query(url)
-    const role = params.get('role')
-    const includeInactive = params.get('include_inactive') === 'true'
-    const search = (params.get('search') ?? '').toLowerCase()
-    const limit = Number(params.get('limit') ?? rows.length)
-    const offset = Number(params.get('offset') ?? 0)
-    const found = rows
-      .filter((row) => includeInactive || row.is_active)
-      .filter((row) => {
-        if (role === 'customer') return row.is_customer
-        if (role === 'local_supplier') return row.is_local_supplier
-        if (role === 'import_supplier') return row.is_import_supplier
-        return true
-      })
-      .filter((row) => search === '' || row.name.toLowerCase().includes(search))
-      .sort((left, right) => left.name.localeCompare(right.name))
-    return {
-      body: found.slice(offset, offset + limit),
-      headers: { 'X-Total-Count': String(found.length) },
-    }
-  }
+/** Тексты первой колонки таблицы: удобно проверять порядок строк. */
+function firstColumn(table: HTMLElement): string[] {
+  return within(table)
+    .getAllByRole('row')
+    .slice(1)
+    .map((row) => within(row).getAllByRole('cell')[0]?.textContent ?? '')
 }
 
 describe('CounterpartiesPage', () => {
   it('показывает роли контрагента; отключённые скрыты до запроса', async () => {
     const user = userEvent.setup()
-    mockApi({ '/api/v1/counterparties': { handler: counterpartiesServer(COUNTERPARTIES) } })
+    mockApi({ '/api/v1/counterparties': { body: COUNTERPARTIES } })
     render(<CounterpartiesPage />)
 
     expect(await screen.findByText('ООО Ромашка')).toBeInTheDocument()
@@ -193,7 +141,7 @@ describe('CounterpartiesPage', () => {
     expect(screen.queryByText('Комус')).not.toBeInTheDocument()
 
     await user.click(screen.getByLabelText('показывать отключённых'))
-    await waitFor(() => expect(screen.getByTestId('counterparties-count')).toHaveTextContent('2'))
+    expect(screen.getByTestId('counterparties-count')).toHaveTextContent('2')
     expect(screen.getByText('Покупатель, Локальный поставщик')).toBeInTheDocument()
   })
 
@@ -211,90 +159,66 @@ describe('CounterpartiesPage', () => {
       manager_id: null,
       manager_name: null,
     }
-    const many: Counterparty[] = Array.from({ length: 120 }, (_, index) => ({
+    const many: Counterparty[] = Array.from({ length: 20 }, (_, index) => ({
       ...base,
       id: `c-${index}`,
       name: `Клиент ${index}`,
     }))
     const target: Counterparty = { ...base, id: 'target-id', name: 'ООО Поздний' }
-    many.push(target)
     mockApi({
       '/api/v1/counterparties/': { body: target },
-      '/api/v1/counterparties': { handler: counterpartiesServer(many) },
+      '/api/v1/counterparties': { body: [...many, target] },
     })
     render(<CounterpartiesPage focusId="target-id" />)
 
     const table = await screen.findByTestId('counterparties-table')
     await waitFor(() => {
-      const firstRow = within(table).getAllByRole('row')[1]
-      expect(firstRow).toHaveClass('focus-row')
-      expect(firstRow).toHaveTextContent('ООО Поздний')
+      const row = within(table).getByText('ООО Поздний').closest('tr')
+      expect(row).toHaveClass('focus-row')
     })
   })
 
-  it('фильтрует по поиску на сервере', async () => {
+  it('фильтрует по поиску', async () => {
     const user = userEvent.setup()
-    mockApi({ '/api/v1/counterparties': { handler: counterpartiesServer(COUNTERPARTIES) } })
+    mockApi({ '/api/v1/counterparties': { body: COUNTERPARTIES } })
     render(<CounterpartiesPage />)
 
     await screen.findByText('ООО Ромашка')
     await user.type(screen.getByLabelText('Поиск по наименованию'), 'ромашка')
 
-    await waitFor(() => expect(screen.getByTestId('counterparties-count')).toHaveTextContent('1'))
+    expect(screen.getByTestId('counterparties-count')).toHaveTextContent('1')
     expect(screen.getByText('ООО Ромашка')).toBeInTheDocument()
 
     await user.clear(screen.getByLabelText('Поиск по наименованию'))
     await user.type(screen.getByLabelText('Поиск по наименованию'), 'нетакого')
-    await waitFor(() => expect(screen.getByTestId('counterparties-count')).toHaveTextContent('0'))
+    expect(screen.getByTestId('counterparties-count')).toHaveTextContent('0')
   })
 
-  it('добавляет контрагента с признаками', async () => {
+  it('сортирует по наименованию: клик — по возрастанию, второй — по убыванию', async () => {
     const user = userEvent.setup()
-    mockApi({
-      'POST /api/v1/counterparties': { body: COUNTERPARTIES[0] },
-      '/api/v1/counterparties': { handler: counterpartiesServer(COUNTERPARTIES) },
-    })
+    mockApi({ '/api/v1/counterparties': { body: COUNTERPARTIES } })
     render(<CounterpartiesPage />)
 
     await screen.findByText('ООО Ромашка')
-    await user.type(screen.getByLabelText('Наименование контрагента'), 'Новый Поставщик')
-    await user.click(screen.getByLabelText('импортный поставщик'))
-    await user.click(screen.getByRole('button', { name: 'Добавить' }))
+    await user.click(screen.getByLabelText('показывать отключённых'))
 
-    const posted = bodies().some((body) => body.includes('"is_import_supplier":true'))
-    expect(posted).toBe(true)
+    const table = screen.getByTestId('counterparties-table')
+    // По умолчанию — по наименованию от А к Я.
+    expect(firstColumn(table)).toEqual(['Комус', 'ООО Ромашка'])
+
+    const header = screen.getByRole('columnheader', { name: 'Наименование' })
+    expect(header).toHaveAttribute('aria-sort', 'ascending')
+
+    await user.click(within(header).getByRole('button'))
+    expect(header).toHaveAttribute('aria-sort', 'descending')
+    expect(firstColumn(table)).toEqual(['ООО Ромашка', 'Комус'])
+
+    await user.click(within(header).getByRole('button'))
+    expect(header).toHaveAttribute('aria-sort', 'ascending')
+    expect(firstColumn(table)).toEqual(['Комус', 'ООО Ромашка'])
   })
 
-  it('показывает ошибку при дубле наименования', async () => {
-    const user = userEvent.setup()
-    mockApi({
-      'POST /api/v1/counterparties': {
-        status: 409,
-        body: { detail: 'Контрагент «Комус» уже есть' },
-      },
-      '/api/v1/counterparties': { handler: counterpartiesServer(COUNTERPARTIES) },
-    })
-    render(<CounterpartiesPage />)
-
-    await screen.findByText('ООО Ромашка')
-    await user.type(screen.getByLabelText('Наименование контрагента'), 'Комус')
-    await user.click(screen.getByRole('button', { name: 'Добавить' }))
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('уже есть')
-  })
-
-  it('администратор может менять контрагентов', async () => {
-    mockApi({ '/api/v1/counterparties': { handler: counterpartiesServer(COUNTERPARTIES) } })
-    render(<CounterpartiesPage user={ADMIN} />)
-
-    expect(await screen.findByText('ООО Ромашка')).toBeInTheDocument()
-    expect(screen.getByLabelText('Наименование контрагента')).toBeInTheDocument()
-    expect(screen.getByLabelText('Менеджер клиента ООО Ромашка')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Отключить' })).toBeInTheDocument()
-  })
-
-  it('показывает «Показать ещё» и догружает следующую сотню', async () => {
-    const user = userEvent.setup()
+  it('показывает все строки сразу, без кнопки «ещё»', async () => {
     const base: Counterparty = {
       id: 'base',
       name: 'Клиент',
@@ -311,23 +235,58 @@ describe('CounterpartiesPage', () => {
       id: `c-${index}`,
       name: `Клиент ${String(index).padStart(3, '0')}`,
     }))
-    mockApi({ '/api/v1/counterparties': { handler: counterpartiesServer(many) } })
+    mockApi({ '/api/v1/counterparties': { body: many } })
     render(<CounterpartiesPage />)
 
-    expect(await screen.findByTestId('counterparties-shown')).toHaveTextContent(
-      'Показано 100 из 250',
-    )
-    await user.click(screen.getByRole('button', { name: 'Показать ещё 100' }))
-    await waitFor(() =>
-      expect(screen.getByTestId('counterparties-shown')).toHaveTextContent('Показано 200 из 250'),
-    )
+    const table = await screen.findByTestId('counterparties-table')
+    await waitFor(() => expect(firstColumn(table)).toHaveLength(250))
+    expect(screen.getByTestId('counterparties-count')).toHaveTextContent('250')
+    expect(screen.queryByRole('button', { name: /Показать ещё/ })).toBeNull()
+    expect(firstColumn(table)).toContain('Клиент 249')
+  })
+
+  it('добавляет контрагента с признаками', async () => {
+    const user = userEvent.setup()
+    mockApi({ '/api/v1/counterparties': { body: COUNTERPARTIES } })
+    render(<CounterpartiesPage />)
+
+    await screen.findByText('ООО Ромашка')
+    await user.type(screen.getByLabelText('Наименование контрагента'), 'Новый Поставщик')
+    await user.click(screen.getByLabelText('импортный поставщик'))
+    await user.click(screen.getByRole('button', { name: 'Добавить' }))
+
+    const posted = bodies().some((body) => body.includes('"is_import_supplier":true'))
+    expect(posted).toBe(true)
+  })
+
+  it('показывает ошибку при дубле наименования', async () => {
+    const user = userEvent.setup()
+    mockApi({
+      '/api/v1/counterparties': { status: 409, body: { detail: 'Контрагент «Комус» уже есть' } },
+    })
+    render(<CounterpartiesPage />)
+
+    await user.type(screen.getByLabelText('Наименование контрагента'), 'Комус')
+    await user.click(screen.getByRole('button', { name: 'Добавить' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('уже есть')
+  })
+
+  it('администратор может менять контрагентов', async () => {
+    mockApi({ '/api/v1/counterparties': { body: COUNTERPARTIES } })
+    render(<CounterpartiesPage user={ADMIN} />)
+
+    expect(await screen.findByText('ООО Ромашка')).toBeInTheDocument()
+    expect(screen.getByLabelText('Наименование контрагента')).toBeInTheDocument()
+    expect(screen.getByLabelText('Менеджер клиента ООО Ромашка')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Отключить' })).toBeInTheDocument()
   })
 })
 
 describe('NomenclaturePage', () => {
-  it('фильтрует по виду и ищет по коду — на сервере', async () => {
+  it('фильтрует по виду и ищет по коду', async () => {
     const user = userEvent.setup()
-    mockApi({ '/api/v1/products': { handler: productsServer(PRODUCTS) } })
+    mockApi({ '/api/v1/products': { body: PRODUCTS } })
     render(<NomenclaturePage />)
 
     expect(await screen.findByText('Антиоксидант')).toBeInTheDocument()
@@ -335,24 +294,83 @@ describe('NomenclaturePage', () => {
     expect(screen.getByTestId('products-count')).toHaveTextContent('1')
 
     await user.click(screen.getByLabelText('показывать отключённые'))
-    await waitFor(() => expect(screen.getByTestId('products-count')).toHaveTextContent('2'))
+    expect(screen.getByTestId('products-count')).toHaveTextContent('2')
 
     await user.selectOptions(screen.getByLabelText('Фильтр по виду'), 'raw')
-    await waitFor(() => expect(screen.getByTestId('products-count')).toHaveTextContent('1'))
+    expect(screen.getByTestId('products-count')).toHaveTextContent('1')
     expect(screen.getByText('Абрикос цукаты')).toBeInTheDocument()
 
     await user.selectOptions(screen.getByLabelText('Фильтр по виду'), '')
     await user.type(screen.getByLabelText('Поиск по коду или наименованию'), 'ТОВ3948')
-    await waitFor(() => expect(screen.getByTestId('products-count')).toHaveTextContent('1'))
+    expect(screen.getByTestId('products-count')).toHaveTextContent('1')
     expect(screen.getByText('Антиоксидант')).toBeInTheDocument()
+  })
+
+  it('сортирует по наименованию: по возрастанию и по убыванию', async () => {
+    const user = userEvent.setup()
+    mockApi({
+      '/api/v1/products': {
+        body: [
+          PRODUCTS[0],
+          {
+            id: 'p3',
+            code: 'ТОВ100000',
+            name: 'Яблоко сушёное',
+            kind: 'material',
+            unit: 'кг',
+            source: '1c',
+            is_active: true,
+          },
+        ],
+      },
+    })
+    render(<NomenclaturePage />)
+
+    const table = await screen.findByTestId('products-table')
+    // По умолчанию — по коду.
+    expect(firstColumn(table)).toEqual(['ТОВ100000', 'ТОВ394895'])
+
+    const name = screen.getByRole('columnheader', { name: 'Наименование' })
+    await user.click(within(name).getByRole('button'))
+    expect(name).toHaveAttribute('aria-sort', 'ascending')
+    expect(firstColumn(table)).toEqual(['ТОВ394895', 'ТОВ100000'])
+
+    await user.click(within(name).getByRole('button'))
+    expect(name).toHaveAttribute('aria-sort', 'descending')
+    expect(firstColumn(table)).toEqual(['ТОВ100000', 'ТОВ394895'])
+  })
+
+  it('показывает все строки сразу и счётчик «из» при фильтре', async () => {
+    const many: Product[] = Array.from({ length: 250 }, (_, index) => ({
+      id: `p-${index}`,
+      code: `КОД${String(index).padStart(4, '0')}`,
+      name: `Позиция ${index}`,
+      kind: 'material',
+      unit: 'шт',
+      source: '1c',
+      is_active: true,
+    }))
+    const user = userEvent.setup()
+    mockApi({ '/api/v1/products': { body: many } })
+    render(<NomenclaturePage />)
+
+    const table = await screen.findByTestId('products-table')
+    await waitFor(() => expect(firstColumn(table)).toHaveLength(250))
+    expect(screen.getByTestId('products-count')).toHaveTextContent('250')
+    expect(screen.queryByRole('button', { name: /Показать ещё/ })).toBeNull()
+
+    await user.type(screen.getByLabelText('Поиск по коду или наименованию'), 'Позиция 24')
+    expect(screen.getByTestId('products-filter-count')).toHaveTextContent('из 250')
+    expect(screen.getByRole('button', { name: 'Сбросить' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Сбросить' }))
+    expect(screen.getByTestId('products-count')).toHaveTextContent('250')
+    expect(screen.getByRole('button', { name: 'Сбросить' })).toBeDisabled()
   })
 
   it('заводит позицию номенклатуры', async () => {
     const user = userEvent.setup()
-    mockApi({
-      'POST /api/v1/products': { body: PRODUCTS[0] },
-      '/api/v1/products': { handler: productsServer(PRODUCTS) },
-    })
+    mockApi({ '/api/v1/products': { body: PRODUCTS } })
     render(<NomenclaturePage />)
 
     await screen.findByText('Антиоксидант')
@@ -365,62 +383,6 @@ describe('NomenclaturePage', () => {
       JSON.stringify(call[1] ?? {}).includes('ТОВ900'),
     )
     expect(posted).toBe(true)
-  })
-
-  it('показывает «Показать ещё» и догружает следующую сотню', async () => {
-    const user = userEvent.setup()
-    const many: Product[] = Array.from({ length: 250 }, (_, index) => ({
-      id: `p-${index}`,
-      code: `КОД${String(index).padStart(4, '0')}`,
-      name: `Позиция ${index}`,
-      kind: 'material',
-      unit: 'шт',
-      source: '1c',
-      is_active: true,
-    }))
-    mockApi({ '/api/v1/products': { handler: productsServer(many) } })
-    render(<NomenclaturePage />)
-
-    expect(await screen.findByTestId('products-shown')).toHaveTextContent('Показано 100 из 250')
-    await user.click(screen.getByRole('button', { name: 'Показать ещё 100' }))
-    await waitFor(() =>
-      expect(screen.getByTestId('products-shown')).toHaveTextContent('Показано 200 из 250'),
-    )
-    // Догруженные строки действительно попали в таблицу.
-    expect(screen.getByTestId('products-table')).toHaveTextContent('Позиция 150')
-  })
-
-  it('позиция из сообщения показывается первой, даже если она вне порции', async () => {
-    const many: Product[] = Array.from({ length: 150 }, (_, index) => ({
-      id: `p-${index}`,
-      code: `КОД${String(index).padStart(4, '0')}`,
-      name: `Позиция ${index}`,
-      kind: 'material',
-      unit: 'шт',
-      source: '1c',
-      is_active: true,
-    }))
-    const target: Product = {
-      id: 'target-id',
-      code: 'ЯЯЯ-1',
-      name: 'Поздняя позиция',
-      kind: 'material',
-      unit: 'шт',
-      source: '1c',
-      is_active: true,
-    }
-    mockApi({
-      '/api/v1/products/': { body: target },
-      '/api/v1/products': { handler: productsServer([...many, target]) },
-    })
-    render(<NomenclaturePage focusId="target-id" />)
-
-    const table = await screen.findByTestId('products-table')
-    await waitFor(() => {
-      const firstRow = within(table).getAllByRole('row')[1]
-      expect(firstRow).toHaveClass('focus-row')
-      expect(firstRow).toHaveTextContent('Поздняя позиция')
-    })
   })
 })
 
@@ -508,31 +470,5 @@ describe('ImportsPage', () => {
       expect(screen.getByTestId('import-result-customers')).toHaveTextContent('Создано: 775')
     })
     expect(screen.getByTestId('import-result-customers')).toHaveTextContent('пропущено дублей: 10')
-  })
-
-  it('показывает «Показать ещё» и догружает журнал загрузок', async () => {
-    const user = userEvent.setup()
-    const sessions = Array.from({ length: 30 }, (_, index) => ({
-      ...SESSION,
-      id: `s-${index}`,
-      file_name: `Файл ${index}.xlsx`,
-    }))
-    mockApi({
-      '/api/v1/imports/kinds': { body: KINDS },
-      '/api/v1/imports': {
-        handler: (url) => ({
-          body: sessions.slice(0, Number(query(url).get('limit') ?? 20)),
-        }),
-      },
-    })
-    render(<ImportsPage user={SALES} />)
-
-    expect(await screen.findByTestId('imports-shown')).toHaveTextContent(
-      'Показаны последние 20 загрузок',
-    )
-    await user.click(screen.getByRole('button', { name: 'Показать ещё 20' }))
-    await waitFor(() =>
-      expect(screen.getByTestId('imports-journal')).toHaveTextContent('Файл 25.xlsx'),
-    )
   })
 })

@@ -1,11 +1,11 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   type Counterparty,
   type CounterpartyRole,
   counterpartyRoles,
   createCounterparty,
   errorMessage,
-  fetchCounterpartiesPage,
+  fetchCounterparties,
   fetchCounterparty,
   fetchManagers,
   isAdmin,
@@ -13,6 +13,8 @@ import {
   updateCounterparty,
 } from './api'
 import { PageHelp } from './PageHelp'
+import { SortableTh } from './SortableTh'
+import { type SortState, sortRows, toggleSort } from './tableSort'
 
 const EMPTY_FORM = {
   name: '',
@@ -22,12 +24,6 @@ const EMPTY_FORM = {
   is_local_supplier: false,
   is_import_supplier: false,
 }
-
-/** Сколько строк просим за раз: кнопка «Показать ещё» добавляет столько же. */
-const PAGE_SIZE = 100
-
-/** Поиск с задержкой: каждый символ не должен дёргать сервер. */
-const SEARCH_DELAY_MS = 300
 
 const ROLE_FILTERS: { value: '' | CounterpartyRole; title: string }[] = [
   { value: '', title: 'Все контрагенты' },
@@ -39,54 +35,37 @@ const ROLE_FILTERS: { value: '' | CounterpartyRole; title: string }[] = [
 /** Кто может менять справочник: те же роли, что и на бэкенде, плюс администратор. */
 const WRITE_ROLES: string[] = ['sales_manager', 'commercial_director', 'purchase_director']
 
+/** По умолчанию — по наименованию, как в справочнике 1С. */
+const DEFAULT_SORT: SortState = { column: 'name', direction: 'asc' }
+
 export function CounterpartiesPage({ user, focusId }: { user?: SessionUser; focusId?: string }) {
   const mayEdit = !user || isAdmin(user) || WRITE_ROLES.includes(user.role)
   const [rows, setRows] = useState<Counterparty[]>([])
-  const [total, setTotal] = useState(0)
   const [managers, setManagers] = useState<SessionUser[]>([])
   const [role, setRole] = useState<'' | CounterpartyRole>('')
   const [search, setSearch] = useState('')
-  const [needle, setNeedle] = useState('')
   const [showInactive, setShowInactive] = useState(false)
+  const [sort, setSort] = useState<SortState>(DEFAULT_SORT)
   const [focusRow, setFocusRow] = useState<Counterparty | null>(null)
   const [form, setForm] = useState(EMPTY_FORM)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
-  // Ответ на устаревший запрос не должен затирать свежий список.
-  const requestId = useRef(0)
 
-  useEffect(() => {
-    const timer = setTimeout(() => setNeedle(search), SEARCH_DELAY_MS)
-    return () => clearTimeout(timer)
-  }, [search])
-
-  const loadFirstPage = useCallback(async () => {
-    const id = ++requestId.current
-    setLoading(true)
+  // Берём и отключённых: переключатель ниже решает, показывать ли их.
+  const reload = useCallback(async () => {
     try {
-      const page = await fetchCounterpartiesPage({
-        role: role === '' ? undefined : role,
-        includeInactive: showInactive,
-        search: needle,
-        limit: PAGE_SIZE,
-      })
-      if (id !== requestId.current) return
-      setRows(page.items)
-      setTotal(page.total)
-      setError(null)
+      setRows(await fetchCounterparties({ includeInactive: true }))
     } catch (err) {
-      if (id !== requestId.current) return
       setError(errorMessage(err))
     } finally {
-      if (id === requestId.current) setLoading(false)
+      setLoading(false)
     }
-  }, [role, showInactive, needle])
+  }, [])
 
   useEffect(() => {
-    void loadFirstPage()
-  }, [loadFirstPage])
+    void reload()
+  }, [reload])
 
   useEffect(() => {
     fetchManagers()
@@ -94,7 +73,7 @@ export function CounterpartiesPage({ user, focusId }: { user?: SessionUser; focu
       .catch(() => setManagers([]))
   }, [])
 
-  // Объект из сообщения тянем отдельно: он может лежать и за первой сотней.
+  // Объект из сообщения тянем отдельно: он может быть отключён и скрыт фильтром.
   useEffect(() => {
     if (!focusId) {
       setFocusRow(null)
@@ -113,34 +92,6 @@ export function CounterpartiesPage({ user, focusId }: { user?: SessionUser; focu
     }
   }, [focusId])
 
-  /** Строка из сообщения показывается первой и не дублируется в порции. */
-  const visible = useMemo(() => {
-    if (!focusRow) return rows
-    return [focusRow, ...rows.filter((row) => row.id !== focusRow.id)]
-  }, [rows, focusRow])
-
-  const loadMore = async () => {
-    setLoadingMore(true)
-    try {
-      const page = await fetchCounterpartiesPage({
-        role: role === '' ? undefined : role,
-        includeInactive: showInactive,
-        search: needle,
-        limit: PAGE_SIZE,
-        offset: rows.length,
-      })
-      setRows((current) => {
-        const seen = new Set(current.map((row) => row.id))
-        return [...current, ...page.items.filter((row) => !seen.has(row.id))]
-      })
-      setTotal(page.total)
-    } catch (err) {
-      setError(errorMessage(err))
-    } finally {
-      setLoadingMore(false)
-    }
-  }
-
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setBusy(true)
@@ -155,7 +106,7 @@ export function CounterpartiesPage({ user, focusId }: { user?: SessionUser; focu
         is_import_supplier: form.is_import_supplier,
       })
       setForm({ ...EMPTY_FORM, is_customer: form.is_customer })
-      await loadFirstPage()
+      await reload()
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -184,20 +135,48 @@ export function CounterpartiesPage({ user, focusId }: { user?: SessionUser; focu
     setError(null)
     try {
       const updated = await updateCounterparty(row.id, { is_active: !row.is_active })
-      const stillShown = showInactive || updated.is_active
-      setRows((current) =>
-        stillShown
-          ? current.map((item) => (item.id === updated.id ? updated : item))
-          : current.filter((item) => item.id !== updated.id),
-      )
+      setRows((current) => current.map((item) => (item.id === updated.id ? updated : item)))
       setFocusRow((current) => (current?.id === updated.id ? updated : current))
-      if (!stillShown) setTotal((value) => Math.max(0, value - 1))
     } catch (err) {
       setError(errorMessage(err))
     } finally {
       setBusy(false)
     }
   }
+
+  const needle = search.trim().toLowerCase()
+  const filtered = useMemo(
+    () =>
+      rows
+        .filter((row) => (showInactive ? true : row.is_active))
+        .filter((row) => {
+          if (role === 'customer') return row.is_customer
+          if (role === 'local_supplier') return row.is_local_supplier
+          if (role === 'import_supplier') return row.is_import_supplier
+          return true
+        })
+        .filter((row) => (needle ? row.name.toLowerCase().includes(needle) : true)),
+    [rows, showInactive, role, needle],
+  )
+
+  const sorted = useMemo(
+    () =>
+      sortRows(filtered, sort, (row, column) => {
+        if (column === 'manager') return row.manager_name
+        if (column === 'roles') return counterpartyRoles(row).join(', ')
+        if (column === 'state') return row.is_active
+        return row.name
+      }),
+    [filtered, sort],
+  )
+
+  // Объект из сообщения не должен теряться за фильтром: открываем его в списке.
+  useEffect(() => {
+    if (!focusRow) return
+    setSearch('')
+    setRole('')
+    if (!focusRow.is_active) setShowInactive(true)
+  }, [focusRow])
 
   useEffect(() => {
     if (!focusRow) return
@@ -209,6 +188,13 @@ export function CounterpartiesPage({ user, focusId }: { user?: SessionUser; focu
     })
     return () => cancelAnimationFrame(frame)
   }, [focusRow])
+
+  const filtersActive = search !== '' || role !== '' || showInactive
+  const resetFilters = () => {
+    setSearch('')
+    setRole('')
+    setShowInactive(false)
+  }
 
   return (
     <section>
@@ -278,7 +264,7 @@ export function CounterpartiesPage({ user, focusId }: { user?: SessionUser; focu
         </form>
       ) : null}
 
-      <div className="toolbar">
+      <div className="toolbar filter-bar">
         <select
           aria-label="Роль контрагента"
           value={role}
@@ -305,90 +291,110 @@ export function CounterpartiesPage({ user, focusId }: { user?: SessionUser; focu
           показывать отключённых
         </label>
         <span className="sep" />
-        <span className="hint">
-          Найдено: <strong data-testid="counterparties-count">{total}</strong>
-        </span>
       </div>
 
-      <table data-testid="counterparties-table">
-        <thead>
-          <tr>
-            <th scope="col">Наименование</th>
-            <th scope="col">Менеджер</th>
-            <th scope="col">Роли</th>
-            <th scope="col">Состояние</th>
-            <th scope="col" aria-label="Действия" />
-          </tr>
-        </thead>
-        <tbody>
-          {visible.length === 0 ? (
+      <div className="filter-summary">
+        <span className="filter-count" data-testid="counterparties-filter-count">
+          Найдено: <strong data-testid="counterparties-count">{filtered.length}</strong>
+          {filtered.length !== rows.length ? (
+            <span className="filter-total"> из {rows.length}</span>
+          ) : null}
+        </span>
+        <button
+          type="button"
+          className="mini filter-reset"
+          onClick={resetFilters}
+          disabled={!filtersActive}
+        >
+          Сбросить
+        </button>
+      </div>
+
+      <div className="table-scroll">
+        <table data-testid="counterparties-table">
+          <thead>
             <tr>
-              <td colSpan={5} className="hint" data-testid="counterparties-empty">
-                {loading ? 'Загрузка…' : 'Контрагентов не найдено.'}
-              </td>
+              <SortableTh
+                column="name"
+                title="Наименование"
+                sort={sort}
+                onSort={(column) => setSort((current) => toggleSort(current, column))}
+              />
+              <SortableTh
+                column="manager"
+                title="Менеджер"
+                sort={sort}
+                onSort={(column) => setSort((current) => toggleSort(current, column))}
+              />
+              <SortableTh
+                column="roles"
+                title="Роли"
+                sort={sort}
+                onSort={(column) => setSort((current) => toggleSort(current, column))}
+              />
+              <SortableTh
+                column="state"
+                title="Состояние"
+                sort={sort}
+                onSort={(column) => setSort((current) => toggleSort(current, column))}
+              />
+              <th scope="col" aria-label="Действия" />
             </tr>
-          ) : (
-            visible.map((row) => (
-              <tr key={row.id} className={row.id === focusId ? 'focus-row' : undefined}>
-                <td>{row.name}</td>
-                <td>
-                  {row.is_customer && mayEdit ? (
-                    <select
-                      aria-label={`Менеджер клиента ${row.name}`}
-                      value={row.manager_id ?? ''}
-                      disabled={busy}
-                      onChange={(event) => void assignManager(row, event.target.value)}
-                    >
-                      <option value="">— не закреплён —</option>
-                      {managers.map((manager) => (
-                        <option key={manager.id} value={manager.id}>
-                          {manager.full_name}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    (row.manager_name ?? '—')
-                  )}
-                </td>
-                <td>{counterpartyRoles(row).join(', ') || '—'}</td>
-                <td>
-                  <span className={row.is_active ? 'badge status-approved' : 'badge'}>
-                    {row.is_active ? 'Активен' : 'Отключён'}
-                  </span>
-                </td>
-                <td>
-                  {mayEdit ? (
-                    <button
-                      type="button"
-                      className="mini"
-                      disabled={busy}
-                      onClick={() => toggle(row)}
-                    >
-                      {row.is_active ? 'Отключить' : 'Включить'}
-                    </button>
-                  ) : null}
+          </thead>
+          <tbody>
+            {sorted.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="hint" data-testid="counterparties-empty">
+                  {loading ? 'Загрузка…' : 'Контрагентов не найдено.'}
                 </td>
               </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-
-      {!loading && rows.length < total ? (
-        <div className="table-more">
-          <span className="hint" data-testid="counterparties-shown">
-            Показано {rows.length} из {total}
-          </span>
-          <button
-            type="button"
-            className="mini"
-            onClick={() => void loadMore()}
-            disabled={loadingMore}
-          >
-            {loadingMore ? 'Загрузка…' : `Показать ещё ${PAGE_SIZE}`}
-          </button>
-        </div>
-      ) : null}
+            ) : (
+              sorted.map((row) => (
+                <tr key={row.id} className={row.id === focusId ? 'focus-row' : undefined}>
+                  <td>{row.name}</td>
+                  <td>
+                    {row.is_customer && mayEdit ? (
+                      <select
+                        aria-label={`Менеджер клиента ${row.name}`}
+                        value={row.manager_id ?? ''}
+                        disabled={busy}
+                        onChange={(event) => void assignManager(row, event.target.value)}
+                      >
+                        <option value="">— не закреплён —</option>
+                        {managers.map((manager) => (
+                          <option key={manager.id} value={manager.id}>
+                            {manager.full_name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      (row.manager_name ?? '—')
+                    )}
+                  </td>
+                  <td>{counterpartyRoles(row).join(', ') || '—'}</td>
+                  <td>
+                    <span className={row.is_active ? 'badge status-approved' : 'badge'}>
+                      {row.is_active ? 'Активен' : 'Отключён'}
+                    </span>
+                  </td>
+                  <td>
+                    {mayEdit ? (
+                      <button
+                        type="button"
+                        className="mini"
+                        disabled={busy}
+                        onClick={() => toggle(row)}
+                      >
+                        {row.is_active ? 'Отключить' : 'Включить'}
+                      </button>
+                    ) : null}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </section>
   )
 }

@@ -460,6 +460,74 @@ th.num {
   font-variant-numeric: tabular-nums;
 }
 
+/* ── Сортировка: заголовок-кнопка со стрелкой ──────────────────────────── */
+
+.sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+th.num .sort-button {
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.sort-button:hover {
+  color: var(--accent);
+}
+
+.sort-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+/* Стрелка видна всегда: так понятно, что колонку можно нажать. */
+.sort-arrow {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.7;
+}
+
+.sort-arrow svg {
+  display: block;
+}
+
+.sort-button:hover .sort-arrow {
+  opacity: 0.85;
+}
+
+.sort-button.active {
+  color: var(--accent);
+}
+
+.sort-button.active .sort-arrow {
+  opacity: 1;
+}
+
+/* Активная колонка тонируется целиком: видно, по чему отсортировано. */
+th[aria-sort="ascending"],
+th[aria-sort="descending"] {
+  background: var(--surface-3);
+}
+
+/* Узкий экран: длинные наименования переносятся, колонка действий остаётся в кадре. */
+@media (max-width: 1400px) {
+  [data-testid="products-table"] td:nth-child(2),
+  [data-testid="products-table"] th:nth-child(2) {
+    white-space: normal;
+    min-width: 320px;
+  }
+}
+
 /* ── Формы, кнопки, вход ───────────────────────────────────────────────── */
 
 input,
@@ -538,17 +606,45 @@ button.primary {
   flex: 1;
 }
 
-/* «Показать ещё»: таблица отдаёт порцию, остальное — по кнопке, без тупика. */
-.table-more {
+/* ── Панель фильтров над таблицей ──────────────────────────────────────── */
+
+.filter-bar {
+  margin-bottom: 0.5rem;
+}
+
+/* Счётчик и «Сбросить» — отдельной строкой: счётчик слева, кнопка справа.
+   Строка есть всегда, поэтому вёрстка не прыгает при включении фильтра. */
+.filter-summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
 }
 
-.table-more .hint {
-  margin: 0;
+.filter-count {
+  color: var(--muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.filter-count strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-total {
+  color: var(--muted);
+}
+
+.filter-reset {
+  color: var(--accent);
+  border-color: transparent;
+  background: none;
+}
+
+.filter-reset:hover {
+  background: var(--hover);
 }
 
 .plan-list {

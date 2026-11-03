@@ -1,18 +1,6 @@
 import { vi } from 'vitest'
 
-export type MockResponse = {
-  status?: number
-  body?: unknown
-  headers?: Record<string, string>
-}
-
-export type MockRoute = MockResponse & {
-  /**
-   * Динамический ответ: тело и заголовки считаются по адресу запроса.
-   * Нужен таблицам с порциями — там ответ зависит от `limit`, `offset` и `search`.
-   */
-  handler?: (url: string, init?: RequestInit) => MockResponse
-}
+export type MockRoute = { status?: number; body?: unknown }
 
 /**
  * Подменяет fetch таблицей маршрутов: ключ — фрагмент URL.
@@ -40,12 +28,11 @@ export function mockApi(routes: Record<string, MockRoute>): void {
           headers: { 'Content-Type': 'application/json' },
         })
       }
-      const route = match[1]
-      const { status = 200, body, headers } = route.handler ? route.handler(url, init) : route
+      const { status = 200, body } = match[1]
       if (status === 204) return new Response(null, { status })
       return new Response(JSON.stringify(body ?? null), {
         status,
-        headers: { 'Content-Type': 'application/json', ...headers },
+        headers: { 'Content-Type': 'application/json' },
       })
     }),
   )

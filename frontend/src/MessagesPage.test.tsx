@@ -103,32 +103,4 @@ describe('Журнал: ссылки и очистка', () => {
       expect(screen.queryByTestId('cleanup-box')).toBeNull()
     })
   })
-
-  it('догружает журнал кнопкой «Показать ещё»', async () => {
-    const user = userEvent.setup()
-    const first = Array.from({ length: 100 }, (_, index) =>
-      event({ id: `ev-${index}`, summary: `Событие ${index}` }),
-    )
-    const older = [event({ id: 'ev-old', summary: 'Самое старое событие' })]
-    mockApi({
-      '/api/v1/messages': { body: { rows: [], unread: 0, total: 0 } },
-      '/api/v1/audit/cleanup': { body: null },
-      '/api/v1/audit': {
-        handler: (url) => ({ body: url.includes('before=') ? older : first }),
-      },
-    })
-    render(<MessagesPage user={EXECUTIVE} />)
-
-    expect(await screen.findByTestId('journal-shown')).toHaveTextContent(
-      'Показаны последние 100 событий',
-    )
-    await user.click(screen.getByRole('button', { name: 'Показать ещё 100' }))
-
-    expect(await screen.findByText('Самое старое событие')).toBeInTheDocument()
-    // Больше нечего грузить — кнопка и подпись исчезают.
-    await waitFor(() => {
-      expect(screen.queryByTestId('journal-shown')).toBeNull()
-    })
-    expect(screen.getByTestId('audit-table')).toHaveTextContent('Самое старое событие')
-  })
 })
