@@ -85,6 +85,12 @@ class PurchasePlanItemIn(BaseModel):
     quantity: Decimal = Field(
         gt=0, le=Decimal("999999999999.999"), description="Годовое количество"
     )
+    norm: Decimal | None = Field(
+        default=None,
+        gt=0,
+        le=Decimal("999999.9999"),
+        description="Норма расхода: единиц сырья на единицу позиции плана продаж",
+    )
     price_rub: Decimal | None = Field(
         default=None,
         ge=0,
@@ -151,6 +157,18 @@ class PurchasePlanItemOut(BaseModel):
     country_name: str
     delivery_days: int
     quantity: Decimal
+    norm: Decimal | None = Field(
+        default=None, description="Норма расхода: единиц сырья на единицу позиции"
+    )
+    need_quantity: Decimal = Field(
+        default=Decimal("0"), description="Потребность за год по норме, в единицах сырья"
+    )
+    need_months: list[PurchasePlanMonthOut] = Field(
+        default_factory=list, description="Потребность по месяцам по норме"
+    )
+    plan_gap: Decimal = Field(
+        default=Decimal("0"), description="Запас (+) или дефицит (−): план закупки − потребность"
+    )
     price_rub: Decimal | None
     notes: str | None
     fact_quantity: Decimal = Field(

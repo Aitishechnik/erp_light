@@ -2585,6 +2585,18 @@ button.primary:disabled,
   font-size: 0.85rem;
 }
 
+/* План закупок: норма расхода — второе поле в колонке количества. */
+.purchase-table input.norm-cell {
+  width: 7rem;
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.purchase-table input.norm-cell:focus {
+  color: var(--text);
+}
+
 .purchase-table input.cell {
   width: 4.6rem;
 }
@@ -3065,9 +3077,15 @@ button.primary:disabled,
 
 /* Число — неделимое значение: «24 613 896,61» не должно рваться посередине.
    Правило выше разрешает перенос для текстовых колонок, но не для числовых. */
-.purchase-table .plan-grid td.num,
-.purchase-table .plan-grid th.num {
+.purchase-table .plan-grid td.num {
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Заголовок числа может переноситься: «Кол-во (год)» и «Сумма, ₽» шире своей
+   колонки и без переноса наезжали на соседний заголовок. */
+.purchase-table .plan-grid th.num {
+  white-space: normal;
   font-variant-numeric: tabular-nums;
 }
 

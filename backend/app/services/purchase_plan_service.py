@@ -431,15 +431,38 @@ def _items_out(
     schedules: dict[uuid.UUID, list[need.MonthPlan]] = {}
     fact_by_item: dict[uuid.UUID, Decimal] = {}
     fact_months_by_item: dict[uuid.UUID, dict[int, Decimal]] = {}
+    # Потребность по норме: год и месяцы. Пока норма не задана, потребности нет —
+    # ноль вместо нормы не подставляем, строку показываем как «норма не задана».
+    need_total: dict[uuid.UUID, Decimal] = {}
+    need_months_by_item: dict[uuid.UUID, dict[int, Decimal]] = {}
     for item in items:
         position = source.get(item.sales_product_id) or (snapshot or {}).get(item.sales_product_id)
+        months = position.months if position else {}
         if item.alternative_of_id is None:
-            schedules[item.id] = need.split_annual(
-                item.quantity,
-                position.months if position else {},
-                item.delivery_days,
-                plan.year,
-            )
+            if item.norm is not None and item.norm > 0:
+                schedules[item.id] = need.split_by_norm(
+                    item.norm,
+                    months,
+                    item.delivery_days,
+                    plan.year,
+                )
+            else:
+                schedules[item.id] = need.split_annual(
+                    item.quantity,
+                    months,
+                    item.delivery_days,
+                    plan.year,
+                )
+        if item.norm is not None and item.norm > 0:
+            need_months_by_item[item.id] = {
+                month: need.quantize_qty(quantity * item.norm)
+                for month, quantity in sorted(months.items())
+                if quantity > 0
+            }
+            need_total[item.id] = need.quantize_qty(sum(months.values(), ZERO) * item.norm)
+        else:
+            need_months_by_item[item.id] = {}
+            need_total[item.id] = ZERO
         rows = arrivals_by_item.get(item.id, [])
         fact_by_item[item.id] = sum((value for _day, value in rows), ZERO)
         fact_months_by_item[item.id] = _months_of(rows, plan.year)
@@ -492,6 +515,17 @@ def _items_out(
                 country_name=item.country.name,
                 delivery_days=item.delivery_days,
                 quantity=item.quantity,
+                norm=item.norm,
+                need_quantity=need_total[item.id],
+                need_months=[
+                    PurchasePlanMonthOut(month=month, quantity=quantity)
+                    for month, quantity in sorted(need_months_by_item[item.id].items())
+                ],
+                plan_gap=(
+                    need.quantize_qty(item.quantity - need_total[item.id])
+                    if item.norm is not None and item.norm > 0
+                    else ZERO
+                ),
                 price_rub=item.price_rub,
                 notes=item.notes,
                 fact_quantity=fact_by_item[item.id],
@@ -831,6 +865,7 @@ def update_items(
                     product_id=item.product_id,
                     country_id=item.country_id,
                     quantity=item.quantity,
+                    norm=item.norm,
                     price_rub=item.price_rub,
                     delivery_days=delivery_days,
                     notes=item.notes,
@@ -843,6 +878,7 @@ def update_items(
         country_changed = stored.country_id != item.country_id
         stored.country_id = item.country_id
         stored.quantity = item.quantity
+        stored.norm = item.norm
         stored.price_rub = item.price_rub
         # Срок доставки — снимок: правка справочника не переписывает строку.
         # Меняем его только вместе со страной.

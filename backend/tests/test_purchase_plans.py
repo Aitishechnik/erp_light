@@ -1,5 +1,6 @@
 """План закупок сырья на основании финально согласованного годового плана продаж."""
 
+import uuid
 from datetime import date
 from decimal import Decimal
 from typing import Any
@@ -9,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.models.audit import AuditEvent
 from app.models.counterparties import Counterparty
 from app.models.domain import Batch, BatchItem, Product
 from app.models.planning import PurchasePlan, SalesPlanApproval, SalesPlanItem
@@ -115,6 +117,7 @@ def _item(
     quantity: str = "30",
     price: str | None = "500.00",
     alternative_of: str | None = None,
+    norm: str | None = None,
 ) -> dict[str, Any]:
     payload = {
         "sales_product_id": str(catalog[sales].id),
@@ -123,6 +126,8 @@ def _item(
         "quantity": quantity,
         "price_rub": price,
     }
+    if norm is not None:
+        payload["norm"] = norm
     if alternative_of is not None:
         payload["alternative_of_id"] = alternative_of
     return payload
@@ -1254,3 +1259,155 @@ def test_removing_main_promotes_alternative(
     assert promoted["alternative_of_id"] is None
     assert promoted["quantity"] == "30.000"
     assert promoted["product_id"] == str(catalog["raw2"].id)
+
+
+def _approve_plan(client: TestClient, login, plan_id: str) -> None:
+    login("purchase")
+    assert client.post(f"/api/v1/purchase-plans/{plan_id}/submit").status_code == 200
+    login("executive")
+    approved = client.post(f"/api/v1/purchase-plans/{plan_id}/approve")
+    assert approved.status_code == 200, approved.text
+
+
+def test_norm_gives_need_and_gap(client: TestClient, login, catalog: dict[str, Any]) -> None:
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    saved = _save(client, plan["id"], [_item(catalog, quantity="400", norm="1.5")])
+    assert saved.status_code == 200, saved.text
+    item = saved.json()["items"][0]
+
+    assert Decimal(item["norm"]) == Decimal("1.5000")
+    assert Decimal(item["need_quantity"]) == Decimal("450.000")
+    assert Decimal(item["plan_gap"]) == Decimal("-50.000")
+    assert [(row["month"], Decimal(row["quantity"])) for row in item["need_months"]] == [
+        (1, Decimal("150")),
+        (2, Decimal("300")),
+    ]
+    # Потребность месяца берётся из продаж, а не из пропорции годового количества.
+    assert [(row["month"], Decimal(row["quantity"])) for row in item["schedule"]] == [
+        (1, Decimal("150")),
+        (2, Decimal("300")),
+    ]
+
+
+def test_line_without_norm_keeps_legacy_split(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    saved = _save(client, plan["id"], [_item(catalog, quantity="300")])
+    assert saved.status_code == 200, saved.text
+    item = saved.json()["items"][0]
+
+    assert item["norm"] is None
+    assert Decimal(item["need_quantity"]) == 0
+    assert item["need_months"] == []
+    assert Decimal(item["plan_gap"]) == 0
+    # Старое поведение: годовое количество делится пропорционально продажам.
+    assert [(row["month"], Decimal(row["quantity"])) for row in item["schedule"]] == [
+        (1, Decimal("100")),
+        (2, Decimal("200")),
+    ]
+
+
+def test_alternative_has_its_own_norm_for_reference(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    main = _item(catalog, quantity="300", norm="1.5")
+    saved = _save(client, plan["id"], [main])
+    assert saved.status_code == 200, saved.text
+    main_id = saved.json()["items"][0]["id"]
+
+    alt = _item(catalog, raw="raw2", quantity="100", norm="2", alternative_of=main_id)
+    both = _save(client, plan["id"], [{**main, "id": main_id}, alt])
+    assert both.status_code == 200, both.text
+    items = {Decimal(row["norm"]): row for row in both.json()["items"]}
+    assert Decimal(items[Decimal("1.5")]["need_quantity"]) == Decimal("450.000")
+    assert Decimal(items[Decimal("2.0")]["need_quantity"]) == Decimal("600.000")
+    # У альтернативы потребность справочная: её количество — план закупки.
+    assert items[Decimal("2.0")]["schedule"] == []
+
+
+def test_sales_correction_signals_purchase_plan(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    plan_ids = _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    saved = _save(client, plan["id"], [_item(catalog, quantity="300", norm="1.5")])
+    assert saved.status_code == 200, saved.text
+    _approve_plan(client, login, plan["id"])
+
+    _correct_sales(client, login, plan_ids["sales"], catalog["customer"], catalog["fin"], 1, "150")
+
+    event = (
+        db_session.execute(
+            select(AuditEvent).where(AuditEvent.action == "purchase_plan.revision_needed")
+        )
+        .scalars()
+        .one()
+    )
+    assert event.is_message is True
+    assert "purchase_director" in event.audience
+    assert "import_manager" in event.audience
+    assert event.year == YEAR
+
+    payload = event.payload or {}
+    assert payload["reason"].startswith("корректировка плана")
+    line = next(row for row in payload["lines"] if row["sales_product"] == "Смесь ореховая")
+    assert Decimal(line["units_delta"]) == Decimal("50")
+    assert Decimal(line["raw_delta"]) == Decimal("75")
+    assert payload["missing_norm"] == []
+    assert "Смесь ореховая: +50 ед. → 75 кг" in event.summary
+
+    purchase_plan = (
+        db_session.execute(select(PurchasePlan).where(PurchasePlan.id == uuid.UUID(plan["id"])))
+        .scalars()
+        .one()
+    )
+    assert purchase_plan.revision_requested_at is not None
+
+    login("purchase")
+    messages = client.get("/api/v1/messages").json()
+    assert any(row["action"] == "purchase_plan.revision_needed" for row in messages["rows"])
+
+
+def test_signal_lists_lines_without_norm(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    plan_ids = _make_annual(client, login, catalog)
+    plan = _create_plan(client, login)
+    assert _save(client, plan["id"], [_item(catalog, quantity="300")]).status_code == 200
+    _approve_plan(client, login, plan["id"])
+
+    _correct_sales(client, login, plan_ids["sales"], catalog["customer"], catalog["fin"], 1, "150")
+
+    event = (
+        db_session.execute(
+            select(AuditEvent).where(AuditEvent.action == "purchase_plan.revision_needed")
+        )
+        .scalars()
+        .one()
+    )
+    payload = event.payload or {}
+    line = payload["lines"][0]
+    assert line["norm"] is None
+    assert line["raw_delta"] is None
+    assert payload["missing_norm"] == ["Арахис"]
+
+
+def test_no_signal_without_purchase_plan(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    plan_ids = _make_annual(client, login, catalog)
+    _correct_sales(client, login, plan_ids["sales"], catalog["customer"], catalog["fin"], 1, "150")
+
+    events = (
+        db_session.execute(
+            select(AuditEvent).where(AuditEvent.action == "purchase_plan.revision_needed")
+        )
+        .scalars()
+        .all()
+    )
+    assert events == []

@@ -352,6 +352,43 @@ def split_annual(
     return result
 
 
+def split_by_norm(
+    norm: Decimal,
+    position_months: dict[int, Decimal],
+    delivery_days: int,
+    plan_year: int,
+    today: date | None = None,
+) -> list[MonthPlan]:
+    """Потребность по месяцам от продаж и нормы расхода.
+
+    Каждый месяц считается отдельно: продажи месяца × норма. В отличие от
+    ``split_annual`` годовой объём здесь не задан — он получается суммой
+    месячных потребностей, поэтому остаток округления размазывать некуда.
+    """
+    if norm <= 0:
+        return []
+    current_day = today or date.today()
+    result: list[MonthPlan] = []
+    for month in sorted(position_months):
+        sold = position_months[month]
+        if sold <= 0:
+            continue
+        quantity = quantize_qty(sold * norm)
+        if quantity <= 0:
+            continue
+        order_year, order_month = order_year_month(plan_year, month, delivery_days)
+        result.append(
+            MonthPlan(
+                month=month,
+                quantity=quantity,
+                order_year=order_year,
+                order_month=order_month,
+                overdue=(order_year, order_month) < (current_day.year, current_day.month),
+            )
+        )
+    return result
+
+
 def _milli(value: Decimal) -> int:
     """Количество в тысячных, чтобы делить без потерь на округлении."""
     return int((value * MILLI).to_integral_value(rounding=ROUND_HALF_UP))

@@ -202,6 +202,14 @@ export type PurchasePlanItem = {
   country_name: string
   delivery_days: number
   quantity: string
+  /** Норма расхода: единиц сырья на единицу позиции плана продаж. */
+  norm?: string | null
+  /** Потребность за год по норме, в единицах сырья. */
+  need_quantity?: string
+  /** Потребность по месяцам по норме. */
+  need_months?: { month: number; quantity: string }[]
+  /** Запас (+) или дефицит (−): план закупки − потребность. */
+  plan_gap?: string
   price_rub: string | null
   notes: string | null
   /** Поступило по связанным поступлениям, в единицах сырья. */
@@ -287,6 +295,7 @@ export type PurchasePlanItemIn = {
   product_id: string
   country_id: string
   quantity: string
+  norm?: string | null
   price_rub: string | null
   notes?: string | null
 }

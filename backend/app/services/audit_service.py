@@ -72,6 +72,9 @@ CATALOG: dict[str, EventSpec] = {
         "Изменены строки плана закупок", "critical", "purchase_plan"
     ),
     "purchase_plan.approved": EventSpec("План закупок утверждён", "critical", "purchase_plan"),
+    "purchase_plan.revision_needed": EventSpec(
+        "Нужен пересмотр плана закупок", "critical", "purchase_plan"
+    ),
     "purchase_plan.reopened": EventSpec(
         "План закупок возвращён в работу", "critical", "purchase_plan"
     ),

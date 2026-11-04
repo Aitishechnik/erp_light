@@ -30,6 +30,7 @@ import {
 import { PageHelp } from './PageHelp'
 
 const QTY_PATTERN = /^\d+(?:[.,]\d{1,3})?$/
+const NORM_PATTERN = /^\d+(?:[.,]\d{1,4})?$/
 const PRICE_PATTERN = /^\d+(?:[.,]\d{1,2})?$/
 
 function normalize(raw: string): string {
@@ -62,6 +63,8 @@ type DraftRow = {
   countryName: string
   deliveryDays: number
   quantity: string
+  /** Норма расхода: единиц сырья на единицу позиции, пусто — не задана. */
+  norm: string
   priceRub: string
   notes: string
   unit: string
@@ -120,6 +123,38 @@ function splitPreview(
         (orderYear === today.getFullYear() && orderMonth < today.getMonth() + 1),
     })
   })
+  return result
+}
+
+/** Потребность по норме: продажи месяца × норма (тот же расчёт, что на сервере). */
+function previewByNorm(
+  norm: number,
+  position: PurchasePlanPosition | undefined,
+  deliveryDays: number,
+  planYear: number,
+): PreviewEntry[] {
+  if (!position || !(norm > 0)) return []
+  const today = new Date()
+  const shift = deliveryDays > 0 ? Math.ceil(deliveryDays / 30) : 0
+  const result: PreviewEntry[] = []
+  for (const month of [...position.months].sort((left, right) => left.month - right.month)) {
+    const sold = toMilli(month.quantity)
+    if (sold <= 0) continue
+    const milli = Math.round(sold * norm)
+    if (milli <= 0) continue
+    const orderIndex = planYear * 12 + month.month - 1 - shift
+    const orderYear = Math.floor(orderIndex / 12)
+    const orderMonth = (((orderIndex % 12) + 12) % 12) + 1
+    result.push({
+      month: month.month,
+      quantityMilli: milli,
+      orderYear,
+      orderMonth,
+      overdue:
+        orderYear < today.getFullYear() ||
+        (orderYear === today.getFullYear() && orderMonth < today.getMonth() + 1),
+    })
+  }
   return result
 }
 
@@ -574,6 +609,7 @@ function draftsFromPlan(plan: PurchasePlan): DraftRow[] {
     countryName: item.country_name,
     deliveryDays: item.delivery_days,
     quantity: trimZeros(item.quantity),
+    norm: item.norm === null || item.norm === undefined ? '' : trimZeros(item.norm),
     priceRub: item.price_rub === null ? '' : trimZeros(item.price_rub),
     notes: item.notes ?? '',
     unit: item.unit,
@@ -763,6 +799,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
         countryName: '',
         deliveryDays: 30,
         quantity: '',
+        norm: '',
         priceRub: '',
         notes: '',
         unit: '',
@@ -789,6 +826,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
         countryName: '',
         deliveryDays: 30,
         quantity: '',
+        norm: '',
         priceRub: '',
         notes: '',
         unit: main.unit,
@@ -816,6 +854,11 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
         setError(`Строка ${index + 1}: количество — число больше нуля`)
         return null
       }
+      const norm = normalize(row.norm)
+      if (norm !== '' && (!NORM_PATTERN.test(norm) || Number(norm) <= 0)) {
+        setError(`Строка ${index + 1}: норма — число больше нуля (до 4 знаков)`)
+        return null
+      }
       const price = normalize(row.priceRub)
       if (price !== '' && !PRICE_PATTERN.test(price)) {
         setError(`Строка ${index + 1}: цена — неотрицательное число`)
@@ -828,6 +871,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
         product_id: row.productId,
         country_id: row.countryId,
         quantity,
+        norm: norm === '' ? null : norm,
         price_rub: price === '' ? null : price,
         notes: row.notes || null,
       })
@@ -1252,14 +1296,19 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                       </tr>
                     ) : (
                       ordered.map((row, index) => {
-                        const schedule = splitPreview(
-                          toMilli(row.quantity),
-                          position,
-                          row.deliveryDays,
-                          plan.year,
-                        )
-                        const price = normalize(row.priceRub)
                         const quantity = normalize(row.quantity)
+                        const normText = normalize(row.norm)
+                        const normValue = Number(normText)
+                        const hasNorm =
+                          normText !== '' && Number.isFinite(normValue) && normValue > 0
+                        const schedule = hasNorm
+                          ? previewByNorm(normValue, position, row.deliveryDays, plan.year)
+                          : splitPreview(toMilli(quantity), position, row.deliveryDays, plan.year)
+                        const needTotal = hasNorm ? Number(position.total) * normValue : 0
+                        const planQuantity = Number(quantity)
+                        const gap =
+                          hasNorm && Number.isFinite(planQuantity) ? planQuantity - needTotal : 0
+                        const price = normalize(row.priceRub)
                         const sum =
                           price !== '' && QTY_PATTERN.test(quantity)
                             ? Number(price) * Number(quantity)
@@ -1415,16 +1464,36 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                               </td>
                               <td className="num">
                                 {canEdit ? (
-                                  <input
-                                    className="cell"
-                                    aria-label={`Количество ${label}`}
-                                    value={row.quantity}
-                                    onChange={(event) =>
-                                      updateRow(row.key, { quantity: event.target.value })
-                                    }
-                                  />
+                                  <>
+                                    <input
+                                      className="cell"
+                                      aria-label={`Количество ${label}`}
+                                      value={row.quantity}
+                                      onChange={(event) =>
+                                        updateRow(row.key, { quantity: event.target.value })
+                                      }
+                                    />
+                                    <input
+                                      className="cell norm-cell"
+                                      aria-label={`Норма ${label}`}
+                                      placeholder="норма"
+                                      title="Норма расхода: единиц сырья на единицу позиции плана продаж"
+                                      value={row.norm}
+                                      onChange={(event) =>
+                                        updateRow(row.key, { norm: event.target.value })
+                                      }
+                                    />
+                                  </>
                                 ) : (
-                                  formatQuantity(row.quantity)
+                                  <>
+                                    {formatQuantity(row.quantity)}
+                                    {row.norm ? (
+                                      <span className="unit">
+                                        {' '}
+                                        · норма {formatQuantity(row.norm)}
+                                      </span>
+                                    ) : null}
+                                  </>
                                 )}
                               </td>
                               <td className="num">
@@ -1458,6 +1527,15 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                           )}`
                                         : ''}
                                     </span>
+                                    {hasNorm ? (
+                                      <span className="sched-line" data-testid={`need-${row.key}`}>
+                                        потребность {formatQuantity(needTotal.toFixed(3))}{' '}
+                                        {row.unit || 'ед.'} · {gap >= 0 ? 'запас' : 'дефицит'}{' '}
+                                        {formatQuantity(Math.abs(gap).toFixed(3))}
+                                      </span>
+                                    ) : (
+                                      <span className="hint">норма не задана</span>
+                                    )}
                                     <span className="alt-note">
                                       закрывает потребность основной строки, когда основного сырья
                                       не хватает
@@ -1465,6 +1543,15 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                   </span>
                                 ) : (
                                   <>
+                                    {hasNorm ? (
+                                      <span className="sched-line" data-testid={`need-${row.key}`}>
+                                        потребность {formatQuantity(needTotal.toFixed(3))}{' '}
+                                        {row.unit || 'ед.'} · {gap >= 0 ? 'запас' : 'дефицит'}{' '}
+                                        {formatQuantity(Math.abs(gap).toFixed(3))}
+                                      </span>
+                                    ) : (
+                                      <span className="hint">норма не задана</span>
+                                    )}
                                     {scheduleMode === 'summary' ? (
                                       <ScheduleView
                                         rows={rowSchedule}

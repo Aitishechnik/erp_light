@@ -230,6 +230,11 @@ class PurchasePlanItem(Base):
     quantity: Mapped[Decimal] = mapped_column(
         Numeric(15, 3), nullable=False, default=Decimal("0"), comment="Годовое количество"
     )
+    norm: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 4),
+        nullable=True,
+        comment="Норма расхода: единиц сырья на единицу позиции плана продаж",
+    )
     price_rub: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
     delivery_days: Mapped[int] = mapped_column(
         Integer, nullable=False, default=30, comment="Снимок срока доставки страны, дней"

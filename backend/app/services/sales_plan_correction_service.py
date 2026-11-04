@@ -40,7 +40,7 @@ from app.schemas.planning import (
     SalesPlanCorrectionItemOut,
     SalesPlanCorrectionOut,
 )
-from app.services import audit_service
+from app.services import audit_service, purchase_signal_service
 from app.services.plan_freeze import check_months_editable, editable_months
 from app.services.sales_plan_approval_service import current_hash, invalidate
 
@@ -514,6 +514,14 @@ def approve(db: Session, user: User, correction_id: uuid.UUID) -> SalesPlanCorre
     correction.status = "approved"
     correction.reviewed_by_id = user.id
     correction.reviewed_at = datetime.now(UTC)
+    # План продаж изменился — закупщику уходит сигнал и запрос пересмотра
+    # плана закупок, если изменение задело его позиции.
+    purchase_signal_service.notify_sales_change(
+        db,
+        actor=user,
+        year=plan.year,
+        reason=f"корректировка плана менеджера {plan.manager.full_name}",
+    )
     audit_service.record(
         db,
         actor=user,

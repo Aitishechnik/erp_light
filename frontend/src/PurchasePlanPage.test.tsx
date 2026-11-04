@@ -258,6 +258,36 @@ describe('PurchasePlanPage', () => {
     expect(sent).toContain('"id":"item-1"')
   })
 
+  it('норма расхода сохраняется и даёт потребность с запасом или дефицитом', async () => {
+    const user = userEvent.setup()
+    mockApi(routes([plan()], { 'PUT /api/v1/purchase-plans/plan-1/items': { body: plan() } }))
+    render(<PurchasePlanPage user={DIRECTOR} />)
+
+    const norm = await screen.findByLabelText('Норма FIN-1 1')
+    await user.type(norm, '1.5')
+    expect(await screen.findByTestId('need-item-1')).toHaveTextContent('потребность 450')
+    expect(screen.getByTestId('need-item-1')).toHaveTextContent('дефицит 420')
+
+    const quantity = screen.getByLabelText('Количество FIN-1 1')
+    await user.clear(quantity)
+    await user.type(quantity, '470')
+    expect(screen.getByTestId('need-item-1')).toHaveTextContent('запас 20')
+
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }))
+    await waitFor(() => {
+      expect(putBodies().some((body) => body.includes('"norm":"1.5"'))).toBe(true)
+    })
+  })
+
+  it('без нормы строка считается по-старому и не показывает потребность', async () => {
+    mockApi(routes())
+    render(<PurchasePlanPage user={DIRECTOR} />)
+
+    await screen.findByTestId('purchase-row-item-1')
+    expect(screen.queryByTestId('need-item-1')).toBeNull()
+    expect(screen.getByTestId('purchase-row-item-1')).toHaveTextContent('норма не задана')
+  })
+
   it('приход перекрывает следующие месяцы и не даёт больше 100 %', async () => {
     mockApi(
       routes([

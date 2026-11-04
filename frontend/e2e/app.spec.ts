@@ -638,6 +638,7 @@ test('закупщик раскладывает потребность план�
           product_id: string
           country_id: string
           quantity: string
+          norm?: string | null
           price_rub: string | null
           alternative_of_id: string | null
         }[]
@@ -655,6 +656,7 @@ test('закупщик раскладывает потребность план�
         country_name: 'Таиланд',
         delivery_days: 90,
         quantity: Number(item.quantity).toFixed(3),
+        norm: item.norm ?? null,
         price_rub: item.price_rub === null ? null : Number(item.price_rub).toFixed(2),
         notes: null,
         fact_quantity: '0',
@@ -696,7 +698,11 @@ test('закупщик раскладывает потребность план�
   await page.getByLabel('Сырьё FIN-1 1').selectOption('raw-1')
   await page.getByLabel('Страна FIN-1 1').selectOption('th-1')
   await page.getByLabel('Количество FIN-1 1').fill('30')
+  await page.getByLabel('Норма FIN-1 1').fill('1.5')
   await page.getByLabel('Цена FIN-1 1').fill('500')
+  // Норма даёт потребность 300 × 1,5 = 450: план 30 — дефицит 420.
+  await expect(page.getByTestId('purchase-table')).toContainText('потребность 450')
+  await expect(page.getByTestId('purchase-table')).toContainText('дефицит 420')
   await expect(page.getByTestId('purchase-table')).toContainText('Ближайший заказ')
   await expect(page.getByTestId('purchase-table')).toContainText('10 кг')
   // Видов графика два — «кратко» и «кварталы»; вид «полосой» убран.
@@ -717,7 +723,15 @@ test('закупщик раскладывает потребность план�
   await expect(detail).toBeVisible()
   await expect(detail).toContainText('Месяц потребности')
 
+  const savedNorm = page.waitForRequest(
+    (request) => request.url().endsWith('/items') && request.method() === 'PUT',
+  )
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  const sent = JSON.parse((await savedNorm).postData() ?? '{}') as {
+    items: { norm?: string | null }[]
+  }
+  expect(sent.items[0]?.norm).toBe('1.5')
+  await expect(page.getByTestId('need-pi-0')).toContainText('потребность 450')
   await expect(page.getByTestId('purchase-table')).toContainText('Таиланд')
   await expect(page.getByTestId('position-FIN-1')).toContainText('разложено')
 
@@ -726,10 +740,12 @@ test('закупщик раскладывает потребность план�
   await page.getByLabel('Сырьё FIN-1 2').selectOption('raw-1')
   await page.getByLabel('Страна FIN-1 2').selectOption('cn-1')
   await page.getByLabel('Количество FIN-1 2').fill('10')
+  await page.getByLabel('Норма FIN-1 2').fill('2')
   await page.getByLabel('Цена FIN-1 2').fill('450')
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
   await expect(page.getByTestId('alt-badge-pi-1')).toContainText('альтернатива')
   await expect(page.getByTestId('alt-pi-1')).toContainText('план 10')
+  await expect(page.getByTestId('need-pi-1')).toContainText('потребность 600')
 
   await page.getByRole('button', { name: 'Отправить на согласование' }).click()
   await expect(page.getByTestId('purchase-status')).toHaveText('На проверке')
