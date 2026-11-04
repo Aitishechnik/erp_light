@@ -275,6 +275,11 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
 
   const result = state.status === 'ready' ? state.result : null
 
+  // Закрытый месяц не редактируется: если редактор был открыт — закрываем.
+  useEffect(() => {
+    if (result?.status === 'closed') setEditing(null)
+  }, [result])
+
   // Решение в форме повторяет сохранённое, пока пользователь его не поменял.
   useEffect(() => {
     if (!result) return
@@ -359,6 +364,7 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
   }
 
   const openReason = (row: MonthRow) => {
+    if (result?.status === 'closed') return
     const key = `${row.client_id}:${row.product_id}`
     if (editing === key) {
       setEditing(null)
@@ -415,6 +421,8 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
       setHistoryOpen(false)
       await load()
     } catch (error) {
+      // Панель подтверждения убираем: причина отказа видна в сообщении под ней.
+      setConfirmClose(false)
       setNotice(errorMessage(error))
     } finally {
       setBusy(false)
@@ -1044,6 +1052,7 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
                               type="button"
                               className="summary-toggle"
                               aria-expanded={managerOpen}
+                              aria-label={`${managerOpen ? 'Свернуть' : 'Раскрыть'} менеджера: ${managerRow.name}`}
                               data-testid={`manager-toggle-${managerRow.id || 'none'}`}
                               onClick={() => toggleManager(managerRow.id)}
                             >
@@ -1065,6 +1074,7 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
                                         type="button"
                                         className="summary-toggle summary-client"
                                         aria-expanded={clientOpen}
+                                        aria-label={`${clientOpen ? 'Свернуть' : 'Раскрыть'} клиента: ${clientRow.name}`}
                                         data-testid={`client-toggle-${key}`}
                                         onClick={() => toggleClient(key)}
                                       >
@@ -1150,7 +1160,11 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
           {result.rows.length === 0 ? (
             <div className="empty-state" data-testid="month-empty">
               <strong>За этот месяц продаж и плана нет</strong>
-              <span>Загрузите выгрузку «Продажи за месяц» в разделе «Загрузка данных».</span>
+              <span>
+                {mayUpload
+                  ? 'Загрузите выгрузку «Продажи за месяц» кнопкой «Загрузить продажи» выше — или в разделе «Загрузка данных».'
+                  : 'Загрузите выгрузку «Продажи за месяц» в разделе «Загрузка данных».'}
+              </span>
             </div>
           ) : null}
 
@@ -1226,7 +1240,7 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
                                   title={`${
                                     row.reason.comment ?? row.reason.title
                                   }${row.reason.author_name ? ` — ${row.reason.author_name}` : ''}`}
-                                  disabled={!mayReason || busy}
+                                  disabled={!mayReason || busy || result.status === 'closed'}
                                   onClick={() => openReason(row)}
                                 >
                                   {row.reason.title}

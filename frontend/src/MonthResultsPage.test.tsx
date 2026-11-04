@@ -309,6 +309,21 @@ describe('Причины отклонений', () => {
     expect(within(table).getByRole('button', { name: 'Качество продукции' })).toBeDisabled()
   })
 
+  it('на закрытом месяце причину не поменять', async () => {
+    const user = userEvent.setup()
+    setup({
+      ...WITH_REASON,
+      status: 'closed',
+      closed_by_name: 'Коммерческий директор (демо)',
+      closed_at: '2026-10-26T10:00:00Z',
+    })
+    const table = await screen.findByTestId('month-table')
+    const chip = within(table).getByRole('button', { name: 'Качество продукции' })
+    expect(chip).toBeDisabled()
+    await user.click(chip)
+    expect(screen.queryByLabelText('Причина отклонения')).toBeNull()
+  })
+
   it('фильтр «без причины» оставляет только строки с отклонением без объяснения', async () => {
     const user = userEvent.setup()
     setup(WITH_REASON)
@@ -339,6 +354,26 @@ describe('Закрытие месяца и решение', () => {
     closed_by_name: 'Коммерческий директор (демо)',
     closed_at: '2026-10-26T10:00:00Z',
   }
+
+  it('объясняет отказ закрыть месяц и убирает подтверждение', async () => {
+    const user = userEvent.setup()
+    mockApi({
+      'POST /api/v1/month-results/': {
+        status: 409,
+        body: { detail: 'За этот месяц нет факта продаж' },
+      },
+      'month-results': { body: RESULT },
+      '/api/v1/products': { body: PRODUCTS },
+    })
+    render(<MonthResultsPage user={COMMERCIAL} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Закрыть месяц' }))
+    const confirm = screen.getByTestId('close-confirm')
+    await user.click(within(confirm).getByRole('button', { name: 'Закрыть месяц' }))
+
+    expect(await screen.findByText(/нет факта продаж/)).toBeInTheDocument()
+    expect(screen.queryByTestId('close-confirm')).toBeNull()
+  })
 
   it('закрывает месяц через подтверждение', async () => {
     const user = userEvent.setup()
