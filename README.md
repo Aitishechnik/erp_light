@@ -50,6 +50,8 @@ cd backend && make seed-users     # по одному демо-пользова�
 Как устроен отчёт «Итоги месяца» (кто что загружает, роли, кнопки) —
 [`docs/how-month-results-works.md`](docs/how-month-results-works.md); расхождения и задачи —
 [`docs/backlog-month-results-2026-11-04.md`](docs/backlog-month-results-2026-11-04.md).
+Норма расхода в плане закупок и сигнал закупкам при изменении плана продаж —
+[`docs/data-contract-purchase-norms.md`](docs/data-contract-purchase-norms.md).
 
 Логины и пароли стенда — в `ACCESS.md` (в git не попадает).
 
