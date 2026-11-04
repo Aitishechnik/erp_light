@@ -237,6 +237,20 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
   const [historyOpen, setHistoryOpen] = useState(false)
   const [history, setHistory] = useState<MonthHistoryItem[] | null>(null)
 
+  /** Смена периода: панели и сообщения прошлого месяца закрываем, иначе они путают. */
+  const switchPeriod = (nextYear: number, nextMonth: number) => {
+    if (nextYear === year && nextMonth === month) return
+    setYear(nextYear)
+    setMonth(nextMonth)
+    setHistory(null)
+    setHistoryOpen(false)
+    setConfirmClose(false)
+    setReopenOpen(false)
+    setUploadOpen(false)
+    setEditing(null)
+    setNotice(null)
+  }
+
   const mayMatch = MATCH_ROLES.includes(user.role)
   const mayReason = REASON_ROLES.includes(user.role)
   const mayClose = CLOSE_ROLES.includes(user.role)
@@ -568,13 +582,15 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
             min={2020}
             max={2100}
             value={year}
-            onChange={(event) => setYear(Number(event.target.value) || today.getFullYear())}
+            onChange={(event) =>
+              switchPeriod(Number(event.target.value) || today.getFullYear(), month)
+            }
           />
         </label>
         <select
           aria-label="Месяц итогов"
           value={month}
-          onChange={(event) => setMonth(Number(event.target.value))}
+          onChange={(event) => switchPeriod(year, Number(event.target.value))}
         >
           {MONTH_NAMES.map((title, index) => (
             <option key={title} value={index + 1}>
@@ -729,9 +745,9 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
           >
             Отмена
           </button>
-          <span className="hint">
+          <p className="hint">
             Период берётся из шапки файла; уточняйте, только если 1С поменяла шапку.
-          </span>
+          </p>
         </div>
       ) : null}
 
@@ -1192,7 +1208,7 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
                       Исполнение
                     </th>
                     <th scope="col" className="num" title="Сумма факта в рублях">
-                      Сумма, ₽
+                      Сумма
                     </th>
                     <th scope="col">Группа</th>
                   </tr>

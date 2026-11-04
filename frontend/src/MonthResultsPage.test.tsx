@@ -375,6 +375,28 @@ describe('Закрытие месяца и решение', () => {
     expect(screen.queryByTestId('close-confirm')).toBeNull()
   })
 
+  it('смена месяца убирает сообщение прошлого месяца', async () => {
+    const user = userEvent.setup()
+    mockApi({
+      'POST /api/v1/month-results/': {
+        status: 409,
+        body: { detail: 'За этот месяц нет факта продаж' },
+      },
+      'month-results': { body: RESULT },
+      '/api/v1/products': { body: PRODUCTS },
+    })
+    render(<MonthResultsPage user={COMMERCIAL} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Закрыть месяц' }))
+    await user.click(
+      within(screen.getByTestId('close-confirm')).getByRole('button', { name: 'Закрыть месяц' }),
+    )
+    expect(await screen.findByText(/нет факта продаж/)).toBeInTheDocument()
+
+    await user.selectOptions(screen.getByLabelText('Месяц итогов'), '9')
+    await waitFor(() => expect(screen.queryByText(/нет факта продаж/)).toBeNull())
+  })
+
   it('закрывает месяц через подтверждение', async () => {
     const user = userEvent.setup()
     setupState(RESULT)
@@ -738,6 +760,20 @@ describe('История закрытий', () => {
     const second = within(table).getByTestId('history-version-2')
     expect(second).toHaveTextContent('Перенести в план продаж → Ноябрь 2026')
     expect(second).toHaveTextContent(/9\s?000,00/)
+  })
+
+  it('смена месяца закрывает историю и запрашивает её заново', async () => {
+    const user = userEvent.setup()
+    setupHistory()
+    await user.click(await screen.findByRole('button', { name: 'История закрытий' }))
+    await screen.findByTestId('history-table')
+
+    await user.selectOptions(screen.getByLabelText('Месяц итогов'), '9')
+    await waitFor(() => expect(screen.queryByTestId('history-table')).toBeNull())
+    expect(screen.getByRole('button', { name: 'История закрытий' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'История закрытий' }))
+    expect(await screen.findByTestId('history-table')).toBeInTheDocument()
   })
 
   it('менеджеру продаж историю не показывает', async () => {
