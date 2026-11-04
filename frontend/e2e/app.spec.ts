@@ -1266,6 +1266,19 @@ test('итоги месяца: план против факта и очеред�
   await expect(unmatched).toContainText('Загадочный товар')
   await expect(page.getByRole('button', { name: 'Сопоставить' })).toBeVisible()
 
+  const summary = page.getByTestId('manager-summary')
+  await expect(summary.getByText('Иван Петров')).toBeVisible()
+  await page.getByTestId('manager-toggle-sm-1').click()
+  await expect(page.getByTestId('client-row-sm-1:client-1')).toContainText('ООО Ромашка')
+  await page.getByTestId('client-toggle-sm-1:client-1').click()
+  const products = page.getByTestId('summary-products-sm-1:client-1')
+  await expect(products.getByText('Товар 1')).toBeVisible()
+  await expect(products.getByText('-20')).toBeVisible()
+
+  await page.getByLabel('Группа').selectOption('extra')
+  await expect(table.getByText('Арахис жареный')).toBeVisible()
+  await expect(table.getByText('Товар 1')).toHaveCount(0)
+
   await page.getByLabel('Месяц итогов').selectOption('9')
   await expect(page.getByTestId('month-summary')).toContainText('Строк: 2')
 })

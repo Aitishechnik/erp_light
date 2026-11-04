@@ -862,6 +862,56 @@ button.primary {
   white-space: normal;
 }
 
+/* Сводка по менеджерам: раскрытие до клиентов и позиций. */
+.summary-table td {
+  vertical-align: top;
+}
+
+.summary-toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.summary-toggle:hover {
+  text-decoration: underline;
+}
+
+.summary-caret {
+  margin-right: 0.35rem;
+  color: var(--muted);
+}
+
+.summary-client {
+  padding-left: 1.4rem;
+}
+
+.summary-products {
+  width: 100%;
+  margin: 0.35rem 0 0.6rem;
+  font-size: 0.8rem;
+}
+
+.summary-products th,
+.summary-products td {
+  padding: 0.2rem 0.4rem;
+}
+
+.summary-products th {
+  font-weight: 600;
+  color: var(--muted);
+  text-align: left;
+}
+
+.summary-products th.num,
+.summary-products td.num {
+  text-align: right;
+}
+
 .reason-editor td {
   background: var(--surface-2);
 }

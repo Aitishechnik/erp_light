@@ -75,6 +75,46 @@ function signed(value: string): string {
   return number > 0 ? `+${formatQuantity(String(number))}` : formatQuantity(String(number))
 }
 
+/** Счётчики сводки: количество разных товаров не складываем — только строки и рубли. */
+type RowStats = {
+  lines: number
+  deviation: number
+  extra: number
+  short: number
+  withoutReason: number
+  amount: number
+}
+
+function rowStats(rows: MonthRow[]): RowStats {
+  return rows.reduce<RowStats>(
+    (acc, row) => {
+      acc.lines += 1
+      if (Number(row.deviation) !== 0) {
+        acc.deviation += 1
+        if (!row.reason) acc.withoutReason += 1
+      }
+      if (row.group === 'extra') acc.extra += 1
+      if (row.group === 'short') acc.short += 1
+      acc.amount += Number(row.fact_amount)
+      return acc
+    },
+    { lines: 0, deviation: 0, extra: 0, short: 0, withoutReason: 0, amount: 0 },
+  )
+}
+
+function StatsCells({ stats }: { stats: RowStats }) {
+  return (
+    <>
+      <td className="num">{stats.lines}</td>
+      <td className="num">{stats.deviation}</td>
+      <td className="num">{stats.extra}</td>
+      <td className="num">{stats.short}</td>
+      <td className="num">{stats.withoutReason}</td>
+      <td className="num">{formatMoney(String(stats.amount))}</td>
+    </>
+  )
+}
+
 /** Сопоставление строки файла с номенклатурой: поиск и выбор карточки. */
 function MatchBox({
   row,
@@ -164,6 +204,9 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [onlyNoReason, setOnlyNoReason] = useState(false)
+  const [group, setGroup] = useState('')
+  const [openManagers, setOpenManagers] = useState<string[]>([])
+  const [openClients, setOpenClients] = useState<string[]>([])
   const [editing, setEditing] = useState<string | null>(null)
   const [reasonCode, setReasonCode] = useState('')
   const [reasonComment, setReasonComment] = useState('')
@@ -246,6 +289,7 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
     return (result?.rows ?? [])
       .filter((row) => (onlyDeviation ? Number(row.deviation) !== 0 : true))
       .filter((row) => (onlyNoReason ? Number(row.deviation) !== 0 && !row.reason : true))
+      .filter((row) => (group === '' ? true : row.group === group))
       .filter((row) => (manager === '' ? true : (row.manager_id ?? '') === manager))
       .filter((row) =>
         needle
@@ -254,25 +298,53 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
               .includes(needle)
           : true,
       )
-  }, [result, onlyDeviation, onlyNoReason, manager, search])
+  }, [result, onlyDeviation, onlyNoReason, group, manager, search])
 
-  const byManager = useMemo(() => {
-    const map = new Map<string, { name: string; lines: number; extra: number; short: number }>()
+  // Сводка: менеджер → клиенты → позиции. Показываем весь месяц, фильтры — к таблице строк.
+  const summary = useMemo(() => {
+    const managers = new Map<
+      string,
+      { name: string; rows: MonthRow[]; clients: Map<string, { name: string; rows: MonthRow[] }> }
+    >()
     for (const row of result?.rows ?? []) {
-      const key = row.manager_id ?? ''
-      const current = map.get(key) ?? {
+      const managerKey = row.manager_id ?? ''
+      const manager = managers.get(managerKey) ?? {
         name: row.manager_name ?? 'Менеджер не определён',
-        lines: 0,
-        extra: 0,
-        short: 0,
+        rows: [],
+        clients: new Map<string, { name: string; rows: MonthRow[] }>(),
       }
-      current.lines += 1
-      if (row.group === 'extra') current.extra += 1
-      if (row.group === 'short') current.short += 1
-      map.set(key, current)
+      manager.rows.push(row)
+      const client = manager.clients.get(row.client_id) ?? { name: row.client_name, rows: [] }
+      client.rows.push(row)
+      manager.clients.set(row.client_id, client)
+      managers.set(managerKey, manager)
     }
-    return [...map.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name, 'ru'))
+    return [...managers.entries()]
+      .map(([id, manager]) => ({
+        id,
+        name: manager.name,
+        stats: rowStats(manager.rows),
+        clients: [...manager.clients.entries()].map(([clientId, client]) => ({
+          id: clientId,
+          name: client.name,
+          stats: rowStats(client.rows),
+          rows: client.rows,
+        })),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
   }, [result])
+
+  const toggleManager = (id: string) => {
+    setOpenManagers((list) =>
+      list.includes(id) ? list.filter((item) => item !== id) : [...list, id],
+    )
+  }
+
+  const toggleClient = (key: string) => {
+    setOpenClients((list) =>
+      list.includes(key) ? list.filter((item) => item !== key) : [...list, key],
+    )
+  }
 
   const openReason = (row: MonthRow) => {
     const key = `${row.client_id}:${row.product_id}`
@@ -482,6 +554,16 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
               {title}
             </option>
           ))}
+        </select>
+        <select
+          aria-label="Группа"
+          value={group}
+          onChange={(event) => setGroup(event.target.value)}
+        >
+          <option value="">Все группы</option>
+          <option value="plan">по плану</option>
+          <option value="extra">вне плана</option>
+          <option value="short">не продано</option>
         </select>
         <label className="check">
           <input
@@ -827,33 +909,145 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
             </div>
           ) : null}
 
-          {byManager.length > 1 ? (
-            <table className="month-table" data-testid="manager-summary">
-              <thead>
-                <tr>
-                  <th scope="col">Менеджер</th>
-                  <th scope="col" className="num">
-                    Строк
-                  </th>
-                  <th scope="col" className="num">
-                    Вне плана
-                  </th>
-                  <th scope="col" className="num">
-                    Не продано
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {byManager.map(([id, row]) => (
-                  <tr key={id || 'none'}>
-                    <td>{row.name}</td>
-                    <td className="num">{row.lines}</td>
-                    <td className="num">{row.extra}</td>
-                    <td className="num">{row.short}</td>
+          {result.rows.length > 0 ? (
+            <>
+              <h2 className="section-title">Сводка по менеджерам</h2>
+              <table className="month-table summary-table" data-testid="manager-summary">
+                <thead>
+                  <tr>
+                    <th scope="col">Менеджер / клиент</th>
+                    <th scope="col" className="num">
+                      Строк
+                    </th>
+                    <th scope="col" className="num">
+                      С отклонением
+                    </th>
+                    <th scope="col" className="num">
+                      Вне плана
+                    </th>
+                    <th scope="col" className="num">
+                      Не продано
+                    </th>
+                    <th scope="col" className="num">
+                      Без причины
+                    </th>
+                    <th scope="col" className="num">
+                      Факт, ₽
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {summary.map((managerRow) => {
+                    const managerOpen = openManagers.includes(managerRow.id)
+                    return (
+                      <Fragment key={managerRow.id || 'none'}>
+                        <tr data-testid={`manager-row-${managerRow.id || 'none'}`}>
+                          <td>
+                            <button
+                              type="button"
+                              className="summary-toggle"
+                              aria-expanded={managerOpen}
+                              data-testid={`manager-toggle-${managerRow.id || 'none'}`}
+                              onClick={() => toggleManager(managerRow.id)}
+                            >
+                              <span className="summary-caret">{managerOpen ? '▾' : '▸'}</span>
+                              <span className="summary-name">{managerRow.name}</span>
+                            </button>
+                          </td>
+                          <StatsCells stats={managerRow.stats} />
+                        </tr>
+                        {managerOpen
+                          ? managerRow.clients.map((clientRow) => {
+                              const key = `${managerRow.id}:${clientRow.id}`
+                              const clientOpen = openClients.includes(key)
+                              return (
+                                <Fragment key={key}>
+                                  <tr data-testid={`client-row-${key}`}>
+                                    <td>
+                                      <button
+                                        type="button"
+                                        className="summary-toggle summary-client"
+                                        aria-expanded={clientOpen}
+                                        data-testid={`client-toggle-${key}`}
+                                        onClick={() => toggleClient(key)}
+                                      >
+                                        <span className="summary-caret">
+                                          {clientOpen ? '▾' : '▸'}
+                                        </span>
+                                        <span className="summary-name">{clientRow.name}</span>
+                                      </button>
+                                    </td>
+                                    <StatsCells stats={clientRow.stats} />
+                                  </tr>
+                                  {clientOpen ? (
+                                    <tr>
+                                      <td colSpan={7}>
+                                        <table
+                                          className="summary-products"
+                                          data-testid={`summary-products-${key}`}
+                                        >
+                                          <thead>
+                                            <tr>
+                                              <th scope="col">Позиция</th>
+                                              <th scope="col">Ед.</th>
+                                              <th scope="col" className="num">
+                                                План
+                                              </th>
+                                              <th scope="col" className="num">
+                                                Факт
+                                              </th>
+                                              <th scope="col" className="num">
+                                                Отклонение
+                                              </th>
+                                              <th scope="col" className="num">
+                                                Исполнение
+                                              </th>
+                                              <th scope="col" className="num">
+                                                Сумма, ₽
+                                              </th>
+                                              <th scope="col">Группа</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {clientRow.rows.map((row) => (
+                                              <tr key={`${row.client_id}:${row.product_id}`}>
+                                                <td>{row.product_name}</td>
+                                                <td>{row.unit}</td>
+                                                <td className="num">
+                                                  {formatQuantity(row.plan_quantity)}
+                                                </td>
+                                                <td className="num">
+                                                  {formatQuantity(row.fact_quantity)}
+                                                </td>
+                                                <td className="num">{signed(row.deviation)}</td>
+                                                <td className="num">
+                                                  {share(row.fact_quantity, row.plan_quantity)}
+                                                </td>
+                                                <td className="num">
+                                                  {formatMoney(row.fact_amount)}
+                                                </td>
+                                                <td>
+                                                  <span className={`badge badge-${row.group}`}>
+                                                    {GROUP_TITLES[row.group]}
+                                                  </span>
+                                                </td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </td>
+                                    </tr>
+                                  ) : null}
+                                </Fragment>
+                              )
+                            })
+                          : null}
+                      </Fragment>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </>
           ) : null}
 
           {result.rows.length === 0 ? (
@@ -862,6 +1056,8 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
               <span>Загрузите выгрузку «Продажи за месяц» в разделе «Загрузка данных».</span>
             </div>
           ) : null}
+
+          {result.rows.length > 0 ? <h2 className="section-title">Строки месяца</h2> : null}
 
           {result.rows.length > 0 ? (
             <div className="table-scroll">

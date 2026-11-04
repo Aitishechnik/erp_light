@@ -579,3 +579,49 @@ describe('Загрузка продаж с экрана отчёта', () => {
     expect(screen.queryByRole('button', { name: 'Загрузить продажи' })).toBeNull()
   })
 })
+
+describe('Сводка по менеджерам', () => {
+  it('считает строки, отклонения, причины и деньги по менеджеру', async () => {
+    setup()
+    const row = await screen.findByTestId('manager-row-m1')
+    const cells = within(row).getAllByRole('cell')
+    expect(cells[1]).toHaveTextContent('3')
+    expect(cells[2]).toHaveTextContent('3')
+    expect(cells[3]).toHaveTextContent('1')
+    expect(cells[4]).toHaveTextContent('1')
+    expect(cells[5]).toHaveTextContent('3')
+    expect(cells[6]).toHaveTextContent(/10\s?000,00/)
+  })
+
+  it('раскрывается до клиента и позиций', async () => {
+    const user = userEvent.setup()
+    setup()
+    const summary = await screen.findByTestId('manager-summary')
+    expect(within(summary).queryByTestId('client-row-m1:c1')).toBeNull()
+
+    await user.click(within(summary).getByTestId('manager-toggle-m1'))
+    const clientRow = screen.getByTestId('client-row-m1:c1')
+    expect(clientRow).toHaveTextContent('Азбука Вкуса')
+
+    await user.click(within(clientRow).getByTestId('client-toggle-m1:c1'))
+    const products = screen.getByTestId('summary-products-m1:c1')
+    expect(within(products).getByText('Финики')).toBeInTheDocument()
+    expect(within(products).getByText('-20')).toBeInTheDocument()
+    expect(within(products).getByText('80,0 %')).toBeInTheDocument()
+  })
+
+  it('фильтр по группе оставляет строки одного вида', async () => {
+    const user = userEvent.setup()
+    setup()
+    const table = await screen.findByTestId('month-table')
+
+    await user.selectOptions(screen.getByLabelText('Группа'), 'short')
+    expect(within(table).getByText('Курага')).toBeInTheDocument()
+    expect(within(table).queryByText('Финики')).toBeNull()
+    expect(within(table).queryByText('Арахис')).toBeNull()
+
+    await user.selectOptions(screen.getByLabelText('Группа'), 'extra')
+    expect(within(table).getByText('Арахис')).toBeInTheDocument()
+    expect(within(table).queryByText('Курага')).toBeNull()
+  })
+})
