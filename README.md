@@ -46,6 +46,11 @@ cd backend && make seed-users     # по одному демо-пользова�
 Контракты данных: [`docs/data-contract-planning.md`](docs/data-contract-planning.md),
 [`docs/data-contract-imports.md`](docs/data-contract-imports.md) и
 [`docs/data-contract-receipts.md`](docs/data-contract-receipts.md).
+
+Как устроен отчёт «Итоги месяца» (кто что загружает, роли, кнопки) —
+[`docs/how-month-results-works.md`](docs/how-month-results-works.md); расхождения и задачи —
+[`docs/backlog-month-results-2026-11-04.md`](docs/backlog-month-results-2026-11-04.md).
+
 Логины и пароли стенда — в `ACCESS.md` (в git не попадает).
 
 
