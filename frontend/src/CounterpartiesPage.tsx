@@ -15,6 +15,7 @@ import {
 import { PageHelp } from './PageHelp'
 import { SortableTh } from './SortableTh'
 import { type SortState, sortRows, toggleSort } from './tableSort'
+import { ROW_HEIGHT, useVirtualRows } from './useVirtualRows'
 
 const EMPTY_FORM = {
   name: '',
@@ -170,6 +171,12 @@ export function CounterpartiesPage({ user, focusId }: { user?: SessionUser; focu
     [filtered, sort],
   )
 
+  const resetKey = `${sort?.column}:${sort?.direction}:${needle}:${role}:${showInactive}`
+  const { viewportRef, range, scrollToIndex } = useVirtualRows({
+    count: sorted.length,
+    resetKey,
+  })
+
   // Объект из сообщения не должен теряться за фильтром: открываем его в списке.
   useEffect(() => {
     if (!focusRow) return
@@ -178,16 +185,13 @@ export function CounterpartiesPage({ user, focusId }: { user?: SessionUser; focu
     if (!focusRow.is_active) setShowInactive(true)
   }, [focusRow])
 
+  // В виртуальном списке строки из сообщения может не быть в DOM — сначала
+  // доскролливаем к её месту, потом подсвечиваем.
   useEffect(() => {
     if (!focusRow) return
-    const frame = requestAnimationFrame(() => {
-      const row = document.querySelector('tr.focus-row')
-      if (row && typeof row.scrollIntoView === 'function') {
-        row.scrollIntoView({ block: 'center' })
-      }
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [focusRow])
+    const index = sorted.findIndex((row) => row.id === focusRow.id)
+    if (index >= 0) scrollToIndex(index)
+  }, [focusRow, sorted, scrollToIndex])
 
   const filtersActive = search !== '' || role !== '' || showInactive
   const resetFilters = () => {
@@ -310,8 +314,12 @@ export function CounterpartiesPage({ user, focusId }: { user?: SessionUser; focu
         </button>
       </div>
 
-      <div className="table-scroll">
-        <table data-testid="counterparties-table">
+      <div
+        className="table-scroll table-viewport"
+        ref={viewportRef}
+        data-testid="counterparties-viewport"
+      >
+        <table data-testid="counterparties-table" className="virtual-table">
           <thead>
             <tr>
               <SortableTh
@@ -349,48 +357,63 @@ export function CounterpartiesPage({ user, focusId }: { user?: SessionUser; focu
                 </td>
               </tr>
             ) : (
-              sorted.map((row) => (
-                <tr key={row.id} className={row.id === focusId ? 'focus-row' : undefined}>
-                  <td>{row.name}</td>
-                  <td>
-                    {row.is_customer && mayEdit ? (
-                      <select
-                        aria-label={`Менеджер клиента ${row.name}`}
-                        value={row.manager_id ?? ''}
-                        disabled={busy}
-                        onChange={(event) => void assignManager(row, event.target.value)}
-                      >
-                        <option value="">— не закреплён —</option>
-                        {managers.map((manager) => (
-                          <option key={manager.id} value={manager.id}>
-                            {manager.full_name}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      (row.manager_name ?? '—')
-                    )}
-                  </td>
-                  <td>{counterpartyRoles(row).join(', ') || '—'}</td>
-                  <td>
-                    <span className={row.is_active ? 'badge status-approved' : 'badge'}>
-                      {row.is_active ? 'Активен' : 'Отключён'}
-                    </span>
-                  </td>
-                  <td>
-                    {mayEdit ? (
-                      <button
-                        type="button"
-                        className="mini"
-                        disabled={busy}
-                        onClick={() => toggle(row)}
-                      >
-                        {row.is_active ? 'Отключить' : 'Включить'}
-                      </button>
-                    ) : null}
-                  </td>
-                </tr>
-              ))
+              <>
+                {range.start > 0 ? (
+                  <tr className="spacer" style={{ height: range.start * ROW_HEIGHT }}>
+                    <td colSpan={5} />
+                  </tr>
+                ) : null}
+                {sorted.slice(range.start, range.end).map((row) => (
+                  <tr key={row.id} className={row.id === focusId ? 'focus-row' : undefined}>
+                    <td>{row.name}</td>
+                    <td>
+                      {row.is_customer && mayEdit ? (
+                        <select
+                          aria-label={`Менеджер клиента ${row.name}`}
+                          value={row.manager_id ?? ''}
+                          disabled={busy}
+                          onChange={(event) => void assignManager(row, event.target.value)}
+                        >
+                          <option value="">— не закреплён —</option>
+                          {managers.map((manager) => (
+                            <option key={manager.id} value={manager.id}>
+                              {manager.full_name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        (row.manager_name ?? '—')
+                      )}
+                    </td>
+                    <td>{counterpartyRoles(row).join(', ') || '—'}</td>
+                    <td>
+                      <span className={row.is_active ? 'badge status-approved' : 'badge'}>
+                        {row.is_active ? 'Активен' : 'Отключён'}
+                      </span>
+                    </td>
+                    <td>
+                      {mayEdit ? (
+                        <button
+                          type="button"
+                          className="mini"
+                          disabled={busy}
+                          onClick={() => toggle(row)}
+                        >
+                          {row.is_active ? 'Отключить' : 'Включить'}
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+                {range.end < sorted.length ? (
+                  <tr
+                    className="spacer"
+                    style={{ height: (sorted.length - range.end) * ROW_HEIGHT }}
+                  >
+                    <td colSpan={5} />
+                  </tr>
+                ) : null}
+              </>
             )}
           </tbody>
         </table>

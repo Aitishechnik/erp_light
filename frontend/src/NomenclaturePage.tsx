@@ -13,6 +13,7 @@ import {
 import { PageHelp } from './PageHelp'
 import { SortableTh } from './SortableTh'
 import { type SortState, sortRows, toggleSort } from './tableSort'
+import { ROW_HEIGHT, useVirtualRows } from './useVirtualRows'
 
 const EMPTY_FORM = { code: '', name: '', kind: 'material', unit: 'шт' }
 
@@ -152,6 +153,12 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
     [filtered, sort],
   )
 
+  const resetKey = `${sort?.column}:${sort?.direction}:${needle}:${kindFilter}:${showInactive}`
+  const { viewportRef, range, scrollToIndex } = useVirtualRows({
+    count: sorted.length,
+    resetKey,
+  })
+
   // Объект из сообщения не должен теряться за фильтром: открываем его в списке.
   useEffect(() => {
     if (!focusRow) return
@@ -160,16 +167,13 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
     if (!focusRow.is_active) setShowInactive(true)
   }, [focusRow])
 
+  // В виртуальном списке строки из сообщения может не быть в DOM — сначала
+  // доскролливаем к её месту, потом подсвечиваем.
   useEffect(() => {
     if (!focusRow) return
-    const frame = requestAnimationFrame(() => {
-      const row = document.querySelector('tr.focus-row')
-      if (row && typeof row.scrollIntoView === 'function') {
-        row.scrollIntoView({ block: 'center' })
-      }
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [focusRow])
+    const index = sorted.findIndex((row) => row.id === focusRow.id)
+    if (index >= 0) scrollToIndex(index)
+  }, [focusRow, sorted, scrollToIndex])
 
   const filtersActive = search !== '' || kindFilter !== '' || showInactive
   const resetFilters = () => {
@@ -280,8 +284,12 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
         </button>
       </div>
 
-      <div className="table-scroll">
-        <table data-testid="products-table">
+      <div
+        className="table-scroll table-viewport"
+        ref={viewportRef}
+        data-testid="products-viewport"
+      >
+        <table data-testid="products-table" className="virtual-table">
           <thead>
             <tr>
               <SortableTh
@@ -325,15 +333,30 @@ export function NomenclaturePage({ focusId }: { focusId?: string }) {
                 </td>
               </tr>
             ) : (
-              sorted.map((product) => (
-                <ProductRow
-                  key={product.id}
-                  product={product}
-                  busy={busy}
-                  focused={product.id === focusId}
-                  onToggle={toggle}
-                />
-              ))
+              <>
+                {range.start > 0 ? (
+                  <tr className="spacer" style={{ height: range.start * ROW_HEIGHT }}>
+                    <td colSpan={6} />
+                  </tr>
+                ) : null}
+                {sorted.slice(range.start, range.end).map((product) => (
+                  <ProductRow
+                    key={product.id}
+                    product={product}
+                    busy={busy}
+                    focused={product.id === focusId}
+                    onToggle={toggle}
+                  />
+                ))}
+                {range.end < sorted.length ? (
+                  <tr
+                    className="spacer"
+                    style={{ height: (sorted.length - range.end) * ROW_HEIGHT }}
+                  >
+                    <td colSpan={6} />
+                  </tr>
+                ) : null}
+              </>
             )}
           </tbody>
         </table>

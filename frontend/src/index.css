@@ -519,13 +519,80 @@ th[aria-sort="descending"] {
   background: var(--surface-3);
 }
 
-/* Узкий экран: длинные наименования переносятся, колонка действий остаётся в кадре. */
-@media (max-width: 1400px) {
-  [data-testid="products-table"] td:nth-child(2),
-  [data-testid="products-table"] th:nth-child(2) {
-    white-space: normal;
-    min-width: 320px;
-  }
+/* ── Виртуальная таблица: в DOM только видимые строки ──────────────────── */
+
+/* Высота области задаётся из JS под остаток окна; сама страница не едет. */
+.table-viewport {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  overscroll-behavior: contain;
+}
+
+.table-viewport table {
+  border: 0;
+  border-radius: 0;
+  /* Глобальное `table { overflow: hidden }` делает таблицу скролл-контейнером
+     и ломает липкую шапку — здесь прокручивается только обёртка. */
+  overflow: visible;
+}
+
+/* Шапка не уезжает: сортировка и фильтры всегда под рукой. */
+.table-viewport thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.table-viewport thead th {
+  background: var(--surface-2);
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+
+.table-viewport::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.table-viewport::-webkit-scrollbar-thumb {
+  background: var(--muted);
+  border-radius: 6px;
+}
+
+.table-viewport::-webkit-scrollbar-track {
+  background: var(--surface-2);
+}
+
+/* Строка одной высоты — иначе виртуальные распорки разъезжаются. */
+.virtual-table tbody tr {
+  height: 39px;
+}
+
+.virtual-table td,
+.virtual-table th {
+  padding-top: 5px;
+  padding-bottom: 5px;
+  white-space: nowrap;
+}
+
+/* Селект менеджера в строке не должен её раздувать. */
+.virtual-table select {
+  height: 26px;
+  padding: 0 0.35rem;
+  max-width: 230px;
+  font-size: 0.85rem;
+}
+
+/* Распорки заменяют непоказанные строки и не рисуют границ. */
+.virtual-table tr.spacer td {
+  padding: 0;
+  border: 0;
+}
+
+/* Строка из сообщения не теряется при прокрутке. */
+.table-viewport tr.focus-row td {
+  background: var(--surface-3);
 }
 
 /* ── Формы, кнопки, вход ───────────────────────────────────────────────── */
