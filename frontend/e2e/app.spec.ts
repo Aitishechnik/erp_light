@@ -1336,6 +1336,53 @@ test('месяц закрывается и показывает снимок', a
   await expect(page.getByRole('button', { name: 'Открыть заново' })).toBeVisible()
 })
 
+test('продажи грузятся прямо с экрана итогов месяца', async ({ page }) => {
+  await mockSession(page, COMMERCIAL)
+  await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/products**', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/month-results**', (route) => route.fulfill({ json: MONTH_RESULT }))
+  await page.route('**/api/v1/imports/sales**', (route) =>
+    route.fulfill({
+      json: {
+        id: 's-1',
+        kind: 'sales',
+        kind_title: 'Продажи за месяц',
+        file_name: 'Продажи_Ноя.xlsx',
+        status: 'ok',
+        rows_total: 2,
+        rows_created: 2,
+        rows_updated: 0,
+        rows_skipped: 0,
+        rows_failed: 0,
+        message: null,
+        created_at: '2026-10-26T10:00:00Z',
+      },
+    }),
+  )
+  await page.goto('/')
+
+  await openSection(page, 'Отчёты', 'Итоги месяца')
+  await page.getByRole('button', { name: 'Загрузить продажи' }).click()
+  await expect(page.getByTestId('upload-form')).toBeVisible()
+
+  await page.getByLabel('Файл продаж за месяц').setInputFiles({
+    name: 'Продажи_Ноя.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    buffer: Buffer.from('xlsx'),
+  })
+  await page.getByLabel('Год в файле').fill('2026')
+  await page.getByLabel('Месяц в файле').fill('11')
+
+  const request = page.waitForRequest(
+    (item) => item.url().includes('/imports/sales') && item.method() === 'POST',
+  )
+  await page.getByRole('button', { name: 'Загрузить', exact: true }).click()
+  expect((await request).url()).toContain('?year=2026&month=11')
+
+  await expect(page.getByText(/Выгрузка принята: строк 2/)).toBeVisible()
+  await expect(page.getByTestId('upload-form')).toHaveCount(0)
+})
+
 const EXECUTIVE = {
   id: 'ed-1',
   login: 'executive',

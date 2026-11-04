@@ -20,6 +20,7 @@ import {
   saveMonthReason,
   setMonthDecision,
   type TransferDrafts,
+  uploadImport,
 } from './api'
 import { PageHelp } from './PageHelp'
 
@@ -176,10 +177,16 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
   })
   const [decisionComment, setDecisionComment] = useState('')
   const [transferResult, setTransferResult] = useState<TransferDrafts | null>(null)
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadYear, setUploadYear] = useState('')
+  const [uploadMonth, setUploadMonth] = useState('')
+  const [uploadSeq, setUploadSeq] = useState(0)
 
   const mayMatch = MATCH_ROLES.includes(user.role)
   const mayReason = REASON_ROLES.includes(user.role)
   const mayClose = CLOSE_ROLES.includes(user.role)
+  const mayUpload = CLOSE_ROLES.includes(user.role)
 
   const load = useCallback(async () => {
     setState({ status: 'loading' })
@@ -344,6 +351,38 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
     }
   }
 
+  /** Загрузка выгрузки продаж прямо с экрана отчёта: период из шапки или уточнён вручную. */
+  const uploadSales = async () => {
+    if (!uploadFile) return
+    const hasYear = uploadYear.trim() !== ''
+    const hasMonth = uploadMonth.trim() !== ''
+    if (hasYear !== hasMonth) {
+      setNotice(
+        'Укажите и год, и месяц — или оставьте оба поля пустыми, тогда период возьмётся из шапки файла',
+      )
+      return
+    }
+    setBusy(true)
+    setNotice(null)
+    try {
+      const period = hasYear ? { year: Number(uploadYear), month: Number(uploadMonth) } : undefined
+      const outcome = await uploadImport('sales', uploadFile, period)
+      setUploadOpen(false)
+      setUploadFile(null)
+      setUploadSeq((value) => value + 1)
+      setNotice(
+        outcome.status === 'ok'
+          ? `Выгрузка принята: строк ${outcome.rows_created}, не сопоставлено ${outcome.rows_failed}.`
+          : (outcome.message ?? 'Выгрузка загружена с замечаниями — смотрите журнал загрузок.'),
+      )
+      await load()
+    } catch (error) {
+      setNotice(errorMessage(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const createDrafts = async () => {
     setBusy(true)
     setNotice(null)
@@ -493,6 +532,80 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
               </button>
             )
           ) : null}
+          {mayUpload ? (
+            result.status === 'closed' ? (
+              <span className="hint">
+                Месяц закрыт — выгрузку продаж не принять; откройте месяц заново.
+              </span>
+            ) : (
+              <button type="button" className="mini" onClick={() => setUploadOpen((open) => !open)}>
+                {uploadOpen ? 'Скрыть загрузку' : 'Загрузить продажи'}
+              </button>
+            )
+          ) : null}
+        </div>
+      ) : null}
+
+      {result && mayUpload && uploadOpen && result.status === 'open' ? (
+        <div className="month-confirm" data-testid="upload-form">
+          <p>
+            Отчёт 1С «Продажи» за месяц (.xlsx). Повторная загрузка заменит месяц целиком — строки
+            этого месяца в отчёте обновятся.
+          </p>
+          <input
+            key={uploadSeq}
+            type="file"
+            accept=".xlsx"
+            aria-label="Файл продаж за месяц"
+            onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
+          />
+          <label className="check">
+            Год
+            <input
+              type="number"
+              aria-label="Год в файле"
+              min={2020}
+              max={2100}
+              placeholder="из шапки"
+              value={uploadYear}
+              onChange={(event) => setUploadYear(event.target.value)}
+            />
+          </label>
+          <label className="check">
+            Месяц
+            <input
+              type="number"
+              aria-label="Месяц в файле"
+              min={1}
+              max={12}
+              placeholder="из шапки"
+              value={uploadMonth}
+              onChange={(event) => setUploadMonth(event.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="primary"
+            disabled={!uploadFile || busy}
+            onClick={() => void uploadSales()}
+          >
+            Загрузить
+          </button>
+          <button
+            type="button"
+            className="mini"
+            onClick={() => {
+              setUploadOpen(false)
+              setUploadFile(null)
+              setUploadYear('')
+              setUploadMonth('')
+            }}
+          >
+            Отмена
+          </button>
+          <span className="hint">
+            Период берётся из шапки файла; уточняйте, только если 1С поменяла шапку.
+          </span>
         </div>
       ) : null}
 

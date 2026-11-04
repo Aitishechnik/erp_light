@@ -817,10 +817,18 @@ export function fetchImports(limit = 20): Promise<ImportSession[]> {
   return request<ImportSession[]>(`/api/v1/imports?limit=${limit}`)
 }
 
-export function uploadImport(kind: string, file: File): Promise<ImportSession> {
+/** Период выгрузки, если шапку файла нужно уточнить вручную. */
+export type ImportPeriod = { year: number; month: number }
+
+export function uploadImport(
+  kind: string,
+  file: File,
+  period?: ImportPeriod,
+): Promise<ImportSession> {
   const form = new FormData()
   form.append('file', file)
-  return request<ImportSession>(`/api/v1/imports/${kind}`, { method: 'POST', body: form })
+  const query = period ? `?year=${period.year}&month=${period.month}` : ''
+  return request<ImportSession>(`/api/v1/imports/${kind}${query}`, { method: 'POST', body: form })
 }
 
 /** Загрузка файла «Партия» из 1С в конкретное поступление (из его карточки). */

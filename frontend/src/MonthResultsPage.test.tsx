@@ -479,3 +479,103 @@ describe('Закрытие месяца и решение', () => {
     expect(screen.queryByRole('button', { name: 'Сохранить решение' })).toBeNull()
   })
 })
+
+describe('Загрузка продаж с экрана отчёта', () => {
+  const SESSION = {
+    id: 's-1',
+    kind: 'sales',
+    kind_title: 'Продажи за месяц',
+    file_name: 'Продажи_Окт.xlsx',
+    status: 'ok',
+    rows_total: 2,
+    rows_created: 2,
+    rows_updated: 0,
+    rows_skipped: 0,
+    rows_failed: 0,
+    message: null,
+    created_at: '2026-10-26T10:00:00Z',
+  }
+
+  function setupUpload(result: MonthResult = RESULT, user: SessionUser = COMMERCIAL) {
+    mockApi({
+      'POST /api/v1/imports/sales': { body: SESSION },
+      'month-results': { body: result },
+      '/api/v1/products': { body: PRODUCTS },
+    })
+    return render(<MonthResultsPage user={user} />)
+  }
+
+  function file(): File {
+    return new File(['xlsx'], 'Продажи_Окт.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+  }
+
+  it('грузят только коммерческий и исполнительный директор', async () => {
+    const { unmount } = setupUpload()
+    expect(await screen.findByRole('button', { name: 'Загрузить продажи' })).toBeInTheDocument()
+    unmount()
+
+    setupUpload(RESULT, PURCHASE)
+    await screen.findByTestId('month-state')
+    expect(screen.queryByRole('button', { name: 'Загрузить продажи' })).toBeNull()
+  })
+
+  it('загружает файл с уточнённым периодом и обновляет отчёт', async () => {
+    const user = userEvent.setup()
+    setupUpload()
+    await user.click(await screen.findByRole('button', { name: 'Загрузить продажи' }))
+
+    const form = screen.getByTestId('upload-form')
+    await user.upload(within(form).getByLabelText('Файл продаж за месяц'), file())
+    await user.type(within(form).getByLabelText('Год в файле'), '2026')
+    await user.type(within(form).getByLabelText('Месяц в файле'), '11')
+    await user.click(within(form).getByRole('button', { name: 'Загрузить' }))
+
+    await waitFor(() => {
+      const call = vi
+        .mocked(fetch)
+        .mock.calls.find(
+          ([url, init]) =>
+            (init?.method ?? 'GET').toUpperCase() === 'POST' &&
+            String(url).includes('/imports/sales'),
+        )
+      expect(call).toBeTruthy()
+      expect(String(call?.[0])).toContain('?year=2026&month=11')
+    })
+    expect(await screen.findByText(/Выгрузка принята: строк 2/)).toBeInTheDocument()
+    expect(screen.queryByTestId('upload-form')).toBeNull()
+  })
+
+  it('не отправляет файл, если уточнён только один параметр периода', async () => {
+    const user = userEvent.setup()
+    setupUpload()
+    await user.click(await screen.findByRole('button', { name: 'Загрузить продажи' }))
+
+    const form = screen.getByTestId('upload-form')
+    await user.upload(within(form).getByLabelText('Файл продаж за месяц'), file())
+    await user.type(within(form).getByLabelText('Год в файле'), '2026')
+    await user.click(within(form).getByRole('button', { name: 'Загрузить' }))
+
+    expect(await screen.findByText(/Укажите и год, и месяц/)).toBeInTheDocument()
+    const uploaded = vi
+      .mocked(fetch)
+      .mock.calls.some(
+        ([url, init]) =>
+          (init?.method ?? 'GET').toUpperCase() === 'POST' &&
+          String(url).includes('/imports/sales'),
+      )
+    expect(uploaded).toBe(false)
+  })
+
+  it('на закрытом месяце поясняет, что загрузка недоступна', async () => {
+    setupUpload({
+      ...RESULT,
+      status: 'closed',
+      closed_by_name: 'Коммерческий директор (демо)',
+      closed_at: '2026-10-26T10:00:00Z',
+    })
+    expect(await screen.findByText(/Месяц закрыт — выгрузку продаж не принять/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Загрузить продажи' })).toBeNull()
+  })
+})
