@@ -62,7 +62,7 @@ def _money(value: Decimal) -> Decimal:
     return value.quantize(MONEY_STEP)
 
 
-Matcher = Annotated[User, Depends(require_roles(ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR))]
+Matcher = Annotated[User, Depends(require_roles(*service.MATCH_ROLES))]
 
 
 def _reason_out(row: service.MonthRow) -> ReasonOut | None:

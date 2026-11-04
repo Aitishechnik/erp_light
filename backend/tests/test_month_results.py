@@ -317,6 +317,45 @@ def test_sales_manager_sees_only_own_rows(
     assert [row["client_name"] for row in rows] == ["ООО Вектор"]
 
 
+def test_unmatched_queue_is_hidden_from_non_matchers(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    manager = _user(db_session, "sales")
+    catalog["customer"].manager_id = manager.id
+    db_session.commit()
+
+    login("commercial")
+    response = upload_sales(
+        client,
+        sales_xlsx(
+            [
+                (
+                    "ООО Ромашка",
+                    [("Смесь ореховая", "1", "10"), ("Неведомый товар", "2", "20")],
+                )
+            ]
+        ),
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["rows_failed"] == 1
+    assert len(month(client)["unmatched"]) == 1
+
+    login("sales")
+    assert month(client)["unmatched"] == []
+
+    login("purchase")
+    assert month(client)["unmatched"] == []
+
+    # Очередь всё ещё блокирует закрытие: её видит и проверяет закрывающий.
+    login("commercial")
+    blocked = client.post("/api/v1/month-results/2026/10/close")
+    assert blocked.status_code == 409
+    assert "сопоставления" in blocked.json()["detail"]
+
+    login("executive")
+    assert len(month(client)["unmatched"]) == 1
+
+
 def test_roles_of_month_results(client: TestClient, login, catalog: dict[str, Any]) -> None:
     login("import")
     assert client.get("/api/v1/month-results?year=2026&month=10").status_code == 403

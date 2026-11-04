@@ -39,6 +39,10 @@ from app.models.sales import (
 
 ZERO = Decimal("0")
 
+# Кто видит очередь сопоставления. Очередь — рабочий инструмент тех, кто сопоставляет;
+# остальным она показывает чужие клиенты, количество и суммы.
+MATCH_ROLES = (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR)
+
 
 @dataclass(frozen=True)
 class MonthRow:
@@ -223,7 +227,7 @@ def month_summary(db: Session, user: User, year: int, month: int) -> MonthSummar
         month=month,
         plan_approved=_plan_approved(db, year),
         rows=rows,
-        unmatched=month_unmatched(db, year, month),
+        unmatched=month_unmatched(db, year, month) if user.role in MATCH_ROLES else [],
     )
 
 
