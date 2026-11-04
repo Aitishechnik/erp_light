@@ -698,6 +698,41 @@ def test_reopen_with_reason_keeps_history(
     assert open_again.status_code == 200
 
 
+def test_history_lists_closed_versions(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    login("commercial")
+    _closed_month(client, db_session, catalog)
+    client.post("/api/v1/month-results/2026/10/reopen", json={"reason": "перезалили факт"})
+    client.post("/api/v1/month-results/2026/10/close")
+
+    response = client.get("/api/v1/month-results/2026/10/history")
+    assert response.status_code == 200, response.text
+    versions = response.json()
+    assert [row["version"] for row in versions] == [1, 2]
+    assert versions[0]["closed_by_name"] == "Коммерческий директор (демо)"
+    assert versions[0]["totals"]["lines"] == 1
+    assert versions[0]["totals"]["deviation_lines"] == 1
+    assert versions[0]["totals"]["fact_amount"] == "8000.00"
+    assert versions[1]["totals"]["lines"] == 1
+
+    login("purchase")
+    assert client.get("/api/v1/month-results/2026/10/history").status_code == 200
+
+    login("sales")
+    assert client.get("/api/v1/month-results/2026/10/history").status_code == 403
+
+    login("import")
+    assert client.get("/api/v1/month-results/2026/10/history").status_code == 403
+
+
+def test_history_is_empty_before_close(client: TestClient, login) -> None:
+    login("commercial")
+    response = client.get("/api/v1/month-results/2026/10/history")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
 def test_reopen_when_open_is_rejected(client: TestClient, login, catalog: dict[str, Any]) -> None:
     login("commercial")
     response = client.post("/api/v1/month-results/2026/10/reopen", json={"reason": "просто так"})

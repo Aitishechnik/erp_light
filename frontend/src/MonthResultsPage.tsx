@@ -4,12 +4,15 @@ import {
   closeMonth,
   createTransferDrafts,
   errorMessage,
+  fetchMonthHistory,
   fetchMonthResult,
   fetchPlanningProducts,
   formatDate,
   formatMoney,
   formatQuantity,
   type MonthDecisionIn,
+  type MonthHistoryDecision,
+  type MonthHistoryItem,
   type MonthResult,
   type MonthRow,
   type MonthUnmatched,
@@ -100,6 +103,12 @@ function rowStats(rows: MonthRow[]): RowStats {
     },
     { lines: 0, deviation: 0, extra: 0, short: 0, withoutReason: 0, amount: 0 },
   )
+}
+
+/** Подпись решения из снимка: перенос показывает месяц-получатель. */
+function decisionText(decision: MonthHistoryDecision): string {
+  if (!decision.target_year || !decision.target_month) return decision.title
+  return `${decision.title} → ${MONTH_NAMES[decision.target_month - 1]} ${decision.target_year}`
 }
 
 function StatsCells({ stats }: { stats: RowStats }) {
@@ -225,11 +234,14 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
   const [uploadYear, setUploadYear] = useState('')
   const [uploadMonth, setUploadMonth] = useState('')
   const [uploadSeq, setUploadSeq] = useState(0)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [history, setHistory] = useState<MonthHistoryItem[] | null>(null)
 
   const mayMatch = MATCH_ROLES.includes(user.role)
   const mayReason = REASON_ROLES.includes(user.role)
   const mayClose = CLOSE_ROLES.includes(user.role)
   const mayUpload = CLOSE_ROLES.includes(user.role)
+  const mayHistory = CLOSE_ROLES.includes(user.role) || user.role === 'purchase_director'
 
   const load = useCallback(async () => {
     setState({ status: 'loading' })
@@ -399,6 +411,8 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
     try {
       await closeMonth(year, month)
       setConfirmClose(false)
+      setHistory(null)
+      setHistoryOpen(false)
       await load()
     } catch (error) {
       setNotice(errorMessage(error))
@@ -415,6 +429,8 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
       await reopenMonth(year, month, reopenReason.trim())
       setReopenOpen(false)
       setReopenReason('')
+      setHistory(null)
+      setHistoryOpen(false)
       await load()
     } catch (error) {
       setNotice(errorMessage(error))
@@ -452,6 +468,21 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
       setNotice(errorMessage(error))
     } finally {
       setBusy(false)
+    }
+  }
+
+  const toggleHistory = async () => {
+    if (historyOpen) {
+      setHistoryOpen(false)
+      return
+    }
+    setHistoryOpen(true)
+    if (history !== null) return
+    try {
+      setHistory(await fetchMonthHistory(year, month))
+    } catch (error) {
+      setHistoryOpen(false)
+      setNotice(errorMessage(error))
     }
   }
 
@@ -625,6 +656,11 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
               </button>
             )
           ) : null}
+          {mayHistory ? (
+            <button type="button" className="mini" onClick={() => void toggleHistory()}>
+              {historyOpen ? 'Скрыть историю' : 'История закрытий'}
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -688,6 +724,67 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
           <span className="hint">
             Период берётся из шапки файла; уточняйте, только если 1С поменяла шапку.
           </span>
+        </div>
+      ) : null}
+
+      {result && mayHistory && historyOpen ? (
+        <div className="month-confirm" data-testid="month-history">
+          <p>
+            Снимки фиксируются при закрытии и не пересчитываются: в истории видно, что было
+            зафиксировано в каждой версии.
+          </p>
+          {history === null ? (
+            <p className="hint">Загрузка истории…</p>
+          ) : history.length === 0 ? (
+            <p className="hint">Закрытий ещё не было.</p>
+          ) : (
+            <div className="table-scroll">
+              <table className="month-table" data-testid="history-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Версия</th>
+                    <th scope="col">Закрыт</th>
+                    <th scope="col">Кто</th>
+                    <th scope="col" className="num">
+                      Строк
+                    </th>
+                    <th scope="col" className="num">
+                      С откл.
+                    </th>
+                    <th scope="col" className="num">
+                      Вне плана
+                    </th>
+                    <th scope="col" className="num">
+                      Не продано
+                    </th>
+                    <th scope="col" className="num">
+                      Без причины
+                    </th>
+                    <th scope="col" className="num">
+                      Факт, ₽
+                    </th>
+                    <th scope="col">Решение</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((item) => (
+                    <tr key={item.version} data-testid={`history-version-${item.version}`}>
+                      <td>{item.version}</td>
+                      <td>{formatDate(item.closed_at)}</td>
+                      <td>{item.closed_by_name ?? '—'}</td>
+                      <td className="num">{item.totals.lines}</td>
+                      <td className="num">{item.totals.deviation_lines}</td>
+                      <td className="num">{item.totals.extra_lines}</td>
+                      <td className="num">{item.totals.short_lines}</td>
+                      <td className="num">{item.totals.without_reason}</td>
+                      <td className="num">{formatMoney(item.totals.fact_amount)}</td>
+                      <td>{item.decision ? decisionText(item.decision) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       ) : null}
 

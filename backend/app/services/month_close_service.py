@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.auth import ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR, User
 from app.models.sales import (
@@ -54,6 +54,27 @@ def is_closed(db: Session, year: int, month: int) -> bool:
     """Закрыт ли месяц: проверяют загрузка продаж и правка причин."""
     result = get_result(db, year, month)
     return result is not None and result.status == "closed"
+
+
+def history(db: Session, year: int, month: int) -> list[MonthResultSnapshot]:
+    """Версии снимков месяца: каждая фиксация закрытия, от старой к новой.
+
+    Снимок не пересчитывается: история показывает, что именно было зафиксировано
+    при каждом закрытии, даже если потом месяц открывали и загружали заново.
+    """
+    result = get_result(db, year, month)
+    if result is None:
+        return []
+    return list(
+        db.execute(
+            select(MonthResultSnapshot)
+            .where(MonthResultSnapshot.month_result_id == result.id)
+            .options(selectinload(MonthResultSnapshot.closed_by))
+            .order_by(MonthResultSnapshot.version)
+        )
+        .scalars()
+        .all()
+    )
 
 
 def _require_role(user: User) -> None:
@@ -121,6 +142,8 @@ def _decision_snapshot(result: MonthResult) -> dict[str, Any] | None:
         "comment": result.decision_comment,
         "target_year": result.target_year,
         "target_month": result.target_month,
+        "author": result.decision_by.full_name if result.decision_by is not None else None,
+        "at": result.decision_at.isoformat() if result.decision_at is not None else None,
     }
 
 

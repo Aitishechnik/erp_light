@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { MonthResult, MonthRow, Product, SessionUser } from './api'
+import type { MonthHistoryItem, MonthResult, MonthRow, Product, SessionUser } from './api'
 import { mockApi } from './apiMock'
 import { MonthResultsPage } from './MonthResultsPage'
 
@@ -623,5 +623,98 @@ describe('Сводка по менеджерам', () => {
     await user.selectOptions(screen.getByLabelText('Группа'), 'extra')
     expect(within(table).getByText('Арахис')).toBeInTheDocument()
     expect(within(table).queryByText('Курага')).toBeNull()
+  })
+})
+
+const SALES_MANAGER: SessionUser = {
+  ...COMMERCIAL,
+  id: 'u4',
+  role: 'sales_manager',
+  role_title: 'Менеджер по продажам',
+}
+
+const HISTORY: MonthHistoryItem[] = [
+  {
+    version: 1,
+    closed_at: '2026-10-26T10:00:00Z',
+    closed_by_name: 'Коммерческий директор (демо)',
+    totals: {
+      lines: 3,
+      deviation_lines: 3,
+      extra_lines: 1,
+      short_lines: 1,
+      without_reason: 3,
+      fact_amount: '10000.00',
+    },
+    decision: null,
+  },
+  {
+    version: 2,
+    closed_at: '2026-10-27T10:00:00Z',
+    closed_by_name: 'Исполнительный директор (демо)',
+    totals: {
+      lines: 3,
+      deviation_lines: 2,
+      extra_lines: 1,
+      short_lines: 1,
+      without_reason: 1,
+      fact_amount: '9000.00',
+    },
+    decision: {
+      code: 'transfer_sales',
+      title: 'Перенести в план продаж',
+      target_year: 2026,
+      target_month: 11,
+      author_name: 'Коммерческий директор (демо)',
+      at: '2026-10-27T09:00:00Z',
+    },
+  },
+]
+
+describe('История закрытий', () => {
+  const CLOSED: MonthResult = {
+    ...RESULT,
+    status: 'closed',
+    closed_by_name: 'Коммерческий директор (демо)',
+    closed_at: '2026-10-26T10:00:00Z',
+  }
+
+  function setupHistory(
+    result: MonthResult = CLOSED,
+    user: SessionUser = COMMERCIAL,
+    items: MonthHistoryItem[] = HISTORY,
+  ) {
+    mockApi({
+      'GET /history': { body: items },
+      'month-results': { body: result },
+      '/api/v1/products': { body: PRODUCTS },
+    })
+    return render(<MonthResultsPage user={user} />)
+  }
+
+  it('показывает версии снимков и решение месяца', async () => {
+    const user = userEvent.setup()
+    setupHistory()
+    await user.click(await screen.findByRole('button', { name: 'История закрытий' }))
+
+    const table = await screen.findByTestId('history-table')
+    await waitFor(() => expect(within(table).getByText('Версия')).toBeInTheDocument())
+    expect(within(table).getByTestId('history-version-1')).toHaveTextContent('—')
+    const second = within(table).getByTestId('history-version-2')
+    expect(second).toHaveTextContent('Перенести в план продаж → Ноябрь 2026')
+    expect(second).toHaveTextContent(/9\s?000,00/)
+  })
+
+  it('менеджеру продаж историю не показывает', async () => {
+    setupHistory(CLOSED, SALES_MANAGER)
+    await screen.findByTestId('month-state')
+    expect(screen.queryByRole('button', { name: 'История закрытий' })).toBeNull()
+  })
+
+  it('закупки видят историю, пустая история объясняется', async () => {
+    setupHistory(CLOSED, PURCHASE, [])
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'История закрытий' }))
+    expect(await screen.findByText('Закрытий ещё не было.')).toBeInTheDocument()
   })
 })

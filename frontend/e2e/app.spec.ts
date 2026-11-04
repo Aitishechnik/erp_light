@@ -1334,6 +1334,26 @@ test('месяц закрывается и показывает снимок', a
     closed = true
     return route.fulfill({ json: state() })
   })
+  await page.route('**/api/v1/month-results/**/history', (route) =>
+    route.fulfill({
+      json: [
+        {
+          version: 1,
+          closed_at: '2026-10-26T10:00:00Z',
+          closed_by_name: 'Коммерческий директор',
+          totals: {
+            lines: 2,
+            deviation_lines: 2,
+            extra_lines: 1,
+            short_lines: 0,
+            without_reason: 2,
+            fact_amount: '8100.00',
+          },
+          decision: null,
+        },
+      ],
+    }),
+  )
   await page.goto('/')
 
   await openSection(page, 'Отчёты', 'Итоги месяца')
@@ -1347,6 +1367,12 @@ test('месяц закрывается и показывает снимок', a
   await expect(page.getByText(/Снимок зафиксирован/)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Закрыть месяц' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Открыть заново' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'История закрытий' }).click()
+  const history = page.getByTestId('history-table')
+  await expect(history).toBeVisible()
+  await expect(history).toContainText('Коммерческий директор')
+  await expect(history).toContainText('8 100,00')
 })
 
 test('продажи грузятся прямо с экрана итогов месяца', async ({ page }) => {

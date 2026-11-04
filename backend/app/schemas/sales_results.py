@@ -31,6 +31,38 @@ class DecisionOut(BaseModel):
     at: datetime
 
 
+class MonthTotalsOut(BaseModel):
+    """Итоги снимка: счётчики строк и сумма факта."""
+
+    lines: int
+    deviation_lines: int
+    extra_lines: int
+    short_lines: int
+    without_reason: int
+    fact_amount: Decimal
+
+
+class HistoryDecisionOut(BaseModel):
+    """Решение месяца из снимка: в старых версиях автора и даты может не быть."""
+
+    code: str
+    title: str
+    target_year: int | None = None
+    target_month: int | None = None
+    author_name: str | None = None
+    at: datetime | None = None
+
+
+class MonthHistoryItemOut(BaseModel):
+    """Одна версия снимка месяца: когда закрыли, кто и с какими итогами."""
+
+    version: int
+    closed_at: datetime
+    closed_by_name: str | None
+    totals: MonthTotalsOut
+    decision: HistoryDecisionOut | None = None
+
+
 class DecisionIn(BaseModel):
     """Поставить решение месяца."""
 

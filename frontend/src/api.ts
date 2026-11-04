@@ -1203,6 +1203,38 @@ export function createTransferDrafts(year: number, month: number): Promise<Trans
   })
 }
 
+/** Итоги одного закрытия месяца — так, как они зафиксированы в снимке. */
+export type MonthTotals = {
+  lines: number
+  deviation_lines: number
+  extra_lines: number
+  short_lines: number
+  without_reason: number
+  fact_amount: string
+}
+
+export type MonthHistoryDecision = {
+  code: string
+  title: string
+  target_year: number | null
+  target_month: number | null
+  author_name: string | null
+  at: string | null
+}
+
+export type MonthHistoryItem = {
+  version: number
+  closed_at: string
+  closed_by_name: string | null
+  totals: MonthTotals
+  decision: MonthHistoryDecision | null
+}
+
+/** История закрытий месяца: версии снимков, от старой к новой. */
+export function fetchMonthHistory(year: number, month: number): Promise<MonthHistoryItem[]> {
+  return request<MonthHistoryItem[]>(`/api/v1/month-results/${year}/${month}/history`)
+}
+
 /** Одно поступление по id: нужно для перехода из журнала. */
 export function fetchBatch(id: string): Promise<Batch> {
   return request<Batch>(`/api/v1/batches/${id}`)

@@ -17,14 +17,17 @@ from app.models.auth import (
     ROLE_SALES_MANAGER,
     User,
 )
-from app.models.sales import DECISION_TITLES, REASON_TITLES, MonthResult
+from app.models.sales import DECISION_TITLES, REASON_TITLES, MonthResult, MonthResultSnapshot
 from app.schemas.sales_results import (
     DecisionIn,
     DecisionOut,
+    HistoryDecisionOut,
     MatchIn,
     MatchOut,
+    MonthHistoryItemOut,
     MonthResultOut,
     MonthRowOut,
+    MonthTotalsOut,
     MonthUnmatchedOut,
     ReasonIn,
     ReasonOptionOut,
@@ -64,6 +67,12 @@ def _money(value: Decimal) -> Decimal:
 
 Matcher = Annotated[User, Depends(require_roles(*service.MATCH_ROLES))]
 
+# История снимков: её видит руководство. Менеджеру не показываем — в снимке строки
+# всех клиентов, а не только его.
+HISTORY_ROLES = (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR, ROLE_PURCHASE_DIRECTOR)
+
+HistoryViewer = Annotated[User, Depends(require_roles(*HISTORY_ROLES))]
+
 
 def _reason_out(row: service.MonthRow) -> ReasonOut | None:
     if row.reason is None:
@@ -88,6 +97,38 @@ def _decision_out(result: MonthResult | None) -> DecisionOut | None:
         target_month=result.target_month,
         author_name=result.decision_by.full_name if result.decision_by is not None else None,
         at=result.decision_at,
+    )
+
+
+def _history_out(row: MonthResultSnapshot) -> MonthHistoryItemOut:
+    """Одна версия снимка: итоги и решение так, как они были зафиксированы."""
+    snapshot = row.snapshot or {}
+    totals = snapshot.get("totals") or {}
+    decision = snapshot.get("decision")
+    return MonthHistoryItemOut(
+        version=row.version,
+        closed_at=row.closed_at,
+        closed_by_name=row.closed_by.full_name if row.closed_by is not None else None,
+        totals=MonthTotalsOut(
+            lines=int(totals.get("lines", 0)),
+            deviation_lines=int(totals.get("deviation_lines", 0)),
+            extra_lines=int(totals.get("extra_lines", 0)),
+            short_lines=int(totals.get("short_lines", 0)),
+            without_reason=int(totals.get("without_reason", 0)),
+            fact_amount=_money(Decimal(str(totals.get("fact_amount", "0")))),
+        ),
+        decision=(
+            HistoryDecisionOut(
+                code=decision.get("code", ""),
+                title=decision.get("title", ""),
+                target_year=decision.get("target_year"),
+                target_month=decision.get("target_month"),
+                author_name=decision.get("author"),
+                at=decision.get("at"),
+            )
+            if decision
+            else None
+        ),
     )
 
 
@@ -160,6 +201,14 @@ def month_result(
             status_code=status.HTTP_403_FORBIDDEN, detail="Итоги месяца вам недоступны"
         )
     return _summary(db, user, year, month)
+
+
+@router.get("/month-results/{year}/{month}/history", response_model=list[MonthHistoryItemOut])
+def month_history(
+    year: int, month: int, user: HistoryViewer, db: DbSession
+) -> list[MonthHistoryItemOut]:
+    """История закрытий месяца: версии снимков, от старой к новой."""
+    return [_history_out(row) for row in month_close_service.history(db, year, month)]
 
 
 @router.post("/month-results/{year}/{month}/match", response_model=MatchOut)

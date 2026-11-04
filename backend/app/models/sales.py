@@ -313,4 +313,5 @@ class MonthResultSnapshot(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
+    closed_by: Mapped[User | None] = relationship(foreign_keys=[closed_by_id])
     month_result: Mapped[MonthResult] = relationship(back_populates="snapshots")
