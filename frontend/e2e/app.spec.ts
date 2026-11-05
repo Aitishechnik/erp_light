@@ -1518,8 +1518,8 @@ test('прочтение одного сообщения уменьшает сч
   await page.getByTestId('bell-row-ev-1').click()
 
   await expect(page.getByTestId('bell-badge')).toHaveText('1')
-  // Панель показывает только непрочитанное: прочитанная строка из неё уходит.
-  await expect(page.getByTestId('bell-row-ev-1')).toHaveCount(0)
+  // Прочитанное сообщение остаётся в панели с пометкой: история не исчезает.
+  await expect(page.getByTestId('bell-row-ev-1')).toHaveClass(/read/)
 })
 
 test('ссылка из журнала открывает объект и подсвечивает строку', async ({ page }) => {

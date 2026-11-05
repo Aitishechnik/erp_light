@@ -83,10 +83,10 @@ export function NotificationsBell({ onOpenJournal }: Props) {
     }
   }, [open])
 
-  /** В панель попадают только непрочитанные: прочитанное живёт в журнале. */
-  const loadUnread = useCallback(async () => {
-    const data = await fetchMessages({ unread: true, limit: 20 })
-    setRows(data.rows.filter((row) => !row.read))
+  /** В панели — последние сообщения, и прочитанные тоже: история не исчезает. */
+  const loadMessages = useCallback(async () => {
+    const data = await fetchMessages({ limit: 20 })
+    setRows(data.rows)
     setUnread(data.unread)
     setError('')
   }, [])
@@ -96,7 +96,7 @@ export function NotificationsBell({ onOpenJournal }: Props) {
     setOpen(next)
     if (!next) return
     try {
-      await loadUnread()
+      await loadMessages()
     } catch (err) {
       setError(errorMessage(err))
     }
@@ -107,7 +107,7 @@ export function NotificationsBell({ onOpenJournal }: Props) {
     try {
       const data = await markAllMessagesRead()
       setUnread(data.unread)
-      setRows([])
+      setRows((current) => current.map((row) => ({ ...row, read: true })))
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -115,23 +115,25 @@ export function NotificationsBell({ onOpenJournal }: Props) {
     }
   }
 
-  /** Одно сообщение: отмечаем прочитанным и сразу гасим строку и счётчик. */
+  /** Одно сообщение: отмечаем прочитанным, но строку оставляем в истории. */
   const readOne = useCallback(
     async (row: AuditEvent) => {
       if (row.read) return
-      setRows((current) => current.filter((item) => item.id !== row.id))
+      setRows((current) =>
+        current.map((item) => (item.id === row.id ? { ...item, read: true } : item)),
+      )
       setUnread((current) => Math.max(0, current - 1))
       try {
         const data = await markMessagesRead([row.id])
         setUnread(data.unread)
       } catch (err) {
-        // Не получилось — возвращаем список непрочитанных с сервера.
+        // Не получилось — возвращаем список с сервера.
         setError(errorMessage(err))
-        void loadUnread().catch(() => undefined)
+        void loadMessages().catch(() => undefined)
         void refreshCount()
       }
     },
-    [loadUnread, refreshCount],
+    [loadMessages, refreshCount],
   )
 
   const openRow = (row: AuditEvent) => {
@@ -193,7 +195,7 @@ export function NotificationsBell({ onOpenJournal }: Props) {
           ) : null}
           {rows.length === 0 ? (
             <p className="hint" data-testid="bell-empty">
-              Непрочитанных нет — все сообщения в журнале.
+              Сообщений нет.
             </p>
           ) : (
             <ul className="bell-list" data-testid="bell-list">
@@ -239,9 +241,9 @@ export function NotificationsBell({ onOpenJournal }: Props) {
               })}
             </ul>
           )}
-          {unread > rows.length ? (
+          {rows.length >= 20 ? (
             <p className="hint bell-more" data-testid="bell-more">
-              Показаны последние {rows.length} — остальные в журнале.
+              Показаны последние 20 — остальные в журнале.
             </p>
           ) : null}
           <div className="bell-actions">

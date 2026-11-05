@@ -67,7 +67,8 @@ describe('Служебные сообщения', () => {
     expect(await screen.findByTestId('bell-list')).toHaveTextContent(
       'План продаж на 2026 год утверждён',
     )
-    expect(screen.queryByTestId('bell-row-ev-2')).not.toBeInTheDocument()
+    // Прочитанные остаются в панели: история не исчезает.
+    expect(screen.getByTestId('bell-row-ev-2')).toBeInTheDocument()
     expect(screen.getAllByText(/Коммерческий директор \(демо\)/).length).toBeGreaterThan(0)
   })
 
@@ -83,6 +84,7 @@ describe('Служебные сообщения', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('bell-badge')).toBeNull()
     })
+    expect(screen.getByTestId('bell-row-ev-1')).toBeInTheDocument()
   })
 
   it('прочтение одного сообщения уменьшает счётчик на единицу', async () => {
@@ -108,11 +110,9 @@ describe('Служебные сообщения', () => {
     await waitFor(() => {
       expect(screen.getByTestId('bell-badge')).toHaveTextContent('1')
     })
-    expect(screen.queryByTestId('bell-row-ev-1')).not.toBeInTheDocument()
+    expect(screen.getByTestId('bell-row-ev-1')).toBeInTheDocument()
     expect(screen.queryByTestId('bell-hint')).not.toBeInTheDocument()
-    expect(await screen.findByTestId('bell-empty')).toHaveTextContent(
-      'Непрочитанных нет — все сообщения в журнале',
-    )
+    expect(screen.queryByTestId('bell-empty')).not.toBeInTheDocument()
   })
 
   it('сообщение отмечается прочитанным и с клавиатуры', async () => {
@@ -131,7 +131,7 @@ describe('Служебные сообщения', () => {
     await user.keyboard('{Enter}')
 
     await waitFor(() => {
-      expect(screen.queryByTestId('bell-row-ev-1')).not.toBeInTheDocument()
+      expect(screen.getByTestId('bell-row-ev-1')).toHaveClass('read')
     })
   })
 
