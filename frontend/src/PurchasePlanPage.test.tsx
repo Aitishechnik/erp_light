@@ -280,6 +280,49 @@ describe('PurchasePlanPage', () => {
     })
   })
 
+  it('покрытие считает потребность по норме, а не по годовому количеству', async () => {
+    const user = userEvent.setup()
+    mockApi(routes([plan({ items: [planItem({ fact_months: [] })] })]))
+    render(<PurchasePlanPage user={DIRECTOR} />)
+
+    await user.type(await screen.findByLabelText('Норма FIN-1 1'), '1.5')
+    await user.click(screen.getByRole('button', { name: 'Показать таблицей' }))
+    const detail = await screen.findByTestId('schedule-table')
+    // Потребность месяца по норме: январь 100 × 1,5 = 150, февраль 200 × 1,5 = 300.
+    // Раньше покрытие считалось от годового количества (30) и давало 10 и 20.
+    expect(detail).toHaveTextContent('Докупить, кг')
+    expect(detail).toHaveTextContent('январь 2026')
+    expect(detail).toHaveTextContent('150')
+    expect(detail).toHaveTextContent('300')
+  })
+
+  it('закрытый месяц считает потребность по факту и показывает остаток', async () => {
+    mockApi(
+      routes([
+        plan({
+          closed_months: [1],
+          positions: [{ ...POSITION, fact_months: [{ month: 1, quantity: '80.000' }] }],
+          items: [
+            planItem({
+              norm: '1.5',
+              quantity: '450.000',
+              fact_months: [],
+              carryover: '30.000',
+              carryover_month: 1,
+            }),
+          ],
+        }),
+      ]),
+    )
+    render(<PurchasePlanPage user={DIRECTOR} />)
+
+    // Январь по факту: 80 × 1,5 = 120; февраль по плану: 200 × 1,5 = 300.
+    expect(await screen.findByTestId('need-item-1')).toHaveTextContent('потребность 420')
+    const rest = screen.getByTestId('carryover-item-1')
+    expect(rest).toHaveTextContent('остаток после янв')
+    expect(rest).toHaveTextContent('30')
+  })
+
   it('без нормы строка считается по-старому и не показывает потребность', async () => {
     mockApi(routes())
     render(<PurchasePlanPage user={DIRECTOR} />)

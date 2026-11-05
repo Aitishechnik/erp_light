@@ -704,7 +704,8 @@ test('закупщик раскладывает потребность план�
   await expect(page.getByTestId('purchase-table')).toContainText('потребность 450')
   await expect(page.getByTestId('purchase-table')).toContainText('дефицит 420')
   await expect(page.getByTestId('purchase-table')).toContainText('Ближайший заказ')
-  await expect(page.getByTestId('purchase-table')).toContainText('10 кг')
+  // Покрытие считается по норме: январь 100 × 1,5 = 150 кг, а не 10.
+  await expect(page.getByTestId('purchase-table')).toContainText('150 кг')
   // Видов графика два — «кратко» и «кварталы»; вид «полосой» убран.
   await expect(page.getByRole('button', { name: 'полосой' })).toHaveCount(0)
   await page.getByRole('button', { name: 'кварталы' }).click()

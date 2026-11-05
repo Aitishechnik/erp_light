@@ -12,7 +12,12 @@ from sqlalchemy.orm import Session
 from app.models.audit import AuditEvent
 from app.models.counterparties import Counterparty
 from app.models.domain import Batch, BatchItem, Product
-from app.models.planning import PurchasePlan, SalesPlanApproval, SalesPlanItem
+from app.models.planning import (
+    PurchasePlan,
+    PurchasePlanItem,
+    SalesPlanApproval,
+    SalesPlanItem,
+)
 from app.services.purchase_need import (
     cover_family,
     cover_group,
@@ -1340,6 +1345,14 @@ def _signal_events(db_session: Session) -> list[AuditEvent]:
     )
 
 
+def _carry_events(db_session: Session) -> list[AuditEvent]:
+    return list(
+        db_session.execute(select(AuditEvent).where(AuditEvent.action == "purchase_plan.carryover"))
+        .scalars()
+        .all()
+    )
+
+
 def _plan_with_norm(client: TestClient, login, catalog: dict[str, Any]) -> dict[str, Any]:
     plan = _create_plan(client, login)
     saved = _save(client, plan["id"], [_item(catalog, quantity="30", norm="1.5")])
@@ -1423,6 +1436,107 @@ def test_no_signal_when_fact_meets_plan(
     assert client.post(f"/api/v1/month-results/{YEAR}/1/close").status_code == 200
 
     assert _signal_events(db_session) == []
+    assert _carry_events(db_session) == []
+
+
+def test_underperformance_keeps_stock_and_tells_purchase(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    """Недобор не увеличивает план: сырьё уже куплено и закрывает следующие месяцы."""
+    _make_annual(client, login, catalog)
+    plan = _plan_with_norm(client, login, catalog)
+
+    login("commercial")
+    uploaded = upload_sales(
+        client,
+        sales_xlsx(
+            [("ООО Ромашка", [("Смесь ореховая", "80", "8000")])],
+            period=f"Январь {YEAR}",
+        ),
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert client.post(f"/api/v1/month-results/{YEAR}/1/close").status_code == 200
+
+    # Перевыполнения нет: запрос пересмотра не ставится, план не растёт.
+    assert _signal_events(db_session) == []
+    purchase_plan = db_session.execute(select(PurchasePlan)).scalars().one()
+    assert purchase_plan.revision_requested_at is None
+
+    events = _carry_events(db_session)
+    assert len(events) == 1
+    event = events[0]
+    assert event.is_message is True
+    assert "purchase_director" in event.audience
+    assert "import_manager" in event.audience
+    assert "Продажи за январь" in event.summary
+    assert "ниже плана" in event.summary
+    # 20 единиц недобора × норма 1,5 = 30 кг остатка.
+    assert "остаток 30 кг" in event.summary
+
+    payload = event.payload or {}
+    line = payload["lines"][0]
+    assert Decimal(line["plan_units"]) == Decimal("100")
+    assert Decimal(line["fact_units"]) == Decimal("80")
+    assert Decimal(line["delta_kg"]) == Decimal("-30")
+
+    # В плане виден остаток, а потребность месяца считается по факту продаж.
+    login("purchase")
+    body = client.get(f"/api/v1/purchase-plans/{plan['id']}").json()
+    item = body["items"][0]
+    assert item["carryover"] == "30.000"
+    assert item["carryover_month"] == 1
+    assert Decimal(item["need_quantity"]) == Decimal("420.000")
+    assert [row["quantity"] for row in item["schedule"]] == ["120.000", "300.000"]
+
+
+def test_underperformance_leftover_covers_next_months(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    """Недобор января остаётся на складе и закрывает февральскую потребность."""
+    _make_annual(client, login, catalog)
+    plan = _plan_with_norm(client, login, catalog)
+    item = db_session.execute(select(PurchasePlanItem)).scalars().one()
+
+    batch = Batch(
+        batch_number="ИТ-2027-0500",
+        batch_date=date(YEAR, 1, 15),
+        currency="RUB",
+        source="1c",
+    )
+    db_session.add(batch)
+    db_session.flush()
+    db_session.add(
+        BatchItem(
+            batch_id=batch.id,
+            product_id=catalog["raw"].id,
+            quantity=Decimal("450"),
+            purchase_plan_item_id=item.id,
+        )
+    )
+    db_session.commit()
+
+    login("commercial")
+    uploaded = upload_sales(
+        client,
+        sales_xlsx(
+            [("ООО Ромашка", [("Смесь ореховая", "80", "8000")])],
+            period=f"Январь {YEAR}",
+        ),
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert client.post(f"/api/v1/month-results/{YEAR}/1/close").status_code == 200
+
+    login("purchase")
+    body = client.get(f"/api/v1/purchase-plans/{plan['id']}").json()
+    item_body = body["items"][0]
+    schedule = item_body["schedule"]
+    # Январь: куплено 450, продано 80 единиц (120 кг) — на складе 330 кг.
+    assert [row["quantity"] for row in schedule] == ["120.000", "300.000"]
+    assert [row["covered"] for row in schedule] == ["120.000", "300.000"]
+    assert [row["remaining"] for row in schedule] == ["0.000", "0.000"]
+    assert [row["carry"] for row in schedule] == ["330.000", "30.000"]
+    assert item_body["carry_forward"] == "30.000"
+    assert item_body["carryover"] == "30.000"
 
 
 def test_correction_does_not_touch_purchase_plan(

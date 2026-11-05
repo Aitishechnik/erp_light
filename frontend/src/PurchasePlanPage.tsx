@@ -18,6 +18,7 @@ import {
   type PurchasePlan,
   type PurchasePlanChange,
   type PurchasePlanItemIn,
+  type PurchasePlanMonth,
   type PurchasePlanPosition,
   type PurchasePlanSignal,
   type PurchasePlanSourceEvent,
@@ -74,6 +75,9 @@ type DraftRow = {
   factShare: string
   /** Факт по месяцам прихода: месяц → количество. */
   factMonths: { month: number; quantity: string }[]
+  /** Остаток сырья после закрытого месяца: уже куплено, но не продано. */
+  carryover: string
+  carryoverMonth: number | null
 }
 
 type PreviewEntry = {
@@ -142,15 +146,15 @@ function formatKg(value: string | null): string {
 /** Потребность по норме: продажи месяца × норма (тот же расчёт, что на сервере). */
 function previewByNorm(
   norm: number,
-  position: PurchasePlanPosition | undefined,
+  months: PurchasePlanMonth[],
   deliveryDays: number,
   planYear: number,
 ): PreviewEntry[] {
-  if (!position || !(norm > 0)) return []
+  if (!(norm > 0)) return []
   const today = new Date()
   const shift = deliveryDays > 0 ? Math.ceil(deliveryDays / 30) : 0
   const result: PreviewEntry[] = []
-  for (const month of [...position.months].sort((left, right) => left.month - right.month)) {
+  for (const month of [...months].sort((left, right) => left.month - right.month)) {
     const sold = toMilli(month.quantity)
     if (sold <= 0) continue
     const milli = Math.round(sold * norm)
@@ -169,6 +173,24 @@ function previewByNorm(
     })
   }
   return result
+}
+
+/** Месяцы потребности: закрытые — по факту продаж, остальные — по плану. */
+function positionNeedMonths(
+  position: PurchasePlanPosition | undefined,
+  closed: Set<number>,
+): PurchasePlanMonth[] {
+  if (!position) return []
+  if (closed.size === 0) return position.months
+  const fact = new Map((position.fact_months ?? []).map((row) => [row.month, row.quantity]))
+  return position.months.map((row) =>
+    closed.has(row.month) ? { month: row.month, quantity: fact.get(row.month) ?? '0' } : row,
+  )
+}
+
+/** Годовая потребность по норме: сумма месяцев × норма. */
+function needTotalOf(months: PurchasePlanMonth[], norm: number): number {
+  return months.reduce((sum, row) => sum + Number(row.quantity), 0) * norm
 }
 
 /** Как показывать график заказа: сводкой или кварталами. */
@@ -245,6 +267,7 @@ function coverDrafts(
   drafts: DraftRow[],
   positions: PurchasePlanPosition[],
   planYear: number,
+  closed: Set<number> = new Set(),
 ): Coverage {
   const byRow = new Map<string, ScheduleRow[]>()
   const group = new Map<string, GroupTotals>()
@@ -278,9 +301,13 @@ function coverDrafts(
     const available = new Map<string, number>()
     for (const row of rows) {
       const position = positions.find((item) => item.product_id === row.salesProductId)
+      const norm = Number(normalize(row.norm))
+      const hasNorm = Number.isFinite(norm) && norm > 0
       entries.set(
         row.key,
-        splitPreview(toMilli(row.quantity), position, row.deliveryDays, planYear),
+        hasNorm
+          ? previewByNorm(norm, positionNeedMonths(position, closed), row.deliveryDays, planYear)
+          : splitPreview(toMilli(row.quantity), position, row.deliveryDays, planYear),
       )
       const months = new Map<number, number>()
       for (const month of row.factMonths) {
@@ -629,6 +656,8 @@ function draftsFromPlan(plan: PurchasePlan): DraftRow[] {
     factQuantity: item.fact_quantity,
     factShare: item.fact_share,
     factMonths: item.fact_months ?? [],
+    carryover: item.carryover ?? '0',
+    carryoverMonth: item.carryover_month ?? null,
   }))
 }
 
@@ -820,6 +849,8 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
         factQuantity: '0',
         factShare: '0',
         factMonths: [],
+        carryover: '0',
+        carryoverMonth: null,
       },
     ])
     setError(null)
@@ -847,6 +878,8 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
         factQuantity: '0',
         factShare: '0',
         factMonths: [],
+        carryover: '0',
+        carryoverMonth: null,
       },
     ])
     setError(null)
@@ -970,7 +1003,8 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
 
   const changedPositions = new Set((plan?.source.changes ?? []).map((row) => row.product_id))
   const source = plan?.source
-  const coverage = coverDrafts(drafts, plan?.positions ?? [], plan?.year ?? year)
+  const closedMonths = new Set(plan?.closed_months ?? [])
+  const coverage = coverDrafts(drafts, plan?.positions ?? [], plan?.year ?? year, closedMonths)
 
   return (
     <section>
@@ -1463,10 +1497,13 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                         const normValue = Number(normText)
                         const hasNorm =
                           normText !== '' && Number.isFinite(normValue) && normValue > 0
+                        const monthsForNeed = hasNorm
+                          ? positionNeedMonths(position, closedMonths)
+                          : []
                         const schedule = hasNorm
-                          ? previewByNorm(normValue, position, row.deliveryDays, plan.year)
+                          ? previewByNorm(normValue, monthsForNeed, row.deliveryDays, plan.year)
                           : splitPreview(toMilli(quantity), position, row.deliveryDays, plan.year)
-                        const needTotal = hasNorm ? Number(position.total) * normValue : 0
+                        const needTotal = hasNorm ? needTotalOf(monthsForNeed, normValue) : 0
                         const planQuantity = Number(quantity)
                         const gap =
                           hasNorm && Number.isFinite(planQuantity) ? planQuantity - needTotal : 0
@@ -1713,6 +1750,16 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                     ) : (
                                       <span className="hint">норма не задана</span>
                                     )}
+                                    {Number(row.carryover) > 0 && row.carryoverMonth ? (
+                                      <span
+                                        className="sched-line sched-carryover"
+                                        data-testid={`carryover-${row.key}`}
+                                      >
+                                        остаток после {monthShort(row.carryoverMonth)} {plan.year}:{' '}
+                                        {formatQuantity(Number(row.carryover).toFixed(3))}{' '}
+                                        {row.unit || 'ед.'} — на складе, закрывает следующие месяцы
+                                      </span>
+                                    ) : null}
                                     {scheduleMode === 'summary' ? (
                                       <ScheduleView
                                         rows={rowSchedule}

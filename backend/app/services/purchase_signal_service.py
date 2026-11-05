@@ -52,6 +52,10 @@ MONTH_NAMES = (
 
 SIGNAL_ACTION = "purchase_plan.revision_needed"
 
+# Недобор — не повод увеличивать план: сырьё уже куплено и лежит на складе.
+# Сообщение только говорит закупщику, что следующую поставку можно сдвинуть.
+CARRY_ACTION = "purchase_plan.carryover"
+
 
 def _plan(db: Session, year: int) -> PurchasePlan | None:
     return db.execute(select(PurchasePlan).where(PurchasePlan.year == year)).scalars().one_or_none()
@@ -178,6 +182,90 @@ def notify_overperformance(
         plan.revision_requested_by_id = actor.id if actor is not None else None
         note = f"Запрошен пересмотр: {reason}"
         plan.notes = f"{plan.notes}\n{note}" if plan.notes else note
+    return len(lines)
+
+
+def notify_underperformance(
+    db: Session,
+    *,
+    actor: User | None,
+    year: int,
+    month: int,
+) -> int:
+    """Посчитать недобор месяца и сказать закупщикам про остаток на складе.
+
+    Недобор не увеличивает план закупок и не просит пересмотра: сырьё под
+    невыполненный план уже куплено, оно закрывает следующие месяцы. Закупщик
+    видит остаток в плане и может сдвинуть ближайшую поставку. Возвращает число
+    затронутых строк: 0 — сообщения нет. Коммит делает закрытие месяца.
+    """
+    plan = _plan(db, year)
+    if plan is None:
+        return 0
+    db.flush()
+
+    plan_month = {
+        product_id: position.months.get(month, ZERO)
+        for product_id, position in need.need_positions(db, year).items()
+    }
+    facts = db.execute(
+        select(SalesFact.product_id, func.sum(SalesFact.quantity))
+        .where(SalesFact.year == year, SalesFact.month == month)
+        .group_by(SalesFact.product_id)
+    ).all()
+    fact_by_product = {
+        product_id: need.quantize_qty(quantity or ZERO) for product_id, quantity in facts
+    }
+
+    # Недобор по позиции: продали меньше, чем стояло в плане месяца.
+    under: dict[uuid.UUID, Decimal] = {}
+    for product_id, plan_units in plan_month.items():
+        short = plan_units - fact_by_product.get(product_id, ZERO)
+        if short > ZERO:
+            under[product_id] = short
+    if not under:
+        return 0
+
+    lines: list[dict[str, object]] = []
+    for item in plan.items:
+        item_short = under.get(item.sales_product_id)
+        if item_short is None:
+            continue
+        plan_units = plan_month.get(item.sales_product_id, ZERO)
+        lines.append(_line_payload(item, plan_units, plan_units - item_short))
+    if not lines:
+        return 0
+
+    missing_norm = [row["product"] for row in lines if row["norm"] is None]
+    leftover = sum(
+        (-Decimal(str(row["delta_kg"])) for row in lines if row["delta_kg"] is not None),
+        ZERO,
+    )
+    label = _month_label(month)
+    summary = (
+        f"Продажи за {label} {year} ниже плана: позиций {len(under)}, строк плана "
+        f"закупок {len(lines)}, остаток {_qty(leftover)} кг закрывает следующие месяцы — "
+        "поставки можно сдвинуть"
+    )
+    reason = f"недобор плана продаж за {label} {year}"
+    audit_service.record(
+        db,
+        actor=actor,
+        action=CARRY_ACTION,
+        summary=summary,
+        entity_id=plan.id,
+        entity_label=f"План закупок, {year}",
+        payload={
+            "reason": reason,
+            "month": month,
+            "actor": actor.full_name if actor is not None else None,
+            "lines": lines,
+            "missing_norm": missing_norm,
+        },
+        year=year,
+        month=month,
+        audience=PURCHASE_AUDIENCE,
+    )
     return len(lines)
 
 

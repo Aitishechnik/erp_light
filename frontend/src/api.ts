@@ -223,6 +223,10 @@ export type PurchasePlanItem = {
   used_months: { month: number; quantity: string }[]
   /** Излишек после последнего месяца — переходит на следующий год. */
   carry_forward: string
+  /** Остаток сырья на конец последнего закрытого месяца: куплено, но не продано. */
+  carryover?: string
+  /** Месяц, на конец которого посчитан остаток. */
+  carryover_month?: number | null
   schedule: PurchasePlanScheduleEntry[]
 }
 
@@ -235,6 +239,8 @@ export type PurchasePlanPosition = {
   unit: string
   total: string
   months: PurchasePlanMonth[]
+  /** Продажи закрытых месяцев по факту: подменяют план в покрытии. */
+  fact_months?: PurchasePlanMonth[]
   decomposed: boolean
   status: 'ok' | 'added' | 'removed' | 'orphan'
   changed: boolean
@@ -307,6 +313,8 @@ export type PurchasePlan = {
   created_at: string
   updated_at: string
   editable_months: number[]
+  /** Закрытые месяцы года: потребность считается по факту продаж. */
+  closed_months?: number[]
   source: PurchasePlanSource
   positions: PurchasePlanPosition[]
   items: PurchasePlanItem[]

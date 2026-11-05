@@ -193,6 +193,13 @@ class PurchasePlanItemOut(BaseModel):
         default=Decimal("0"),
         description="Излишек после последнего месяца — переходит на следующий год",
     )
+    carryover: Decimal = Field(
+        default=Decimal("0"),
+        description="Остаток сырья на конец последнего закрытого месяца: куплено, но не продано",
+    )
+    carryover_month: int | None = Field(
+        default=None, description="Месяц, на конец которого посчитан остаток"
+    )
     schedule: list[PurchasePlanScheduleEntryOut]
 
 
@@ -205,6 +212,10 @@ class PurchasePlanPositionOut(BaseModel):
     unit: str
     total: Decimal
     months: list[PurchasePlanMonthOut]
+    fact_months: list[PurchasePlanMonthOut] = Field(
+        default_factory=list,
+        description="Продажи закрытых месяцев по факту: подменяют план в покрытии",
+    )
     decomposed: bool
     status: str = Field(description="ok | added | removed | orphan")
     changed: bool
@@ -284,6 +295,9 @@ class PurchasePlanOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     editable_months: list[int] = Field(description="Месяцы, которые сейчас можно менять")
+    closed_months: list[int] = Field(
+        default_factory=list, description="Закрытые месяцы года: потребность считается по факту"
+    )
     source: PurchasePlanSourceOut
     positions: list[PurchasePlanPositionOut]
     items: list[PurchasePlanItemOut]

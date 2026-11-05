@@ -38,6 +38,7 @@ from app.models.planning import (
     PurchasePlanSourceEvent,
     SalesPlanApproval,
 )
+from app.models.sales import MonthResult, SalesFact
 from app.schemas.planning import (
     PurchasePlanChangeOut,
     PurchasePlanCreate,
@@ -275,8 +276,15 @@ def _source_out(db: Session, plan: PurchasePlan) -> PurchasePlanSourceOut:
 
 
 def _positions_out(
-    db: Session, plan: PurchasePlan, source: dict[uuid.UUID, NeedPosition]
+    db: Session,
+    plan: PurchasePlan,
+    source: dict[uuid.UUID, NeedPosition],
+    *,
+    closed: set[int] | None = None,
+    facts: dict[uuid.UUID, dict[int, Decimal]] | None = None,
 ) -> list[PurchasePlanPositionOut]:
+    closed_months = closed or set()
+    facts_by_product = facts or {}
     state, _ = need.annual_state(db, plan.year)
     snapshot = need.snapshot_positions(plan.source_snapshot)
     current = need.need_positions(db, plan.year) if state == "ok" else {}
@@ -322,6 +330,11 @@ def _positions_out(
                 PurchasePlanMonthOut(month=month, quantity=quantity)
                 for month, quantity in sorted(position.months.items())
                 if quantity > 0
+            ],
+            fact_months=[
+                PurchasePlanMonthOut(month=month, quantity=quantity)
+                for month, quantity in sorted(facts_by_product.get(position.product_id, {}).items())
+                if month in closed_months
             ],
             decomposed=bool(items_by_position.get(position.product_id)),
             status=status.get(position.product_id, "ok"),
@@ -400,12 +413,45 @@ def _fact_share(fact: Decimal, quantity: Decimal) -> Decimal:
     return (fact / quantity * ONE_HUNDRED).quantize(SHARE, rounding=ROUND_HALF_UP)
 
 
+def _closed_months(db: Session, year: int) -> set[int]:
+    """Закрытые месяцы года: по ним потребность считается по факту продаж."""
+    return {
+        int(month)
+        for month in db.execute(
+            select(MonthResult.month).where(
+                MonthResult.year == year, MonthResult.status == "closed"
+            )
+        ).scalars()
+    }
+
+
+def _sales_facts(db: Session, year: int, months: set[int]) -> dict[uuid.UUID, dict[int, Decimal]]:
+    """Факт продаж закрытых месяцев: товар → месяц → количество."""
+    if not months:
+        return {}
+    rows = db.execute(
+        select(SalesFact.product_id, SalesFact.month, func.sum(SalesFact.quantity))
+        .where(SalesFact.year == year, SalesFact.month.in_(months))
+        .group_by(SalesFact.product_id, SalesFact.month)
+    ).all()
+    result: dict[uuid.UUID, dict[int, Decimal]] = {}
+    for product_id, month, quantity in rows:
+        result.setdefault(product_id, {})[int(month)] = need.quantize_qty(quantity or ZERO)
+    return result
+
+
 def _items_out(
     plan: PurchasePlan,
     source: dict[uuid.UUID, NeedPosition],
     arrivals: dict[uuid.UUID, list[tuple[date, Decimal]]] | None = None,
     snapshot: dict[uuid.UUID, NeedPosition] | None = None,
+    *,
+    closed: set[int] | None = None,
+    facts: dict[uuid.UUID, dict[int, Decimal]] | None = None,
 ) -> list[PurchasePlanItemOut]:
+    closed_months = closed or set()
+    facts_by_product = facts or {}
+    last_closed = max(closed_months) if closed_months else 0
     arrivals_by_item = arrivals or {}
     items = sorted(
         plan.items,
@@ -440,11 +486,20 @@ def _items_out(
     for item in items:
         position = source.get(item.sales_product_id) or (snapshot or {}).get(item.sales_product_id)
         months = position.months if position else {}
+        # Закрытые месяцы считаем по факту продаж: сырьё, купленное под
+        # невыполненный план, остаётся на складе и закрывает следующие месяцы.
+        needed = months
+        if item.norm is not None and item.norm > 0 and closed_months:
+            fact_by_month = facts_by_product.get(item.sales_product_id, {})
+            needed = {
+                month: (fact_by_month.get(month, ZERO) if month in closed_months else quantity)
+                for month, quantity in months.items()
+            }
         if item.alternative_of_id is None:
             if item.norm is not None and item.norm > 0:
                 schedules[item.id] = need.split_by_norm(
                     item.norm,
-                    months,
+                    needed,
                     item.delivery_days,
                     plan.year,
                 )
@@ -458,10 +513,10 @@ def _items_out(
         if item.norm is not None and item.norm > 0:
             need_months_by_item[item.id] = {
                 month: need.quantize_qty(quantity * item.norm)
-                for month, quantity in sorted(months.items())
+                for month, quantity in sorted(needed.items())
                 if quantity > 0
             }
-            need_total[item.id] = need.quantize_qty(sum(months.values(), ZERO) * item.norm)
+            need_total[item.id] = need.quantize_qty(sum(needed.values(), ZERO) * item.norm)
         else:
             need_months_by_item[item.id] = {}
             need_total[item.id] = ZERO
@@ -473,6 +528,8 @@ def _items_out(
     used_by_alternative: dict[uuid.UUID, dict[int, Decimal]] = {}
     # Излишек — общий для сырья: он остаётся после последнего месяца любой строки.
     carry_by_item: dict[uuid.UUID, Decimal] = {}
+    # Остаток после закрытых месяцев: уже куплено, но ещё не продано.
+    carryover_by_item: dict[uuid.UUID, Decimal] = {}
     for family in families.values():
         family_alts = [alt for item in family for alt in alternatives_by_main.get(item.id, [])]
         family_arrivals: dict[uuid.UUID, dict[int, Decimal]] = {}
@@ -487,6 +544,32 @@ def _items_out(
         used_by_alternative.update(used)
         for item in [*family, *family_alts]:
             carry_by_item[item.id] = left
+
+    # Недобор последнего закрытого месяца: сырьё, купленное под невыполненный
+    # план, остаётся на складе. План закупки оно не увеличивает — наоборот,
+    # закрывает потребность следующих месяцев.
+    short_by_product: dict[uuid.UUID, Decimal] = {}
+    if last_closed:
+        for item in items:
+            if item.norm is None or item.norm <= 0:
+                continue
+            position = source.get(item.sales_product_id) or (snapshot or {}).get(
+                item.sales_product_id
+            )
+            if position is None:
+                continue
+            planned = position.months.get(last_closed, ZERO)
+            sold = facts_by_product.get(item.sales_product_id, {}).get(last_closed, ZERO)
+            if planned > sold:
+                short_by_product[item.sales_product_id] = planned - sold
+    for item in items:
+        if item.norm is not None and item.norm > 0:
+            short = short_by_product.get(item.sales_product_id)
+            carryover_by_item[item.id] = (
+                need.quantize_qty(short * item.norm) if short is not None else ZERO
+            )
+        else:
+            carryover_by_item[item.id] = ZERO
 
     ordered: list[PurchasePlanItem] = []
     for item in mains:
@@ -537,6 +620,8 @@ def _items_out(
                     for month, quantity in sorted(fact_months.items())
                 ],
                 carry_forward=carry_by_item[item.id],
+                carryover=carryover_by_item.get(item.id, ZERO),
+                carryover_month=last_closed or None,
                 used_quantity=sum(
                     (value for value in used_by_alternative.get(item.id, {}).values()), ZERO
                 ),
@@ -602,6 +687,8 @@ def _serialize(db: Session, plan: PurchasePlan) -> PurchasePlanOut:
     snapshot = need.snapshot_positions(plan.source_snapshot)
     item_ids = [item.id for item in plan.items]
     arrivals = _arrivals(db, item_ids)
+    closed = _closed_months(db, plan.year)
+    facts = _sales_facts(db, plan.year, closed)
     return PurchasePlanOut(
         id=plan.id,
         year=plan.year,
@@ -614,9 +701,10 @@ def _serialize(db: Session, plan: PurchasePlan) -> PurchasePlanOut:
         created_at=plan.created_at,
         updated_at=plan.updated_at,
         editable_months=editable_months(plan.year),
+        closed_months=sorted(closed),
         source=_source_out(db, plan),
-        positions=_positions_out(db, plan, source),
-        items=_items_out(plan, source, arrivals, snapshot),
+        positions=_positions_out(db, plan, source, closed=closed, facts=facts),
+        items=_items_out(plan, source, arrivals, snapshot, closed=closed, facts=facts),
         signals=_signals_out(db, plan),
     )
 

@@ -209,8 +209,10 @@ def close_month(db: Session, user: User, year: int, month: int) -> MonthResult:
         )
     )
     # Перевыполнение плана: продали больше, чем запланировали, — закупщику
-    # нужен пересмотр плана закупок. Недобор (перенос) закупки не трогает.
+    # нужен пересмотр плана закупок. Недобор план не увеличивает: сырьё уже
+    # куплено, остаток закрывает следующие месяцы — закупщику уходит сообщение.
     purchase_signal_service.notify_overperformance(db, actor=user, year=year, month=month)
+    purchase_signal_service.notify_underperformance(db, actor=user, year=year, month=month)
     audit_service.record(
         db,
         actor=user,
