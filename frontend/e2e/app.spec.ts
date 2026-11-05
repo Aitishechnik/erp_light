@@ -273,6 +273,9 @@ async function mockSession(page: Page, user: Record<string, unknown> = MANAGER):
 
 /** Меню сгруппировано: сначала раскрываем категорию, потом жмём раздел. */
 async function openSection(page: Page, group: string, section: string): Promise<void> {
+  // Ждём, пока меню отрисуется: иначе count() успевает вернуть 0 до появления
+  // пунктов, клик по уже открытой группе её сворачивает и раздел не находится.
+  await expect(page.getByRole('button', { name: 'Планирование', exact: true })).toBeVisible()
   const item = page.getByRole('button', { name: section, exact: true })
   if ((await item.count()) === 0) {
     await page.getByRole('button', { name: group, exact: true }).click()
