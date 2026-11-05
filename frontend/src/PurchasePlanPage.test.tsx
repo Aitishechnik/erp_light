@@ -316,12 +316,65 @@ describe('PurchasePlanPage', () => {
     render(<PurchasePlanPage user={DIRECTOR} />)
 
     const block = await screen.findByTestId('signal-history')
+    // Новое изменение раскрывается эффектом после загрузки плана.
+    await waitFor(() => expect(block).toHaveTextContent('150,000'))
     expect(block).toHaveTextContent('История изменений')
     expect(block).toHaveTextContent('перевыполнение плана продаж за март 2026')
-    expect(block).toHaveTextContent('150')
-    expect(block).toHaveTextContent('225')
-    expect(block).toHaveTextContent('+75')
+    expect(block).toHaveTextContent('225,000')
+    expect(block).toHaveTextContent('+75,000')
     expect(block).toHaveTextContent('100,000 → 150,000')
+  })
+
+  it('несколько изменений — лента с раскрытием и «свернуть все»', async () => {
+    const user = userEvent.setup()
+    const line: PurchasePlanSignal['lines'][number] = {
+      sales_product: 'Смесь ореховая',
+      product: 'Орех грецкий, вес',
+      unit: 'кг',
+      norm: '1.5000',
+      plan_units: '100.000',
+      fact_units: '150.000',
+      units_delta: '50.000',
+      was_kg: '150.000',
+      now_kg: '225.000',
+      delta_kg: '75.000',
+      alternative: false,
+    }
+    const signals: PurchasePlanSignal[] = [
+      {
+        id: 'sig-2',
+        created_at: '2026-11-05T10:30:00Z',
+        month: 3,
+        reason: 'перевыполнение плана продаж за март 2026',
+        actor_name: 'Коммерческий директор',
+        lines: [line],
+      },
+      {
+        id: 'sig-1',
+        created_at: '2026-10-05T10:30:00Z',
+        month: 2,
+        reason: 'перевыполнение плана продаж за февраль 2026',
+        actor_name: 'Коммерческий директор',
+        lines: [line],
+      },
+    ]
+    mockApi(routes([plan({ signals })]))
+    render(<PurchasePlanPage user={DIRECTOR} />)
+
+    const block = await screen.findByTestId('signal-history')
+    expect(block).toHaveTextContent('Изменений: 2')
+    // Новое раскрыто, старое свёрнуто (раскрытие ставит эффект после загрузки).
+    await waitFor(() =>
+      expect(screen.getByTestId('signal-toggle-sig-2')).toHaveAttribute('aria-expanded', 'true'),
+    )
+    expect(screen.getByTestId('signal-toggle-sig-1')).toHaveAttribute('aria-expanded', 'false')
+
+    await user.click(screen.getByTestId('signal-toggle-sig-1'))
+    expect(screen.getByTestId('signal-toggle-sig-1')).toHaveAttribute('aria-expanded', 'true')
+
+    await user.click(screen.getByRole('button', { name: 'Свернуть все' }))
+    expect(screen.getByTestId('signal-toggle-sig-2')).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByTestId('signal-toggle-sig-1')).toHaveAttribute('aria-expanded', 'false')
   })
 
   it('приход перекрывает следующие месяцы и не даёт больше 100 %', async () => {
