@@ -2630,7 +2630,7 @@ button.primary:disabled,
 
 .signal-toggle {
   display: grid;
-  grid-template-columns: 1rem 6.5rem 9rem minmax(0, 1fr) 13rem 9rem;
+  grid-template-columns: 1rem 6.5rem 9rem minmax(0, 1fr) 14rem 8.5rem;
   gap: 0.5rem;
   align-items: center;
   width: 100%;
@@ -2669,6 +2669,8 @@ button.primary:disabled,
 
 .signal-stats {
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
