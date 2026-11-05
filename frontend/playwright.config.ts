@@ -9,6 +9,9 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : [['list']],
+  // Холодный старт preview и 26 параллельных браузеров на общей машине дают
+  // редкие таймауты ожиданий: 5 с мало, логика тестов не меняется.
+  expect: { timeout: 10_000 },
   use: {
     baseURL: BASE_URL,
     trace: 'on-first-retry',
