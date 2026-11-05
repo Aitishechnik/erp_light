@@ -144,9 +144,12 @@ describe('Служебные сообщения', () => {
     await user.click(await screen.findByRole('button', { name: 'Весь журнал' }))
 
     expect(await screen.findByTestId('audit-table')).toBeInTheDocument()
-    expect(screen.getByTestId('audit-sales_plan.approved')).toHaveTextContent(
-      'План продаж на 2026 год утверждён',
-    )
+    // В списке теперь и журнал, и входящие: событий с одним кодом может быть несколько.
+    expect(
+      screen
+        .getAllByTestId('audit-sales_plan.approved')
+        .some((row) => row.textContent?.includes('План продаж на 2026 год утверждён')),
+    ).toBe(true)
     expect(screen.getByText('Непрочитанных: 2')).toBeInTheDocument()
   })
 })

@@ -5,6 +5,14 @@ import type { AuditEvent, SessionUser } from './api'
 import { mockApi } from './apiMock'
 import { MessagesPage } from './MessagesPage'
 
+const PURCHASE: SessionUser = {
+  id: 'pd-1',
+  login: 'purchase',
+  full_name: 'Пётр Закупщиков',
+  role: 'purchase_director',
+  role_title: 'Директор по закупкам',
+}
+
 const EXECUTIVE: SessionUser = {
   id: 'ed-1',
   login: 'executive',
@@ -49,6 +57,31 @@ describe('Журнал: ссылки и очистка', () => {
 
     const link = await screen.findByRole('link', { name: /Месяц 01.2027 закрыт/ })
     expect(link).toHaveAttribute('href', '#/month/2027/1')
+  })
+
+  it('сообщение от чужого действия видно, даже если его нет в журнале', async () => {
+    mockApi({
+      '/api/v1/messages': {
+        body: {
+          rows: [
+            event({
+              id: 'ev-9',
+              action: 'purchase_plan.revision_needed',
+              action_title: 'Нужен пересмотр плана закупок',
+              summary: 'План продаж на 2027 год изменён: нужен пересмотр плана закупок',
+              link: '#/purchase-plan/2027',
+              read: false,
+            }),
+          ],
+          unread: 1,
+          total: 1,
+        },
+      },
+      '/api/v1/audit': { body: [] },
+    })
+    render(<MessagesPage user={PURCHASE} />)
+
+    expect(await screen.findByText(/План продаж на 2027 год изменён/)).toBeInTheDocument()
   })
 
   it('событие без объекта остаётся текстом', async () => {

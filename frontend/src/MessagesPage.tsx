@@ -81,9 +81,18 @@ export function MessagesPage({ user }: Props) {
 
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase()
-    const source = onlyMessages
-      ? rows.filter((row) => messages.some((item) => item.id === row.id))
-      : rows
+    // Журнал и входящие — разные выборки: сообщение закупщику приходит от чужого
+    // действия и в его журнал не попадает. Показываем объединение, иначе
+    // «Служебные сообщения» пусты, хотя колокольчик показывает счётчик.
+    const merged = new Map<string, AuditEvent>()
+    for (const row of rows) merged.set(row.id, row)
+    for (const row of messages) {
+      if (!merged.has(row.id)) merged.set(row.id, row)
+    }
+    const all = [...merged.values()].sort((left, right) =>
+      left.created_at < right.created_at ? 1 : left.created_at > right.created_at ? -1 : 0,
+    )
+    const source = onlyMessages ? messages : all
     if (!needle) return source
     return source.filter((row) =>
       [row.summary, row.action_title, row.actor_name ?? '', row.entity_label ?? '']
