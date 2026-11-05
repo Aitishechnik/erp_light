@@ -2585,6 +2585,17 @@ button.primary:disabled,
   font-size: 0.85rem;
 }
 
+/* Норма в режиме чтения — отдельной строкой: в колонке количества она не
+   влезает в одну строку и раньше наезжала на цену соседней колонки. */
+.purchase-table .plan-grid td.num .norm-inline {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--muted);
+  white-space: normal;
+}
+
 /* План закупок: норма расхода — второе поле в колонке количества. */
 .purchase-table input.norm-cell {
   width: 7rem;

@@ -1488,9 +1488,8 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                                   <>
                                     {formatQuantity(row.quantity)}
                                     {row.norm ? (
-                                      <span className="unit">
-                                        {' '}
-                                        · норма {formatQuantity(row.norm)}
+                                      <span className="norm-inline">
+                                        норма {formatQuantity(row.norm)}
                                       </span>
                                     ) : null}
                                   </>
