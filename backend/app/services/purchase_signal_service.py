@@ -1,12 +1,16 @@
-"""Сигнал закупкам: план продаж изменился — нужен пересмотр плана закупок.
+"""Сигнал закупкам: перевыполнение плана продаж — нужен пересмотр плана закупок.
 
-Вызывается после применения корректировки плана продаж (в том числе созданной
-переносом недобора из итогов месяца). Сравнивает снимок плана продаж, с которым
-составлялся план закупок, с текущей потребностью и, если позиции разошлись,
-пишет служебное сообщение закупщикам и запрашивает пересмотр плана.
+Вызывается при закрытии месяца. Сравнивает факт продаж за месяц с планом
+продаж того же месяца по каждой позиции: если продали больше плана, сырья
+не хватило — по нормам расхода считаем, сколько ещё нужно, и пишем служебное
+сообщение закупщикам.
+
+Недобор и перенос недобора на следующий период закупки не трогают: товар
+под этот объём уже закуплен, он учтён в распределении плана закупок. Склад
+и остатки в расчёте не участвуют — «сколько уже учтено» видно из плана.
 
 Количества не правятся: утверждённый план закупок меняет человек, вернув его
-в работу. Сигнал только показывает, что именно выросло или просело.
+в работу. Сигнал только показывает, чего не хватило и на сколько.
 """
 
 from __future__ import annotations
@@ -15,11 +19,12 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.auth import ROLE_IMPORT_MANAGER, ROLE_PURCHASE_DIRECTOR, User
 from app.models.planning import PurchasePlan, PurchasePlanItem
+from app.models.sales import SalesFact
 from app.services import audit_service
 from app.services import purchase_need as need
 
@@ -28,19 +33,24 @@ ZERO = Decimal("0")
 # Кому уходит сигнал: тем, кто правит план закупок.
 PURCHASE_AUDIENCE = (ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER)
 
+MONTH_NAMES = (
+    "январь",
+    "февраль",
+    "март",
+    "апрель",
+    "май",
+    "июнь",
+    "июль",
+    "август",
+    "сентябрь",
+    "октябрь",
+    "ноябрь",
+    "декабрь",
+)
+
 
 def _plan(db: Session, year: int) -> PurchasePlan | None:
     return db.execute(select(PurchasePlan).where(PurchasePlan.year == year)).scalars().one_or_none()
-
-
-def _units_by_product(changes: list[need.NeedChange]) -> dict[uuid.UUID, Decimal]:
-    """Суммарная дельта продаж по позиции за год (в единицах позиции)."""
-    totals: dict[uuid.UUID, Decimal] = {}
-    for change in changes:
-        before = change.was or ZERO
-        after = change.now or ZERO
-        totals[change.product_id] = totals.get(change.product_id, ZERO) + (after - before)
-    return totals
 
 
 def _qty(value: Decimal) -> str:
@@ -63,61 +73,74 @@ def _line_payload(item: PurchasePlanItem, units: Decimal) -> dict[str, object]:
     }
 
 
-def notify_sales_change(
+def _month_label(month: int) -> str:
+    return MONTH_NAMES[month - 1]
+
+
+def notify_overperformance(
     db: Session,
     *,
     actor: User | None,
     year: int,
-    reason: str,
+    month: int,
 ) -> int:
-    """Создать сигнал закупкам, если изменение продаж задело план закупок.
+    """Посчитать перевыполнение месяца и, если оно есть, позвать закупщиков.
 
     Возвращает число затронутых строк плана закупок: 0 — сигнала нет.
-    Коммит делает вызывающий сервис. Снимка нет — сравнивать не с чем, сигнала
-    тоже нет: без базовой версии любое изменение выглядело бы как «всё новое».
+    Коммит делает вызывающий сервис (закрытие месяца).
     """
     plan = _plan(db, year)
-    if plan is None or plan.source_snapshot is None:
+    if plan is None:
         return 0
     db.flush()
-    changes = need.diff_positions(
-        need.snapshot_positions(plan.source_snapshot),
-        need.need_positions(db, year),
-    )
-    if not changes:
+
+    plan_month = {
+        product_id: position.months.get(month, ZERO)
+        for product_id, position in need.need_positions(db, year).items()
+    }
+    facts = db.execute(
+        select(SalesFact.product_id, func.sum(SalesFact.quantity))
+        .where(SalesFact.year == year, SalesFact.month == month)
+        .group_by(SalesFact.product_id)
+    ).all()
+
+    # Перевыполнение по позиции: продали больше, чем стояло в плане месяца.
+    over: dict[uuid.UUID, Decimal] = {}
+    for product_id, quantity in facts:
+        delta = need.quantize_qty(quantity or ZERO) - plan_month.get(product_id, ZERO)
+        if delta > ZERO:
+            over[product_id] = delta
+    if not over:
         return 0
 
-    units = _units_by_product(changes)
     lines = [
-        _line_payload(item, units[item.sales_product_id])
+        _line_payload(item, over[item.sales_product_id])
         for item in plan.items
-        if units.get(item.sales_product_id) not in (None, ZERO)
+        if over.get(item.sales_product_id) not in (None, ZERO)
     ]
     if not lines:
         return 0
 
     missing_norm = [row["product"] for row in lines if row["norm"] is None]
-    products = len({change.product_id for change in changes})
-    # Показатели — прямо в сообщении: закупщик видит, что именно выросло и на сколько,
-    # не открывая план. Строки без нормы так и помечаем.
     details: list[str] = []
     for row in lines[:3]:
-        units_delta = Decimal(str(row["units_delta"]))
-        sign = "+" if units_delta > 0 else "−"
-        text = f"{row['sales_product']}: {sign}{_qty(abs(units_delta))} ед."
+        units = Decimal(str(row["units_delta"]))
+        text = f"{row['sales_product']}: +{_qty(units)} ед."
         raw = row["raw_delta"]
         if raw is None:
             text += " — норма не задана"
         else:
-            text += f" → {_qty(Decimal(str(raw)))} {row['unit']}"
+            text += f" → +{_qty(Decimal(str(raw)))} {row['unit']}"
             if row["alternative"]:
                 text += " (альтернатива)"
         details.append(text)
     tail = f" и ещё {len(lines) - 3}" if len(lines) > 3 else ""
+    label = _month_label(month)
     summary = (
-        f"План продаж на {year} год изменён: позиций {products}, строк плана закупок "
-        f"{len(lines)} — нужен пересмотр плана закупок. " + "; ".join(details) + tail
+        f"Продажи за {label} {year} выше плана: позиций {len(over)}, строк плана "
+        f"закупок {len(lines)} — нужно увеличить план закупок. " + "; ".join(details) + tail
     )
+    reason = f"перевыполнение плана продаж за {label} {year}"
     audit_service.record(
         db,
         actor=actor,
@@ -127,20 +150,23 @@ def notify_sales_change(
         entity_label=f"План закупок, {year}",
         payload={
             "reason": reason,
-            "changes": [
+            "month": month,
+            "overperformance": [
                 {
-                    "product": change.name,
-                    "code": change.code,
-                    "month": change.month,
-                    "was": str(change.was) if change.was is not None else None,
-                    "now": str(change.now) if change.now is not None else None,
+                    "product_id": str(product_id),
+                    "sales_plan": str(plan_month.get(product_id, ZERO)),
+                    "fact": str(
+                        need.quantize_qty(over[product_id] + plan_month.get(product_id, ZERO))
+                    ),
+                    "delta": str(need.quantize_qty(over[product_id])),
                 }
-                for change in changes
+                for product_id in over
             ],
             "lines": lines,
             "missing_norm": missing_norm,
         },
         year=year,
+        month=month,
         audience=PURCHASE_AUDIENCE,
     )
 

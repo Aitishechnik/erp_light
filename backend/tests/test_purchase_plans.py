@@ -1,6 +1,5 @@
 """План закупок сырья на основании финально согласованного годового плана продаж."""
 
-import uuid
 from datetime import date
 from decimal import Decimal
 from typing import Any
@@ -22,6 +21,7 @@ from app.services.purchase_need import (
     split_annual,
 )
 from app.services.sales_plan_approval_service import current_hash
+from tests.test_month_results import sales_xlsx, upload_sales
 
 TODAY = date.today()
 YEAR = TODAY.year + 1
@@ -1330,84 +1330,115 @@ def test_alternative_has_its_own_norm_for_reference(
     assert items[Decimal("2.0")]["schedule"] == []
 
 
-def test_sales_correction_signals_purchase_plan(
-    client: TestClient, login, catalog: dict[str, Any], db_session: Session
-) -> None:
-    plan_ids = _make_annual(client, login, catalog)
-    plan = _create_plan(client, login)
-    saved = _save(client, plan["id"], [_item(catalog, quantity="300", norm="1.5")])
-    assert saved.status_code == 200, saved.text
-    _approve_plan(client, login, plan["id"])
-
-    _correct_sales(client, login, plan_ids["sales"], catalog["customer"], catalog["fin"], 1, "150")
-
-    event = (
-        db_session.execute(
-            select(AuditEvent).where(AuditEvent.action == "purchase_plan.revision_needed")
-        )
-        .scalars()
-        .one()
-    )
-    assert event.is_message is True
-    assert "purchase_director" in event.audience
-    assert "import_manager" in event.audience
-    assert event.year == YEAR
-
-    payload = event.payload or {}
-    assert payload["reason"].startswith("корректировка плана")
-    line = next(row for row in payload["lines"] if row["sales_product"] == "Смесь ореховая")
-    assert Decimal(line["units_delta"]) == Decimal("50")
-    assert Decimal(line["raw_delta"]) == Decimal("75")
-    assert payload["missing_norm"] == []
-    assert "Смесь ореховая: +50 ед. → 75 кг" in event.summary
-
-    purchase_plan = (
-        db_session.execute(select(PurchasePlan).where(PurchasePlan.id == uuid.UUID(plan["id"])))
-        .scalars()
-        .one()
-    )
-    assert purchase_plan.revision_requested_at is not None
-
-    login("purchase")
-    messages = client.get("/api/v1/messages").json()
-    assert any(row["action"] == "purchase_plan.revision_needed" for row in messages["rows"])
-
-
-def test_signal_lists_lines_without_norm(
-    client: TestClient, login, catalog: dict[str, Any], db_session: Session
-) -> None:
-    plan_ids = _make_annual(client, login, catalog)
-    plan = _create_plan(client, login)
-    assert _save(client, plan["id"], [_item(catalog, quantity="300")]).status_code == 200
-    _approve_plan(client, login, plan["id"])
-
-    _correct_sales(client, login, plan_ids["sales"], catalog["customer"], catalog["fin"], 1, "150")
-
-    event = (
-        db_session.execute(
-            select(AuditEvent).where(AuditEvent.action == "purchase_plan.revision_needed")
-        )
-        .scalars()
-        .one()
-    )
-    payload = event.payload or {}
-    line = payload["lines"][0]
-    assert line["norm"] is None
-    assert line["raw_delta"] is None
-    assert payload["missing_norm"] == ["Арахис"]
-
-
-def test_no_signal_without_purchase_plan(
-    client: TestClient, login, catalog: dict[str, Any], db_session: Session
-) -> None:
-    plan_ids = _make_annual(client, login, catalog)
-    _correct_sales(client, login, plan_ids["sales"], catalog["customer"], catalog["fin"], 1, "150")
-
-    events = (
+def _signal_events(db_session: Session) -> list[AuditEvent]:
+    return list(
         db_session.execute(
             select(AuditEvent).where(AuditEvent.action == "purchase_plan.revision_needed")
         )
         .scalars()
         .all()
     )
-    assert events == []
+
+
+def _plan_with_norm(client: TestClient, login, catalog: dict[str, Any]) -> dict[str, Any]:
+    plan = _create_plan(client, login)
+    saved = _save(client, plan["id"], [_item(catalog, quantity="30", norm="1.5")])
+    assert saved.status_code == 200, saved.text
+    _approve_plan(client, login, plan["id"])
+    return plan
+
+
+def test_close_signals_purchase_on_overperformance(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    _make_annual(client, login, catalog)
+    _plan_with_norm(client, login, catalog)
+
+    login("commercial")
+    uploaded = upload_sales(
+        client,
+        sales_xlsx(
+            [("ООО Ромашка", [("Смесь ореховая", "150", "15000")])],
+            period=f"Январь {YEAR}",
+        ),
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert uploaded.json()["rows_created"] == 1
+
+    closed = client.post(f"/api/v1/month-results/{YEAR}/1/close")
+    assert closed.status_code == 200, closed.text
+
+    events = _signal_events(db_session)
+    assert len(events) == 1
+    event = events[0]
+    assert event.is_message is True
+    assert "purchase_director" in event.audience
+    assert "import_manager" in event.audience
+    assert event.month == 1
+    assert "Продажи за январь" in event.summary
+    assert "+50 ед. → +75 кг" in event.summary
+
+    payload = event.payload or {}
+    assert payload["month"] == 1
+    line = payload["lines"][0]
+    assert Decimal(line["units_delta"]) == Decimal("50")
+    assert Decimal(line["raw_delta"]) == Decimal("75")
+    assert line["alternative"] is False
+
+    purchase_plan = db_session.execute(select(PurchasePlan)).scalars().one()
+    assert purchase_plan.revision_requested_at is not None
+
+
+def test_no_signal_when_fact_meets_plan(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    _make_annual(client, login, catalog)
+    _plan_with_norm(client, login, catalog)
+
+    login("commercial")
+    uploaded = upload_sales(
+        client,
+        sales_xlsx(
+            [("ООО Ромашка", [("Смесь ореховая", "100", "10000")])],
+            period=f"Январь {YEAR}",
+        ),
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert client.post(f"/api/v1/month-results/{YEAR}/1/close").status_code == 200
+
+    assert _signal_events(db_session) == []
+
+
+def test_correction_does_not_touch_purchase_plan(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    plan_ids = _make_annual(client, login, catalog)
+    _plan_with_norm(client, login, catalog)
+
+    # Перенос недобора меняет план продаж, но закупки не трогает: товар уже учтён.
+    _correct_sales(client, login, plan_ids["sales"], catalog["customer"], catalog["fin"], 1, "150")
+
+    assert _signal_events(db_session) == []
+    purchase_plan = db_session.execute(select(PurchasePlan)).scalars().one()
+    assert purchase_plan.revision_requested_at is None
+
+
+def test_empty_sales_report_closes_month(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    _make_annual(client, login, catalog)
+    _plan_with_norm(client, login, catalog)
+
+    login("commercial")
+    uploaded = upload_sales(client, sales_xlsx([], period=f"Февраль {YEAR}"))
+    assert uploaded.status_code == 200, uploaded.text
+    assert uploaded.json()["rows_created"] == 0
+    assert uploaded.json()["rows_total"] == 0
+
+    closed = client.post(f"/api/v1/month-results/{YEAR}/2/close")
+    assert closed.status_code == 200, closed.text
+    body = closed.json()
+    assert body["status"] == "closed"
+    assert body["fact_amount"] == "0.00"
+
+    assert _signal_events(db_session) == []

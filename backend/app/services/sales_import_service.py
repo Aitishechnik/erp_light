@@ -236,8 +236,8 @@ def parse_sales_file(content: bytes) -> ParsedSales:
                     discount_rub=_decimal(cell_value(sheet, row, columns, "discount")),
                 )
             )
-        if not parsed.lines:
-            raise ImportDataError("В файле нет ни одной строки с товаром")
+        # Пустой отчёт — тоже факт: продаж за месяц не было. Раньше такой файл
+        # отклонялся, и месяц нельзя было закрыть.
         return parsed
     finally:
         workbook.close()
@@ -364,6 +364,8 @@ def import_sales(
     index = _product_index(db)
     session = ImportSession(
         kind="sales",
+        year=period_year,
+        month=period_month,
         file_name=file_name,
         content_hash=hashlib.sha256(content).hexdigest(),
         status="pending",

@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.auth import ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR, User
+from app.models.domain import ImportSession
 from app.models.sales import (
     DECISION_CODES,
     DECISION_TITLES,
@@ -28,7 +29,7 @@ from app.models.sales import (
     MonthResultSnapshot,
     SalesFact,
 )
-from app.services import audit_service, month_result_service
+from app.services import audit_service, month_result_service, purchase_signal_service
 
 CLOSE_ROLES = (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR)
 
@@ -47,6 +48,23 @@ def get_result(db: Session, year: int, month: int) -> MonthResult | None:
         db.execute(select(MonthResult).where(MonthResult.year == year, MonthResult.month == month))
         .scalars()
         .one_or_none()
+    )
+
+
+def _sales_uploaded(db: Session, year: int, month: int) -> bool:
+    """Выгрузка продаж за месяц загружена, даже если строк в ней ноль."""
+    return (
+        db.execute(
+            select(ImportSession.id)
+            .where(
+                ImportSession.kind == "sales",
+                ImportSession.year == year,
+                ImportSession.month == month,
+                ImportSession.status.in_(("ok", "partial")),
+            )
+            .limit(1)
+        ).first()
+        is not None
     )
 
 
@@ -163,7 +181,7 @@ def close_month(db: Session, user: User, year: int, month: int) -> MonthResult:
         .select_from(SalesFact)
         .where(SalesFact.year == year, SalesFact.month == month)
     ).scalar_one()
-    if not facts:
+    if not facts and not _sales_uploaded(db, year, month):
         raise MonthCloseError(
             "За этот месяц нет факта продаж — сначала загрузите выгрузку «Продажи»",
             status_code=409,
@@ -190,6 +208,9 @@ def close_month(db: Session, user: User, year: int, month: int) -> MonthResult:
             closed_at=result.closed_at,
         )
     )
+    # Перевыполнение плана: продали больше, чем запланировали, — закупщику
+    # нужен пересмотр плана закупок. Недобор (перенос) закупки не трогает.
+    purchase_signal_service.notify_overperformance(db, actor=user, year=year, month=month)
     audit_service.record(
         db,
         actor=user,

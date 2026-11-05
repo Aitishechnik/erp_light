@@ -290,6 +290,10 @@ class ImportSession(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    # Период выгрузки: у продаж — месяц, за который она снята. Нужен, чтобы
+    # отличить «факт не загружали» от «продаж в месяце не было».
+    year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    month: Mapped[int | None] = mapped_column(Integer, nullable=True)
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
