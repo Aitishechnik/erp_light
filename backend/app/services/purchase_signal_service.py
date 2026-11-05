@@ -43,6 +43,12 @@ def _units_by_product(changes: list[need.NeedChange]) -> dict[uuid.UUID, Decimal
     return totals
 
 
+def _qty(value: Decimal) -> str:
+    """Число по-русски: десятичная запятая и без хвостовых нулей."""
+    text = f"{value.normalize():f}"
+    return text.replace(".", ",") if "." in text else text
+
+
 def _line_payload(item: PurchasePlanItem, units: Decimal) -> dict[str, object]:
     raw = need.quantize_qty(units * item.norm) if item.norm is not None else None
     return {
@@ -98,12 +104,14 @@ def notify_sales_change(
     for row in lines[:3]:
         units_delta = Decimal(str(row["units_delta"]))
         sign = "+" if units_delta > 0 else "−"
-        text = f"{row['sales_product']}: {sign}{abs(units_delta).normalize():f} ед."
+        text = f"{row['sales_product']}: {sign}{_qty(abs(units_delta))} ед."
         raw = row["raw_delta"]
         if raw is None:
             text += " — норма не задана"
         else:
-            text += f" → {Decimal(str(raw)).normalize():f} {row['unit']}"
+            text += f" → {_qty(Decimal(str(raw)))} {row['unit']}"
+            if row["alternative"]:
+                text += " (альтернатива)"
         details.append(text)
     tail = f" и ещё {len(lines) - 3}" if len(lines) > 3 else ""
     summary = (
