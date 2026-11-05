@@ -622,7 +622,7 @@ describe('PurchasePlanPage', () => {
     expect(await screen.findByTestId('purchase-status')).toHaveTextContent('Черновик')
     expect(screen.getByRole('button', { name: 'Сохранить' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Добавить сырьё FIN-1' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Количество FIN-1 1')).toBeInTheDocument()
+    expect(await screen.findByLabelText('Количество FIN-1 1')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Удалить' })).toBeInTheDocument()
   })
 
