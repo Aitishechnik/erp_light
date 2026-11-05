@@ -643,6 +643,7 @@ def cmd_plans() -> None:
                 "product_id": products[product.raw_code]["id"],
                 "country_id": countries[product.country],
                 "quantity": str(quantity),
+                "norm": str(product.recipe),
                 "price_rub": str(product.price_usd * Decimal("79.5")),
             }
         )
@@ -668,6 +669,7 @@ def cmd_plans() -> None:
                 "product_id": products[alternative.raw_code]["id"],
                 "country_id": countries[alternative.country],
                 "quantity": str((main_quantity * alternative.share).quantize(Decimal("0.001"))),
+                "norm": str(main.recipe),
                 "price_rub": str(alternative.price_rub),
                 "alternative_of_id": main_id,
                 "notes": f"Альтернатива: {alternative.raw}",
