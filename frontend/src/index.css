@@ -3334,13 +3334,16 @@ button.primary:disabled,
 
 .audit-table .wrap {
   white-space: normal;
-  min-width: 8rem;
-  max-width: 16rem;
+  /* Сообщение закупщику длинное: в узкой колонке оно превращалось в столбик
+     из двух слов и растягивало строку на пол-экрана. */
+  min-width: 22rem;
+  max-width: 42rem;
 }
 
 /* «Кто» — имя и роль в две строки; шире не нужно, иначе таблица не влезает. */
 .audit-table td:nth-child(2) {
-  max-width: 9rem;
+  min-width: 8.5rem;
+  max-width: 10rem;
   white-space: normal;
   overflow-wrap: anywhere;
 }
