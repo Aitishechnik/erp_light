@@ -47,10 +47,12 @@ from app.schemas.planning import (
     PurchasePlanOut,
     PurchasePlanPositionOut,
     PurchasePlanScheduleEntryOut,
+    PurchasePlanSignalLineOut,
+    PurchasePlanSignalOut,
     PurchasePlanSourceEventOut,
     PurchasePlanSourceOut,
 )
-from app.services import audit_service
+from app.services import audit_service, purchase_signal_service
 from app.services import purchase_need as need
 from app.services.plan_freeze import editable_months
 from app.services.purchase_need import NeedChange, NeedPosition
@@ -561,6 +563,40 @@ def _items_out(
     return result
 
 
+def _signals_out(db: Session, plan: PurchasePlan) -> list[PurchasePlanSignalOut]:
+    """История изменений плана: было → стало по строкам."""
+    result: list[PurchasePlanSignalOut] = []
+    for row in purchase_signal_service.history(db, plan):
+        result.append(
+            PurchasePlanSignalOut(
+                id=row["id"],
+                created_at=row["created_at"],
+                month=row["month"],
+                reason=row["reason"],
+                actor_name=row["actor_name"],
+                lines=[
+                    PurchasePlanSignalLineOut(
+                        sales_product=line["sales_product"],
+                        product=line["product"],
+                        unit=line["unit"],
+                        norm=Decimal(line["norm"]) if line["norm"] is not None else None,
+                        plan_units=Decimal(line["plan_units"]),
+                        fact_units=Decimal(line["fact_units"]),
+                        units_delta=Decimal(line["units_delta"]),
+                        was_kg=Decimal(line["was_kg"]) if line["was_kg"] is not None else None,
+                        now_kg=Decimal(line["now_kg"]) if line["now_kg"] is not None else None,
+                        delta_kg=(
+                            Decimal(line["delta_kg"]) if line["delta_kg"] is not None else None
+                        ),
+                        alternative=bool(line.get("alternative")),
+                    )
+                    for line in row["lines"]
+                ],
+            )
+        )
+    return result
+
+
 def _serialize(db: Session, plan: PurchasePlan) -> PurchasePlanOut:
     source = _source_positions(db, plan)
     snapshot = need.snapshot_positions(plan.source_snapshot)
@@ -581,6 +617,7 @@ def _serialize(db: Session, plan: PurchasePlan) -> PurchasePlanOut:
         source=_source_out(db, plan),
         positions=_positions_out(db, plan, source),
         items=_items_out(plan, source, arrivals, snapshot),
+        signals=_signals_out(db, plan),
     )
 
 

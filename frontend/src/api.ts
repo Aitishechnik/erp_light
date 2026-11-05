@@ -271,6 +271,30 @@ export type PurchasePlanSource = {
   revision_requested_by_name: string | null
 }
 
+export type PurchasePlanSignalLine = {
+  sales_product: string
+  product: string
+  unit: string
+  norm: string | null
+  plan_units: string
+  fact_units: string
+  units_delta: string
+  was_kg: string | null
+  now_kg: string | null
+  delta_kg: string | null
+  alternative: boolean
+}
+
+/** Одно изменение плана закупок: было → стало по строкам. */
+export type PurchasePlanSignal = {
+  id: string
+  created_at: string
+  month: number | null
+  reason: string | null
+  actor_name: string | null
+  lines: PurchasePlanSignalLine[]
+}
+
 export type PurchasePlan = {
   id: string
   year: number
@@ -286,6 +310,7 @@ export type PurchasePlan = {
   source: PurchasePlanSource
   positions: PurchasePlanPosition[]
   items: PurchasePlanItem[]
+  signals?: PurchasePlanSignal[]
 }
 
 export type PurchasePlanItemIn = {

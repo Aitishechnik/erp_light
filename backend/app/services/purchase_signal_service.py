@@ -2,15 +2,15 @@
 
 Вызывается при закрытии месяца. Сравнивает факт продаж за месяц с планом
 продаж того же месяца по каждой позиции: если продали больше плана, сырья
-не хватило — по нормам расхода считаем, сколько ещё нужно, и пишем служебное
-сообщение закупщикам.
+не хватило — по нормам расхода считаем, сколько ещё нужно, и пишем короткое
+служебное сообщение закупщикам со ссылкой на историю изменений плана.
 
 Недобор и перенос недобора на следующий период закупки не трогают: товар
 под этот объём уже закуплен, он учтён в распределении плана закупок. Склад
 и остатки в расчёте не участвуют — «сколько уже учтено» видно из плана.
 
 Количества не правятся: утверждённый план закупок меняет человек, вернув его
-в работу. Сигнал только показывает, чего не хватило и на сколько.
+в работу. Сообщение — только сигнал; подробности лежат в истории плана.
 """
 
 from __future__ import annotations
@@ -18,10 +18,12 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.models.audit import AuditEvent
 from app.models.auth import ROLE_IMPORT_MANAGER, ROLE_PURCHASE_DIRECTOR, User
 from app.models.planning import PurchasePlan, PurchasePlanItem
 from app.models.sales import SalesFact
@@ -48,27 +50,45 @@ MONTH_NAMES = (
     "декабрь",
 )
 
+SIGNAL_ACTION = "purchase_plan.revision_needed"
+
 
 def _plan(db: Session, year: int) -> PurchasePlan | None:
     return db.execute(select(PurchasePlan).where(PurchasePlan.year == year)).scalars().one_or_none()
 
 
 def _qty(value: Decimal) -> str:
-    """Число по-русски: десятичная запятая и без хвостовых нулей."""
+    """Число по-русски: пробелы между тысячами и десятичная запятая."""
     text = f"{value.normalize():f}"
-    return text.replace(".", ",") if "." in text else text
+    whole, _, fraction = text.partition(".")
+    grouped = f"{int(whole):,}".replace(",", " ")
+    return f"{grouped},{fraction}" if fraction else grouped
 
 
-def _line_payload(item: PurchasePlanItem, units: Decimal) -> dict[str, object]:
-    raw = need.quantize_qty(units * item.norm) if item.norm is not None else None
+def _kg(item: PurchasePlanItem, units: Decimal) -> Decimal | None:
+    if item.norm is None:
+        return None
+    return need.quantize_qty(units * item.norm)
+
+
+def _line_payload(
+    item: PurchasePlanItem, plan_units: Decimal, fact_units: Decimal
+) -> dict[str, object]:
+    was = _kg(item, plan_units)
+    now = _kg(item, fact_units)
     return {
         "item_id": str(item.id),
+        "sales_product_id": str(item.sales_product_id),
         "sales_product": item.sales_product.name,
         "product": item.product.name,
         "unit": item.product.unit,
         "norm": str(item.norm) if item.norm is not None else None,
-        "units_delta": str(need.quantize_qty(units)),
-        "raw_delta": str(raw) if raw is not None else None,
+        "plan_units": str(need.quantize_qty(plan_units)),
+        "fact_units": str(need.quantize_qty(fact_units)),
+        "units_delta": str(need.quantize_qty(fact_units - plan_units)),
+        "was_kg": str(was) if was is not None else None,
+        "now_kg": str(now) if now is not None else None,
+        "delta_kg": str(now - was) if was is not None and now is not None else None,
         "alternative": item.alternative_of_id is not None,
     }
 
@@ -113,55 +133,38 @@ def notify_overperformance(
     if not over:
         return 0
 
-    lines = [
-        _line_payload(item, over[item.sales_product_id])
-        for item in plan.items
-        if over.get(item.sales_product_id) not in (None, ZERO)
-    ]
+    lines: list[dict[str, object]] = []
+    for item in plan.items:
+        item_delta = over.get(item.sales_product_id)
+        if item_delta is None or item_delta == ZERO:
+            continue
+        plan_units = plan_month.get(item.sales_product_id, ZERO)
+        lines.append(_line_payload(item, plan_units, plan_units + item_delta))
     if not lines:
         return 0
 
     missing_norm = [row["product"] for row in lines if row["norm"] is None]
-    details: list[str] = []
-    for row in lines[:3]:
-        units = Decimal(str(row["units_delta"]))
-        text = f"{row['sales_product']}: +{_qty(units)} ед."
-        raw = row["raw_delta"]
-        if raw is None:
-            text += " — норма не задана"
-        else:
-            text += f" → +{_qty(Decimal(str(raw)))} {row['unit']}"
-            if row["alternative"]:
-                text += " (альтернатива)"
-        details.append(text)
-    tail = f" и ещё {len(lines) - 3}" if len(lines) > 3 else ""
+    added = sum(
+        (Decimal(str(row["delta_kg"])) for row in lines if row["delta_kg"] is not None),
+        ZERO,
+    )
     label = _month_label(month)
     summary = (
         f"Продажи за {label} {year} выше плана: позиций {len(over)}, строк плана "
-        f"закупок {len(lines)} — нужно увеличить план закупок. " + "; ".join(details) + tail
+        f"закупок {len(lines)}, добавка {_qty(added)} кг — история изменений в плане закупок"
     )
     reason = f"перевыполнение плана продаж за {label} {year}"
     audit_service.record(
         db,
         actor=actor,
-        action="purchase_plan.revision_needed",
+        action=SIGNAL_ACTION,
         summary=summary,
         entity_id=plan.id,
         entity_label=f"План закупок, {year}",
         payload={
             "reason": reason,
             "month": month,
-            "overperformance": [
-                {
-                    "product_id": str(product_id),
-                    "sales_plan": str(plan_month.get(product_id, ZERO)),
-                    "fact": str(
-                        need.quantize_qty(over[product_id] + plan_month.get(product_id, ZERO))
-                    ),
-                    "delta": str(need.quantize_qty(over[product_id])),
-                }
-                for product_id in over
-            ],
+            "actor": actor.full_name if actor is not None else None,
             "lines": lines,
             "missing_norm": missing_norm,
         },
@@ -176,3 +179,45 @@ def notify_overperformance(
         note = f"Запрошен пересмотр: {reason}"
         plan.notes = f"{plan.notes}\n{note}" if plan.notes else note
     return len(lines)
+
+
+def history(db: Session, plan: PurchasePlan) -> list[dict[str, Any]]:
+    """История сигналов по плану: что менялось, было и стало.
+
+    Читается из журнала: отдельной таблицы нет. События без полей «было/стало»
+    (старый формат) пропускаем — их всё равно не показать построчно.
+    """
+    events = (
+        db.execute(
+            select(AuditEvent)
+            .where(
+                AuditEvent.action == SIGNAL_ACTION,
+                AuditEvent.entity_id == plan.id,
+            )
+            .order_by(AuditEvent.created_at.desc())
+            .limit(20)
+        )
+        .scalars()
+        .all()
+    )
+    result: list[dict[str, Any]] = []
+    for event in events:
+        payload = event.payload or {}
+        lines = [
+            row
+            for row in payload.get("lines", [])
+            if isinstance(row, dict) and row.get("plan_units") is not None
+        ]
+        if not lines:
+            continue
+        result.append(
+            {
+                "id": event.id,
+                "created_at": event.created_at,
+                "month": payload.get("month"),
+                "reason": payload.get("reason"),
+                "actor_name": payload.get("actor"),
+                "lines": lines,
+            }
+        )
+    return result

@@ -126,6 +126,18 @@ function splitPreview(
   return result
 }
 
+/** Кг в истории изменений: всегда три знака и пробелы между тысячами. */
+const KG_FORMAT = new Intl.NumberFormat('ru-RU', {
+  minimumFractionDigits: 3,
+  maximumFractionDigits: 3,
+})
+
+function formatKg(value: string | null): string {
+  if (value === null) return '—'
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? KG_FORMAT.format(parsed) : value
+}
+
 /** Потребность по норме: продажи месяца × норма (тот же расчёт, что на сервере). */
 function previewByNorm(
   norm: number,
@@ -1090,6 +1102,63 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
               )}
               <HistoryBlock events={source.history} />
             </>
+          ) : null}
+
+          {plan.signals && plan.signals.length > 0 ? (
+            <section className="signal-history" data-testid="signal-history">
+              <h2 className="section-title">История изменений</h2>
+              {plan.signals.map((signal) => (
+                <div className="signal-block" key={signal.id}>
+                  <p className="hint">
+                    {formatDate(signal.created_at)} · {signal.reason ?? 'изменение плана'} ·{' '}
+                    {signal.actor_name ?? '—'}
+                  </p>
+                  <div className="table-scroll">
+                    <table className="signal-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Позиция</th>
+                          <th scope="col">Сырьё</th>
+                          <th scope="col" className="num">
+                            Было, кг
+                          </th>
+                          <th scope="col" className="num">
+                            Стало, кг
+                          </th>
+                          <th scope="col" className="num">
+                            Δ, кг
+                          </th>
+                          <th scope="col" className="num">
+                            Ед.: план → факт
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {signal.lines.map((line) => (
+                          <tr
+                            key={`${signal.id}-${line.sales_product}-${line.product}-${line.alternative}`}
+                          >
+                            <td>{line.sales_product}</td>
+                            <td>
+                              {line.product}
+                              {line.alternative ? ' (альтернатива)' : ''}
+                            </td>
+                            <td className="num">{formatKg(line.was_kg)}</td>
+                            <td className="num">{formatKg(line.now_kg)}</td>
+                            <td className="num">
+                              {line.delta_kg ? `+${formatKg(line.delta_kg)}` : '—'}
+                            </td>
+                            <td className="num">
+                              {formatKg(line.plan_units)} → {formatKg(line.fact_units)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </section>
           ) : null}
 
           {source?.revision_requested_at ? (

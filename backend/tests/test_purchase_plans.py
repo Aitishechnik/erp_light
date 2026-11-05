@@ -1376,17 +1376,33 @@ def test_close_signals_purchase_on_overperformance(
     assert "import_manager" in event.audience
     assert event.month == 1
     assert "Продажи за январь" in event.summary
-    assert "+50 ед. → +75 кг" in event.summary
+    assert "добавка 75 кг" in event.summary
 
     payload = event.payload or {}
     assert payload["month"] == 1
     line = payload["lines"][0]
+    assert Decimal(line["plan_units"]) == Decimal("100")
+    assert Decimal(line["fact_units"]) == Decimal("150")
     assert Decimal(line["units_delta"]) == Decimal("50")
-    assert Decimal(line["raw_delta"]) == Decimal("75")
+    assert Decimal(line["was_kg"]) == Decimal("150")
+    assert Decimal(line["now_kg"]) == Decimal("225")
+    assert Decimal(line["delta_kg"]) == Decimal("75")
     assert line["alternative"] is False
 
     purchase_plan = db_session.execute(select(PurchasePlan)).scalars().one()
     assert purchase_plan.revision_requested_at is not None
+
+    # История изменений приходит вместе с планом: было → стало по строке.
+    login("purchase")
+    plan_body = client.get(f"/api/v1/purchase-plans/{purchase_plan.id}").json()
+    assert len(plan_body["signals"]) == 1
+    signal = plan_body["signals"][0]
+    assert signal["month"] == 1
+    assert signal["actor_name"] == "Коммерческий директор (демо)"
+    history_line = signal["lines"][0]
+    assert Decimal(history_line["was_kg"]) == Decimal("150")
+    assert Decimal(history_line["now_kg"]) == Decimal("225")
+    assert Decimal(history_line["delta_kg"]) == Decimal("75")
 
 
 def test_no_signal_when_fact_meets_plan(

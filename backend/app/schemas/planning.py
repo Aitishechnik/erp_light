@@ -245,6 +245,33 @@ class PurchasePlanSourceOut(BaseModel):
     revision_requested_by_name: str | None
 
 
+class PurchasePlanSignalLineOut(BaseModel):
+    """Строка истории изменений: было → стало по конкретному сырью."""
+
+    sales_product: str
+    product: str
+    unit: str
+    norm: Decimal | None = None
+    plan_units: Decimal
+    fact_units: Decimal
+    units_delta: Decimal
+    was_kg: Decimal | None = None
+    now_kg: Decimal | None = None
+    delta_kg: Decimal | None = None
+    alternative: bool = False
+
+
+class PurchasePlanSignalOut(BaseModel):
+    """Одно изменение плана закупок: месяц, причина, автор и строки."""
+
+    id: uuid.UUID
+    created_at: datetime
+    month: int | None = None
+    reason: str | None = None
+    actor_name: str | None = None
+    lines: list[PurchasePlanSignalLineOut]
+
+
 class PurchasePlanOut(BaseModel):
     id: uuid.UUID
     year: int
@@ -260,6 +287,9 @@ class PurchasePlanOut(BaseModel):
     source: PurchasePlanSourceOut
     positions: list[PurchasePlanPositionOut]
     items: list[PurchasePlanItemOut]
+    signals: list[PurchasePlanSignalOut] = Field(
+        default_factory=list, description="История изменений: было → стало"
+    )
 
 
 # --- Годовой план отдела продаж и корректировки --------------------------

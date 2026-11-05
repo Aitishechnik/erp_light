@@ -7,6 +7,7 @@ import type {
   PurchasePlan,
   PurchasePlanItem,
   PurchasePlanPosition,
+  PurchasePlanSignal,
   SessionUser,
 } from './api'
 import { mockApi } from './apiMock'
@@ -286,6 +287,41 @@ describe('PurchasePlanPage', () => {
     await screen.findByTestId('purchase-row-item-1')
     expect(screen.queryByTestId('need-item-1')).toBeNull()
     expect(screen.getByTestId('purchase-row-item-1')).toHaveTextContent('норма не задана')
+  })
+
+  it('показывает историю изменений: было → стало', async () => {
+    const signal: PurchasePlanSignal = {
+      id: 'sig-1',
+      created_at: '2026-11-05T10:30:00Z',
+      month: 3,
+      reason: 'перевыполнение плана продаж за март 2026',
+      actor_name: 'Коммерческий директор (демо)',
+      lines: [
+        {
+          sales_product: 'Смесь ореховая',
+          product: 'Орех грецкий, вес',
+          unit: 'кг',
+          norm: '1.5000',
+          plan_units: '100.000',
+          fact_units: '150.000',
+          units_delta: '50.000',
+          was_kg: '150.000',
+          now_kg: '225.000',
+          delta_kg: '75.000',
+          alternative: false,
+        },
+      ],
+    }
+    mockApi(routes([plan({ signals: [signal] })]))
+    render(<PurchasePlanPage user={DIRECTOR} />)
+
+    const block = await screen.findByTestId('signal-history')
+    expect(block).toHaveTextContent('История изменений')
+    expect(block).toHaveTextContent('перевыполнение плана продаж за март 2026')
+    expect(block).toHaveTextContent('150')
+    expect(block).toHaveTextContent('225')
+    expect(block).toHaveTextContent('+75')
+    expect(block).toHaveTextContent('100,000 → 150,000')
   })
 
   it('приход перекрывает следующие месяцы и не даёт больше 100 %', async () => {

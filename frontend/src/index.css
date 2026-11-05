@@ -2585,6 +2585,43 @@ button.primary:disabled,
   font-size: 0.85rem;
 }
 
+/* История изменений плана закупок: было → стало по строкам. */
+.signal-history {
+  margin-bottom: 1.25rem;
+}
+
+.signal-block + .signal-block {
+  margin-top: 0.75rem;
+}
+
+.signal-table {
+  width: 100%;
+  font-size: 0.8rem;
+}
+
+.signal-table th,
+.signal-table td {
+  padding: 0.25rem 0.4rem;
+}
+
+.signal-table th {
+  font-weight: 600;
+  color: var(--muted);
+  text-align: left;
+}
+
+.signal-table th.num,
+.signal-table td.num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.signal-table td:nth-child(1),
+.signal-table td:nth-child(2) {
+  max-width: 18rem;
+  white-space: normal;
+}
+
 /* Норма в режиме чтения — отдельной строкой: в колонке количества она не
    влезает в одну строку и раньше наезжала на цену соседней колонки. */
 .purchase-table .plan-grid td.num .norm-inline {
