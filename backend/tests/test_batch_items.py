@@ -2,8 +2,9 @@
 
 Из выгрузки берём только номенклатуру и количество; цены, суммы, курс и
 себестоимость — отдельная задача. Файл принимается целиком или не принимается:
-плохая строка (нет номенклатуры, двусмысленное название, другая единица,
-непонятное количество) отменяет всю загрузку.
+плохая строка (нет кода, код не найден в справочнике, другая единица,
+непонятное количество) отменяет всю загрузку. В форме 1С с 2026-11 номенклатура
+опознаётся по колонке «Код»; файл прежней формы без неё — по наименованию.
 """
 
 from io import BytesIO
@@ -20,7 +21,30 @@ from tests.helpers import put_batch
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 # Колонки как в реальной выгрузке «Партия»: лишние 1С отдаёт, но мы их не читаем.
+# Колонки новой формы 1С: третья — «Код», по ней и ищем номенклатуру.
 HEADER = (
+    "№",
+    "Количество",
+    "Код",
+    "Номенклатура",
+    "Способ отражения расходов",
+    "Серия",
+    "Ед.",
+    "К.",
+    "Цена",
+    "Сумма",
+    "% НДС",
+    "Сумма НДС",
+    "Всего",
+    "Страна происхождения",
+    "Заказ поставщику",
+    "Заказ",
+    "Склад",
+    "Счет передачи (БУ)",
+)
+
+# Прежняя форма «Партии»: колонки «Код» нет, третья колонка без заголовка.
+OLD_HEADER = (
     "№",
     "Количество",
     "",
@@ -49,15 +73,16 @@ def part_row(
     name: str,
     quantity: str,
     *,
+    code: str = "ТОВ1",
     unit: str = "кг",
     price: str = "6.73",
     total: str = "134600",
 ) -> tuple[object, ...]:
-    """Строка выгрузки в порядке колонок 1С."""
+    """Строка новой формы выгрузки в порядке колонок 1С."""
     return (
         number,
         quantity,
-        "",
+        code,
         name,
         "",
         f"{name} Китай 10кг",
@@ -74,6 +99,13 @@ def part_row(
         "Склад СТУПИНО NEW",
         "",
     )
+
+
+def old_part_row(number: int, name: str, quantity: str, *, unit: str = "кг") -> tuple[object, ...]:
+    """Строка прежней формы: колонки «Код» нет, вместо кода — пустая ячейка."""
+    row = list(part_row(number, name, quantity, unit=unit))
+    row[2] = ""
+    return tuple(row)
 
 
 def xlsx(*rows: tuple[object, ...], header: tuple[str, ...] = HEADER) -> bytes:
@@ -148,7 +180,11 @@ def test_draft_gets_items_from_file(client: TestClient, db_session: Session) -> 
     add_products(db_session, raw("ТОВ395561", "Грецкий орех сушеный, вес"))
     batch_id = create_draft(client)
 
-    response = upload_items(client, batch_id, part_row(1, "Грецкий орех сушеный, вес", "20000"))
+    response = upload_items(
+        client,
+        batch_id,
+        part_row(1, "Грецкий орех сушеный, вес", "20000", code="ТОВ395561"),
+    )
     assert response.status_code == 200, response.text
     body = response.json()
 
@@ -202,6 +238,72 @@ def test_file_with_capital_letters_inside_is_read(client: TestClient, db_session
     assert response.json()["batch"]["items"][0]["quantity"] == "20000.000"
 
 
+def test_item_is_found_by_code_when_name_changed(client: TestClient, db_session: Session) -> None:
+    """Название в 1С переименовали — позиция всё равно находится по коду."""
+    add_products(db_session, raw("ТОВ395561", "Грецкий орех сушеный, вес"))
+    batch_id = create_draft(client)
+
+    response = upload_items(
+        client,
+        batch_id,
+        part_row(1, "Грецкий орех сушеный (новое название 1С)", "20000", code="ТОВ395561"),
+    )
+    assert response.status_code == 200, response.text
+    item = response.json()["batch"]["items"][0]
+    assert item["product_code"] == "ТОВ395561"
+    # В карточке остаётся название из нашего справочника.
+    assert item["product_name"] == "Грецкий орех сушеный, вес"
+
+
+def test_code_with_trailing_spaces_and_other_case_is_found(
+    client: TestClient, db_session: Session
+) -> None:
+    """1С отдаёт код с хвостовыми пробелами («ТОВ396657  ») — это тот же код."""
+    add_products(db_session, raw("ТОВ396657", "Хурма сушеная, чипсы, вес"))
+    batch_id = create_draft(client)
+
+    response = upload_items(
+        client,
+        batch_id,
+        part_row(1, "Хурма сушеная, чипсы, вес", "5000", code="тов396657   "),
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["batch"]["items"][0]["product_code"] == "ТОВ396657"
+
+
+def test_empty_code_blocks_file(client: TestClient, db_session: Session) -> None:
+    """В новой форме без кода строку не опознать — файл не принимается целиком."""
+    add_products(db_session, raw("ТОВ1", "Арахис в глазури"))
+    batch_id = create_draft(client)
+
+    response = upload_items(
+        client,
+        batch_id,
+        part_row(1, "Арахис в глазури", "10"),
+        part_row(2, "Чернослив, вес", "5", code=""),
+    )
+    assert response.status_code == 400
+    assert "строка 3: пустой код 1С у «Чернослив, вес»" in response.json()["detail"]
+    assert client.get(f"/api/v1/batches/{batch_id}").json()["items"] == []
+
+
+def test_old_form_without_code_loads_by_name(client: TestClient, db_session: Session) -> None:
+    """Файл прежней формы (без колонки «Код») грузится по наименованию, как раньше."""
+    add_products(db_session, raw("ТОВ395561", "Грецкий орех сушеный, вес"))
+    batch_id = create_draft(client)
+
+    response = upload_items(
+        client,
+        batch_id,
+        old_part_row(1, "Грецкий орех сушеный, вес", "20000"),
+        header=OLD_HEADER,
+    )
+    assert response.status_code == 200, response.text
+    item = response.json()["batch"]["items"][0]
+    assert item["product_code"] == "ТОВ395561"
+    assert item["quantity"] == "20000.000"
+
+
 def test_unknown_nomenclature_blocks_whole_file(client: TestClient, db_session: Session) -> None:
     add_products(db_session, raw("ТОВ1", "Арахис в глазури"))
     batch_id = create_draft(client)
@@ -210,10 +312,10 @@ def test_unknown_nomenclature_blocks_whole_file(client: TestClient, db_session: 
         client,
         batch_id,
         part_row(1, "Арахис в глазури", "10"),
-        part_row(2, "Неизвестный товар", "5"),
+        part_row(2, "Неизвестный товар", "5", code="ТОВ404"),
     )
     assert response.status_code == 400
-    assert "номенклатура «Неизвестный товар» не найдена" in response.json()["detail"]
+    assert "код «ТОВ404» («Неизвестный товар») не найден" in response.json()["detail"]
 
     # Ничего не записалось: партия осталась черновиком.
     batch = client.get(f"/api/v1/batches/{batch_id}").json()
@@ -226,7 +328,25 @@ def test_unknown_nomenclature_blocks_whole_file(client: TestClient, db_session: 
     assert journal[0]["rows_failed"] == 1
 
 
-def test_ambiguous_name_blocks_file(client: TestClient, db_session: Session) -> None:
+def test_same_name_with_different_codes_is_not_ambiguous(
+    client: TestClient, db_session: Session
+) -> None:
+    """Одноимённые позиции больше не мешают: в новой форме они различаются кодом."""
+    add_products(
+        db_session,
+        raw("ТОВ1", "Чернослив, вес"),
+        raw("ТОВ2", "Чернослив, вес"),
+    )
+    batch_id = create_draft(client)
+
+    response = upload_items(client, batch_id, part_row(1, "Чернослив, вес", "10", code="ТОВ2"))
+    assert response.status_code == 200, response.text
+    items = response.json()["batch"]["items"]
+    assert [item["product_code"] for item in items] == ["ТОВ2"]
+
+
+def test_old_form_ambiguous_name_blocks_file(client: TestClient, db_session: Session) -> None:
+    """Прежняя форма без кода: одноимённые позиции по-прежнему требуют уточнения."""
     add_products(
         db_session,
         raw("ТОВ1", "Чернослив, вес"),
@@ -234,9 +354,17 @@ def test_ambiguous_name_blocks_file(client: TestClient, db_session: Session) -> 
     )
     batch_id = create_draft(client)
 
-    response = upload_items(client, batch_id, part_row(1, "Чернослив, вес", "10"))
+    response = upload_items(
+        client,
+        batch_id,
+        old_part_row(1, "Чернослив, вес", "10"),
+        header=OLD_HEADER,
+    )
     assert response.status_code == 400
-    assert "несколько позиций (ТОВ1, ТОВ2)" in response.json()["detail"]
+    assert (
+        "по названию «Чернослив, вес» в справочнике несколько позиций (ТОВ1, ТОВ2)"
+        in (response.json()["detail"])
+    )
     assert client.get(f"/api/v1/batches/{batch_id}").json()["items"] == []
 
 
@@ -318,9 +446,9 @@ def test_repeat_upload_replaces_items(client: TestClient, db_session: Session) -
     second = upload_items(
         client,
         batch_id,
-        part_row(1, "Арахис в глазури", "10"),
-        part_row(2, "Чернослив, вес", "7"),
-        part_row(3, "Изюм темный, вес", "3"),
+        part_row(1, "Арахис в глазури", "10", code="ТОВ1"),
+        part_row(2, "Чернослив, вес", "7", code="ТОВ2"),
+        part_row(3, "Изюм темный, вес", "3", code="ТОВ3"),
     )
     assert second.status_code == 200, second.text
     body = second.json()

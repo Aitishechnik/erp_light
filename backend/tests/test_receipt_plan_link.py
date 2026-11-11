@@ -122,7 +122,7 @@ def test_import_of_items_links_the_line_automatically(
     )
     assert body["items"][0]["purchase_plan_item_id"]
 
-    response = upload_items(client, body["id"], part_row(1, "Арахис", "20"))
+    response = upload_items(client, body["id"], part_row(1, "Арахис", "20", code="RAW-1"))
     assert response.status_code == 200, response.text
     # Строки пересозданы, но привязка восстановлена автоматически по сырью и году.
     assert response.json()["batch"]["items"][0]["purchase_plan_item_id"] == data["line"]["id"]
@@ -146,7 +146,7 @@ def test_import_does_not_link_without_approved_plan(
     assert saved.status_code == 200, saved.text
 
     body = put_batch(client, _receipt("ИТ-1", when=f"{YEAR}-01-15"))
-    response = upload_items(client, body["id"], part_row(1, "Арахис", "20"))
+    response = upload_items(client, body["id"], part_row(1, "Арахис", "20", code="RAW-1"))
     assert response.status_code == 200, response.text
     # План ещё черновик — автоматически не привязываем.
     assert response.json()["batch"]["items"][0]["purchase_plan_item_id"] is None
@@ -155,7 +155,7 @@ def test_import_does_not_link_without_approved_plan(
 def test_import_does_not_link_other_raw(client: TestClient, login, catalog: dict[str, Any]) -> None:
     data = _approved_plan(client, login, catalog)
     body = put_batch(client, _receipt("ИТ-1", when=f"{YEAR}-01-15"))
-    response = upload_items(client, body["id"], part_row(1, "Кокос", "20"))
+    response = upload_items(client, body["id"], part_row(1, "Кокос", "20", code="RAW-2"))
     assert response.status_code == 200, response.text
     assert response.json()["batch"]["items"][0]["purchase_plan_item_id"] is None
     assert _plan(client, data["plan"]["id"])["items"][0]["fact_quantity"] == "0"
@@ -225,7 +225,7 @@ def test_import_prefers_main_line_for_the_raw(
     login("purchase")
 
     body = put_batch(client, _receipt("ИТ-1", when=f"{YEAR}-01-15"))
-    response = upload_items(client, body["id"], part_row(1, "Арахис", "20"))
+    response = upload_items(client, body["id"], part_row(1, "Арахис", "20", code="RAW-1"))
     assert response.status_code == 200, response.text
     # Для RAW-1 есть основная строка и альтернатива на ту же позицию: берём основную.
     assert response.json()["batch"]["items"][0]["purchase_plan_item_id"] == main_id

@@ -1,9 +1,14 @@
 """Позиции партии из выгрузки 1С «Партия» (грузятся из карточки поступления).
 
-Из файла берём только то, что есть в нашей программе: **номенклатуру** (поиск в
-справочнике по наименованию) и **количество**. Остальные колонки выгрузки —
-способ отражения расходов, серия, коэффициент, цена, суммы, НДС, страна
-происхождения, заказ поставщику, заказ, склад, счёт передачи — не читаются.
+Из файла берём только то, что есть в нашей программе: **номенклатуру** и
+**количество**. Остальные колонки выгрузки — способ отражения расходов, серия,
+коэффициент, цена, суммы, НДС, страна происхождения, заказ поставщику, заказ,
+склад, счёт передачи — не читаются.
+
+В форме 1С с 2026-11 появилась колонка **«Код»**, и номенклатура опознаётся по
+ней: код — ключ справочника, поэтому переименование позиции в 1С больше не
+ломает загрузку. Файлы прежней формы без колонки «Код» принимаются по-старому,
+по наименованию.
 
 Финансовую часть партии (цены, суммы, курс, себестоимость) этот загрузчик не
 считает — это отдельная задача. Строки создаются без инвойсной суммы, поэтому
@@ -13,9 +18,11 @@
   * файл принимается целиком или не принимается вовсе: если хоть одна строка не
     сходится со справочником, в поступлении ничего не меняется, а причины
     показываются закупщику;
-  * номенклатура ищется по наименованию без учёта регистра, «ё» и лишних
-    пробелов; нашлось несколько позиций — просим уточнить справочник, сами не
-    угадываем;
+  * номенклатура ищется по коду 1С — регистр и лишние пробелы не важны; кода
+    нет в справочнике — файл не принимается, в причине видны и код, и название;
+  * в файле без колонки «Код» (прежняя форма) позиция ищется по наименованию без
+    учёта регистра, «ё» и лишних пробелов; нашлось несколько позиций — просим
+    уточнить справочник, сами не угадываем;
   * новая номенклатура не заводится;
   * единица измерения из файла сверяется со справочником: количество в другой
     единице испортило бы себестоимость единицы;
@@ -45,8 +52,13 @@ from app.services.purchase_plan_service import auto_plan_item_id
 
 
 def name_key(name: str) -> str:
-    """Ключ поиска номенклатуры: регистр, «ё» и лишние пробелы не важны."""
+    """Ключ поиска номенклатуры по названию: регистр, «ё» и лишние пробелы не важны."""
     return " ".join(str(name).split()).strip().casefold().replace("ё", "е")
+
+
+def code_key(code: str) -> str:
+    """Ключ поиска номенклатуры по коду 1С: лишние пробелы и регистр не важны."""
+    return " ".join(str(code).split()).strip().casefold()
 
 
 def parse_quantity(value: str) -> Decimal | None:
@@ -68,26 +80,37 @@ class PreparedItem:
     quantity: Decimal
 
 
-def _product_map(db: Session) -> dict[str, list[Product]]:
-    """Справочник номенклатуры, разложенный по ключу наименования."""
-    found: dict[str, list[Product]] = {}
+def _product_maps(db: Session) -> tuple[dict[str, list[Product]], dict[str, list[Product]]]:
+    """Справочник номенклатуры в двух разрезах: по коду 1С и по наименованию."""
+    by_code: dict[str, list[Product]] = {}
+    by_name: dict[str, list[Product]] = {}
     for product in db.execute(select(Product)).scalars().all():
-        found.setdefault(name_key(product.name), []).append(product)
-    return found
+        by_code.setdefault(code_key(product.code), []).append(product)
+        by_name.setdefault(name_key(product.name), []).append(product)
+    return by_code, by_name
 
 
 def _prepare(db: Session, rows: list[dict[str, str]]) -> tuple[list[PreparedItem], list[str]]:
     """Проверить все строки файла. Пишем только если проблем нет ни в одной."""
-    products = _product_map(db)
+    by_code, by_name = _product_maps(db)
+    # Новая форма 1С отдаёт колонку «Код»; в прежней её нет, и тогда остаётся
+    # искать по названию — так старые выгрузки продолжают грузиться.
+    code_column = bool(rows) and "Код" in rows[0]
     prepared: list[PreparedItem] = []
     problems: list[str] = []
 
     for number, row in enumerate(rows, start=2):
         name = row["Номенклатура"].strip()
+        code = row.get("Код", "").strip()
         quantity = parse_quantity(row["Количество"])
         unit = row.get("Ед.", "").strip()
 
-        if not name:
+        if code_column and not code:
+            problems.append(
+                f"строка {number}: пустой код 1С у «{name}» — без кода позиция не опознаётся"
+            )
+            continue
+        if not code_column and not name:
             problems.append(f"строка {number}: пустая номенклатура")
             continue
         if quantity is None:
@@ -97,16 +120,29 @@ def _prepare(db: Session, rows: list[dict[str, str]]) -> tuple[list[PreparedItem
             problems.append(f"строка {number}: количество должно быть больше нуля")
             continue
 
-        matches = products.get(name_key(name), [])
-        if not matches:
-            problems.append(f"строка {number}: номенклатура «{name}» не найдена в справочнике")
-            continue
-        if len(matches) > 1:
-            codes = ", ".join(sorted(product.code for product in matches))
-            problems.append(
-                f"строка {number}: по названию «{name}» в справочнике несколько позиций ({codes})"
-            )
-            continue
+        if code_column:
+            matches = by_code.get(code_key(code), [])
+            if not matches:
+                problems.append(f"строка {number}: код «{code}» («{name}») не найден в справочнике")
+                continue
+            if len(matches) > 1:
+                codes = ", ".join(sorted(product.code for product in matches))
+                problems.append(
+                    f"строка {number}: по коду «{code}» в справочнике несколько позиций ({codes})"
+                )
+                continue
+        else:
+            matches = by_name.get(name_key(name), [])
+            if not matches:
+                problems.append(f"строка {number}: номенклатура «{name}» не найдена в справочнике")
+                continue
+            if len(matches) > 1:
+                codes = ", ".join(sorted(product.code for product in matches))
+                problems.append(
+                    f"строка {number}: по названию «{name}» в справочнике "
+                    f"несколько позиций ({codes})"
+                )
+                continue
 
         product = matches[0]
         if unit and name_key(unit) != name_key(product.unit):
@@ -213,6 +249,7 @@ def import_items(db: Session, batch: Batch, file_name: str, content: bytes) -> I
 __all__ = [
     "MAX_PROBLEMS",
     "PreparedItem",
+    "code_key",
     "import_items",
     "name_key",
     "parse_quantity",
