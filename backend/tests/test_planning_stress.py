@@ -31,7 +31,8 @@ MONTH = 1
 def _annual(client: TestClient) -> dict[str, Any]:
     response = client.get("/api/v1/annual-sales-plans", params={"year": YEAR})
     assert response.status_code == 200, response.text
-    return response.json()
+    data: dict[str, Any] = response.json()
+    return data
 
 
 def _reapprove_annual(client: TestClient, login) -> None:
@@ -46,7 +47,8 @@ def _reapprove_annual(client: TestClient, login) -> None:
 def _purchase(client: TestClient) -> dict[str, Any]:
     response = client.get("/api/v1/purchase-plans", params={"year": YEAR})
     assert response.status_code == 200, response.text
-    return response.json()[0]
+    rows: list[dict[str, Any]] = response.json()
+    return rows[0]
 
 
 def _correction(
@@ -95,10 +97,10 @@ def _correction(
 
 def _plan_month_item(client: TestClient, login, plan_id: str, month: int) -> str | None:
     login("commercial")
-    plan = client.get(f"/api/v1/sales-plans/{plan_id}").json()
+    plan: dict[str, Any] = client.get(f"/api/v1/sales-plans/{plan_id}").json()
     for item in plan["items"]:
         if item["month"] == month:
-            return item["quantity"]
+            return str(item["quantity"])
     return None
 
 
@@ -269,7 +271,9 @@ def test_month_reopen_recalculates_signals_and_carryover(
         .all()
     )
     assert len(over) == 1
-    assert Decimal(over[0].payload["lines"][0]["delta_kg"]) == Decimal("75")
+    payload = over[0].payload
+    assert payload is not None
+    assert Decimal(payload["lines"][0]["delta_kg"]) == Decimal("75")
 
     # Открываем месяц, грузим другой факт и закрываем заново.
     login("commercial")
