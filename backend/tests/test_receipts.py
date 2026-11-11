@@ -5,6 +5,7 @@
 валюте, общие расходы делятся между строками по полной валютной стоимости.
 """
 
+import logging
 from datetime import date
 from decimal import Decimal
 
@@ -132,6 +133,16 @@ def test_rate_is_cached_and_reused(
     assert Decimal(second.json()["rate"]) == Decimal("90.5")
     # Второй раз берём из кэша — в сеть не ходим.
     assert len(calls) == 1
+
+
+def test_rate_endpoint_explains_cbr_failure(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Курса нет и ЦБ недоступен — отдаём причину, а не глухое «не найден»."""
+    _no_network(monkeypatch)
+    response = client.get("/api/v1/rates/USD")
+    assert response.status_code == 502
+    assert "ЦБ РФ недоступен" in response.json()["detail"]
 
 
 def test_rub_rate_is_one(client: TestClient) -> None:
@@ -320,7 +331,7 @@ def test_fixed_payment_is_not_revalued_when_rate_grows(
         client, _payload(current_exchange_rate=None, payments=[_payment("600", "80")])
     ).json()
 
-    # Старим кэш курса на два часа — сервис сходит за новым курсом.
+    # Старим кэш курса на два часа — фоновая задача сходит за новым курсом.
     db_session.execute(text("update currency_rates set fetched_at = now() - interval '2 hours'"))
     db_session.commit()
     monkeypatch.setattr(
@@ -331,6 +342,7 @@ def test_fixed_payment_is_not_revalued_when_rate_grows(
             rates=currency_service.parse_cbr_xml(cbr_xml("100,0000")),
         ),
     )
+    currency_service.refresh_used_rates(db_session)
 
     updated = client.get(f"/api/v1/batches/{created['id']}")
     assert updated.status_code == 200, updated.text
@@ -411,6 +423,81 @@ def test_payments_can_be_edited(client: TestClient, login, monkeypatch: pytest.M
     assert len(updated.json()["payments"]) == 2
 
 
+def test_calendar_does_not_go_to_cbr(
+    client: TestClient,
+    login,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    """Календарь читает курсы из базы: ЦБ бывает недоступен, а экран должен открываться."""
+    login("purchase")
+    _with_cbr(monkeypatch)
+    _put(client, _payload(current_exchange_rate=None, batch_number="P-1"))
+    _put(client, _payload(current_exchange_rate=None, batch_number="P-2"))
+    _put(client, _payload(current_exchange_rate=None, batch_number="P-3"))
+
+    # Кэш постарел: раньше каждая из трёх партий шла в ЦБ при открытии месяца.
+    db_session.execute(text("update currency_rates set fetched_at = now() - interval '2 hours'"))
+    db_session.commit()
+
+    def fail(day: date) -> currency_service.CbrRates:
+        raise AssertionError("календарь не должен ходить в ЦБ")
+
+    monkeypatch.setattr(currency_service, "fetch_cbr_rates", fail)
+    response = client.get("/api/v1/batches")
+    assert response.status_code == 200, response.text
+    rates = {Decimal(row["finance"]["exchange_rate"]) for row in response.json()}
+    assert rates == {Decimal("90.5")}
+
+
+def test_calendar_warns_when_rate_is_missing(
+    client: TestClient,
+    login,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Курса в кэше нет — календарь всё равно открывается, а причина попадает в лог."""
+    login("purchase")
+    _no_network(monkeypatch)
+    _put(client, _payload(current_exchange_rate="90"))  # курс задан руками, в кэше ЦБ пусто
+    with caplog.at_level(logging.WARNING, logger="erp_lite"):
+        assert client.get("/api/v1/batches").status_code == 200
+    assert "Нет сохранённого курса ЦБ для USD" in caplog.text
+
+
+def test_hourly_refresh_reports_cbr_failure(
+    client: TestClient,
+    login,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    """Отказ ЦБ не прячем: фоновая задача пишет причину в лог."""
+    login("purchase")
+    _no_network(monkeypatch)
+    _put(client, _payload(current_exchange_rate="90"))
+    with pytest.raises(currency_service.RateError):
+        currency_service.refresh_used_rates(db_session)
+
+
+def test_refresh_does_not_call_cbr_when_cache_is_fresh(
+    client: TestClient,
+    login,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    """Перезапуск сервера со свежим кэшем не ходит в ЦБ."""
+    login("purchase")
+    _with_cbr(monkeypatch)
+    client.get("/api/v1/rates/USD", params={"date": DAY})
+    _put(client, _payload(current_exchange_rate="90"))
+
+    def fail(day: date) -> currency_service.CbrRates:
+        raise AssertionError("свежий кэш не требует запроса в ЦБ")
+
+    monkeypatch.setattr(currency_service, "fetch_cbr_rates", fail)
+    assert currency_service.refresh_used_rates(db_session) == {"USD": DAY}
+
+
 def test_hourly_refresh_touches_only_used_currencies(
     client: TestClient, login, monkeypatch: pytest.MonkeyPatch, db_session: Session
 ) -> None:
@@ -430,8 +517,8 @@ def test_hourly_refresh_touches_only_used_currencies(
 
     monkeypatch.setattr(currency_service, "fetch_cbr_rates", fake_fetch)
     refreshed = currency_service.refresh_used_rates(db_session)
-    assert refreshed == 1  # только USD из поступлений
-    assert fetched  # курс действительно перезапрошен
+    assert len(refreshed) == 1  # только USD из поступлений
+    assert fetched == ["call"]  # один запрос в ЦБ на все валюты, а не по одному
 
 
 FUTURE = "2099-01-01"

@@ -15,7 +15,8 @@ from sqlalchemy import select
 from app.api.deps import CurrentUser, DbSession, require_roles
 from app.api.v1.imports import session_out
 from app.models.auth import ROLE_IMPORT_MANAGER, ROLE_PURCHASE_DIRECTOR, User
-from app.models.domain import Batch
+from app.models.domain import Batch, StockSnapshot
+from app.models.rates import CurrencyRate
 from app.schemas.domain import BatchCreate, BatchCustomsIn, BatchOut
 from app.schemas.imports import BatchImportOut
 from app.services import audit_service, batch_import_service
@@ -28,6 +29,7 @@ from app.services.batch_service import (
     load_batch,
     load_batches,
     lock_batch,
+    rate_rows_for,
     serialize_batch,
     update_batch,
 )
@@ -43,12 +45,24 @@ Writer = Annotated[User, Depends(require_roles(ROLE_PURCHASE_DIRECTOR, ROLE_IMPO
 Director = Annotated[User, Depends(require_roles(ROLE_PURCHASE_DIRECTOR))]
 
 
-def _out(db: DbSession, batch: Batch) -> BatchOut:
-    """Поступление с себестоимостью: платежи по своим курсам + текущий курс остатка."""
-    snaps = latest_snapshots(db, [item.id for item in batch.items])
-    finance, rate_row = batch_finance(db, batch)
+def _out(
+    db: DbSession,
+    batch: Batch,
+    *,
+    snaps: dict[uuid.UUID, StockSnapshot] | None = None,
+    rate_rows: dict[str, CurrencyRate] | None = None,
+) -> BatchOut:
+    """Поступление с себестоимостью: платежи по своим курсам + текущий курс остатка.
+
+    Курсы и снимки остатков можно передать готовыми — календарь читает их одним
+    запросом на все поступления. Сеть на пути чтения не нужна.
+    """
+    if snaps is None:
+        snaps = latest_snapshots(db, [item.id for item in batch.items])
+    rows = rate_rows if rate_rows is not None else rate_rows_for(db, [batch])
+    finance, rate_row = batch_finance(db, batch, rows)
     return serialize_batch(
-        batch, snaps, finance=finance, rate_row=rate_row, rates=expense_rates(db, batch)
+        batch, snaps, finance=finance, rate_row=rate_row, rates=expense_rates(batch, rows)
     )
 
 
@@ -70,9 +84,15 @@ def list_batches(
     date_from: Annotated[date | None, Query(alias="from", description="Начало периода")] = None,
     date_to: Annotated[date | None, Query(alias="to", description="Конец периода")] = None,
 ) -> list[BatchOut]:
-    """Поступления за период (для календаря) с себестоимостью по строкам."""
+    """Поступления за период (для календаря) с себестоимостью по строкам.
+
+    Курсы и снимки остатков читаются одним запросом на весь месяц: в ЦБ отсюда
+    не ходим — иначе на недоступном ЦБ открытие календаря ждёт по разу на партию.
+    """
     batches = load_batches(db, date_from=date_from, date_to=date_to)
-    return [_out(db, batch) for batch in batches]
+    snaps = latest_snapshots(db, [item.id for batch in batches for item in batch.items])
+    rate_rows = rate_rows_for(db, batches)
+    return [_out(db, batch, snaps=snaps, rate_rows=rate_rows) for batch in batches]
 
 
 @router.get("/batches/{batch_id}", response_model=BatchOut)

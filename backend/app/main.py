@@ -17,19 +17,32 @@ from app.services import currency_service
 logger = logging.getLogger("erp_lite")
 
 # Незакрытая часть валютных инвойсов оценивается по последнему курсу, поэтому
-# курсы обновляем сами — раз в час (и при каждом открытии страницы).
+# курсы обновляем сами — при старте и раз в час. Экран читает только то, что уже
+# сохранено: сеть на пути чтения растягивала календарь на секунды, когда ЦБ
+# недоступен, и делала по запросу на каждое поступление.
 RATES_REFRESH_SECONDS = 3600
+
+
+def refresh_rates_once() -> None:
+    """Обновить курсы валют поступлений; отказ ЦБ пишем в лог с причиной."""
+    try:
+        with SessionLocal() as session:
+            refreshed = currency_service.refresh_used_rates(session)
+        if refreshed:
+            logger.info("Курсы ЦБ обновлены: %s", ", ".join(sorted(refreshed)))
+        else:
+            logger.info("Курсы ЦБ: в поступлениях нет валют, кроме рубля")
+    except Exception:  # noqa: BLE001 — фоновая задача не должна ронять приложение
+        logger.warning(
+            "Не удалось обновить курсы ЦБ — экран покажет сохранённые курсы", exc_info=True
+        )
 
 
 async def _rates_refresh_loop() -> None:
     while True:
+        # Сеть и БД — в отдельном потоке: пока ЦБ отвечает, приложение обслуживает запросы.
+        await asyncio.to_thread(refresh_rates_once)
         await asyncio.sleep(RATES_REFRESH_SECONDS)
-        try:
-            with SessionLocal() as session:
-                refreshed = currency_service.refresh_used_rates(session)
-            logger.info("Курсы валют обновлены: %s", refreshed)
-        except Exception:  # noqa: BLE001 — фоновая задача не должна ронять приложение
-            logger.warning("Не удалось обновить курсы валют", exc_info=True)
 
 
 def check_db() -> None:

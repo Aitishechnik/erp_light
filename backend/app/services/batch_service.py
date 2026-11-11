@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Sequence
 from datetime import date
@@ -42,6 +43,8 @@ from app.services.cost import (
     finance_for_batch,
     q2,
 )
+
+logger = logging.getLogger("erp_lite")
 
 ZERO = Decimal("0.00")
 
@@ -133,18 +136,40 @@ def load_batch(db: Session, batch_id: uuid.UUID) -> Batch | None:
     )
 
 
-def expense_rates(db: Session, batch: Batch) -> dict[str, Decimal]:
-    """Курсы ЦБ на текущий день для валют общих расходов партии.
+def rate_rows_for(db: Session, batches: Sequence[Batch]) -> dict[str, CurrencyRate]:
+    """Курсы всех валют экрана — одним запросом в БД и **без сети**.
+
+    Раньше каждая партия сама шла в ЦБ, если кэш старше часа: календарь на 60
+    поступлений делал 60 сетевых попыток и на недоступном ЦБ висел секундами.
+    Теперь читаем только сохранённые курсы, а обновляет их фоновая задача или
+    кнопка «Курс ЦБ».
+    """
+    codes: set[str] = set()
+    for batch in batches:
+        codes.add((batch.currency or "RUB").strip().upper())
+        codes.update((expense.currency or "RUB").strip().upper() for expense in batch.expenses)
+    found = currency_service.latest_rate_rows(db, codes, allow_fetch=False)
+    missing = {code for code in codes if code and code != "RUB"} - set(found)
+    if missing:
+        logger.warning(
+            "Нет сохранённого курса ЦБ для %s — валютные суммы оценены без него",
+            ", ".join(sorted(missing)),
+        )
+    return found
+
+
+def expense_rates(batch: Batch, rate_rows: dict[str, CurrencyRate]) -> dict[str, Decimal]:
+    """Курсы ЦБ для валют общих расходов партии — из уже прочитанного набора.
 
     Расход в валюте пересчитывается по последнему доступному курсу ЦБ; если курса
     нет, расход оценивается в ноль — выдуманное число в себестоимость не попадает.
     """
     rates: dict[str, Decimal] = {}
-    codes = {(expense.currency or "RUB").strip().upper() for expense in batch.expenses}
-    for code in codes:
+    for expense in batch.expenses:
+        code = (expense.currency or "RUB").strip().upper()
         if code == "RUB":
             continue
-        row = currency_service.latest_rate_row(db, code)
+        row = rate_rows.get(code)
         if row is not None:
             rates[code] = row.rate
     return rates
@@ -158,15 +183,26 @@ def expense_amount_rub(expense: BatchExpense, rates: dict[str, Decimal]) -> Deci
     return q2(expense.amount_currency * rates.get(code, ZERO))
 
 
-def batch_finance(db: Session, batch: Batch) -> tuple[BatchFinance, CurrencyRate | None]:
+def batch_finance(
+    db: Session, batch: Batch, rate_rows: dict[str, CurrencyRate] | None = None
+) -> tuple[BatchFinance, CurrencyRate | None]:
     """Себестоимость партии: платежи по своим курсам + незакрытая часть по текущему.
 
-    Курс для незакрытой части — последний доступный (ЦБ); он обновляется раз в час,
-    поэтому оценка остатка меняется, а зафиксированные курсы платежей — нет.
+    Курс для незакрытой части — последний сохранённый (ЦБ); его обновляет фоновая
+    задача, поэтому оценка остатка меняется, а курсы платежей — нет. Сеть здесь не
+    нужна: ``rate_rows`` приходит готовым набором на весь экран.
     """
-    rate, rate_row = currency_service.batch_rate(db, batch.currency, batch.current_exchange_rate)
-    finance = finance_for_batch(batch, rate=rate, expense_rates=expense_rates(db, batch))
-    return finance, rate_row if isinstance(rate_row, CurrencyRate) else None
+    rows = rate_rows if rate_rows is not None else rate_rows_for(db, [batch])
+    code = (batch.currency or "RUB").strip().upper()
+    if code == "RUB":
+        rate = Decimal("1")
+        rate_row = None
+    else:
+        rate_row = rows.get(code)
+        fallback = batch.current_exchange_rate
+        rate = rate_row.rate if rate_row is not None else (fallback or Decimal("1"))
+    finance = finance_for_batch(batch, rate=rate, expense_rates=expense_rates(batch, rows))
+    return finance, rate_row
 
 
 def plan_link_label(item: BatchItem) -> str | None:
@@ -453,6 +489,17 @@ def _update_plan_links(db: Session, batch: Batch, payload: BatchCreate) -> None:
         item.purchase_plan_item_id = link.id
 
 
+def _refresh_expense_rates(db: Session, payload: BatchCreate) -> None:
+    """Курсы валют общих расходов обновляем при сохранении карточки, не при чтении.
+
+    Сохраняет человек — он и так ждёт ответа; экран потом берёт курс из базы, а
+    недоступный ЦБ не растягивает открытие календаря.
+    """
+    codes = {(expense.currency or "RUB").strip().upper() for expense in payload.expenses}
+    for code in sorted(codes - {"RUB", ""}):
+        currency_service.latest_rate_row(db, code)
+
+
 def _resolve_batch_rate(db: Session, payload: BatchCreate) -> Decimal | None:
     """Курс для незакрытого остатка. У черновика без позиций и платежей его не считаем.
 
@@ -516,6 +563,8 @@ def update_batch(db: Session, batch_id: uuid.UUID, payload: BatchCreate) -> Batc
     check_payments_limit(payload)
     supplier_id, supplier_name = _resolve_supplier(db, payload)
     rate = _resolve_batch_rate(db, payload)
+    if payload.auto_rate:
+        _refresh_expense_rates(db, payload)
     batch.batch_number = payload.batch_number
     batch.batch_date = payload.batch_date
     batch.currency = payload.currency

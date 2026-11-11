@@ -36,7 +36,7 @@ def get_rate(
         row = (
             currency_service.get_rate_row(db, currency, target)
             if day is not None
-            else currency_service.latest_rate_row(db, currency)
+            else currency_service.latest_rate_row(db, currency, strict=True)
         )
     except RateError as exc:
         raise HTTPException(exc.status_code, exc.message) from exc

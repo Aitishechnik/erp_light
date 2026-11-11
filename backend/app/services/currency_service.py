@@ -6,6 +6,9 @@
 Курс живёт в кэше час: незакрытая часть валютного инвойса оценивается по последнему
 доступному курсу и потому пересчитывается сама, а курсы уже сделанных платежей
 хранятся в платежах и не меняются никогда.
+
+Экран курсы только читает из базы. Обновляет их фоновая задача (при старте и раз в
+час) и кнопка «Курс ЦБ» — так открытие календаря не зависит от доступности сайта ЦБ.
 """
 
 from __future__ import annotations
@@ -13,11 +16,12 @@ from __future__ import annotations
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ElementTree
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.rates import CurrencyRate
@@ -157,14 +161,9 @@ def get_rate_row(
     return _store(db, currency, fetched.rate_date, nominal, rate)
 
 
-def latest_rate_row(
-    db: Session, code: str, *, allow_fetch: bool = True, ttl: timedelta = RATE_TTL
-) -> CurrencyRate | None:
-    """Последний доступный курс: из кэша, если ему меньше часа, иначе заново с ЦБ."""
-    currency = code.strip().upper()
-    if currency == BASE_CURRENCY:
-        return None
-    row = (
+def _latest_row(db: Session, currency: str) -> CurrencyRate | None:
+    """Самая свежая сохранённая строка курса — без сети."""
+    return (
         db.execute(
             select(CurrencyRate)
             .where(CurrencyRate.code == currency, CurrencyRate.rate_date <= date.today())
@@ -174,6 +173,64 @@ def latest_rate_row(
         .scalars()
         .one_or_none()
     )
+
+
+def latest_rate_rows(
+    db: Session, codes: Iterable[str], *, allow_fetch: bool = True, ttl: timedelta = RATE_TTL
+) -> dict[str, CurrencyRate]:
+    """Последние курсы по списку валют — одним запросом в БД на весь список.
+
+    Чтение экрана сюда приходит с ``allow_fetch=False``: сеть на пути чтения
+    не нужна, курс обновляет фоновая задача или кнопка «Курс ЦБ».
+    """
+    wanted = {str(code).strip().upper() for code in codes} - {"", BASE_CURRENCY}
+    if not wanted:
+        return {}
+    latest = (
+        select(CurrencyRate.code, func.max(CurrencyRate.rate_date).label("rate_date"))
+        .where(CurrencyRate.code.in_(wanted), CurrencyRate.rate_date <= date.today())
+        .group_by(CurrencyRate.code)
+        .subquery()
+    )
+    rows = (
+        db.execute(
+            select(CurrencyRate).join(
+                latest,
+                (CurrencyRate.code == latest.c.code)
+                & (CurrencyRate.rate_date == latest.c.rate_date),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    found = {row.code: row for row in rows}
+    if not allow_fetch:
+        return found
+
+    now = datetime.now(UTC)
+    stale = [
+        code for code in sorted(wanted) if code not in found or now - found[code].fetched_at >= ttl
+    ]
+    for code in stale:
+        row = latest_rate_row(db, code, allow_fetch=True, ttl=ttl)
+        if row is not None:
+            found[code] = row
+    return found
+
+
+def latest_rate_row(
+    db: Session,
+    code: str,
+    *,
+    allow_fetch: bool = True,
+    ttl: timedelta = RATE_TTL,
+    strict: bool = False,
+) -> CurrencyRate | None:
+    """Последний доступный курс: из кэша, если ему меньше часа, иначе заново с ЦБ."""
+    currency = code.strip().upper()
+    if currency == BASE_CURRENCY:
+        return None
+    row = _latest_row(db, currency)
     fresh = row is not None and datetime.now(UTC) - row.fetched_at < ttl
     if fresh or not allow_fetch:
         return row
@@ -182,6 +239,9 @@ def latest_rate_row(
         try:
             fetched = fetch_cbr_rates(date.today() - timedelta(days=shift))
         except RateError:
+            # Кнопка «Курс ЦБ» показывает причину отказа, а не «курс не найден».
+            if strict and row is None:
+                raise
             return row
         if currency in fetched.rates:
             nominal, rate = fetched.rates[currency]
@@ -217,19 +277,13 @@ def resolve_rate(
     return row.rate
 
 
-def batch_rate(db: Session, currency: str, fallback: Decimal | None) -> tuple[Decimal, object]:
-    """Курс для незакрытой части партии и строка курса (нужна дата обновления)."""
-    code = (currency or BASE_CURRENCY).strip().upper()
-    if code == BASE_CURRENCY:
-        return Decimal("1"), None
-    row = latest_rate_row(db, code)
-    if row is not None:
-        return row.rate, row
-    return (fallback if fallback is not None else Decimal("1")), None
+def refresh_used_rates(db: Session) -> dict[str, str]:
+    """Фоновое обновление: освежить курсы валют, которые есть в поступлениях.
 
-
-def refresh_used_rates(db: Session) -> int:
-    """Часовое обновление: освежить курсы валют, которые есть в поступлениях."""
+    Один запрос в ЦБ на все валюты (раньше был запрос на каждую). Отказ ЦБ
+    пробрасывается наверх: фоновая задача пишет его в лог с причиной, иначе
+    «курс не найден» на экране выглядит беспричинным.
+    """
     from app.models.domain import Batch
 
     currencies = {
@@ -237,8 +291,25 @@ def refresh_used_rates(db: Session) -> int:
         for (code,) in db.execute(select(Batch.currency).distinct()).all()
         if code and code.upper() != BASE_CURRENCY
     }
-    refreshed = 0
-    for currency in currencies:
-        if latest_rate_row(db, currency) is not None:
-            refreshed += 1
-    return refreshed
+    if not currencies:
+        return {}
+
+    # Свежий кэш не трогаем: перезапуск сервера не должен лишний раз ходить в ЦБ.
+    cached = latest_rate_rows(db, currencies, allow_fetch=False)
+    now = datetime.now(UTC)
+    stored = {
+        code: row.rate_date.isoformat()
+        for code, row in cached.items()
+        if now - row.fetched_at < RATE_TTL
+    }
+    if set(stored) == currencies:
+        return stored
+
+    fetched = fetch_cbr_rates(date.today())
+    for currency in sorted(currencies):
+        if currency not in fetched.rates:
+            continue
+        nominal, rate = fetched.rates[currency]
+        _store(db, currency, fetched.rate_date, nominal, rate)
+        stored[currency] = fetched.rate_date.isoformat()
+    return stored
