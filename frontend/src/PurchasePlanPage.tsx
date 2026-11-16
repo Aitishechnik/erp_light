@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import {
   acknowledgePurchasePlanSource,
   approvePurchasePlan,
@@ -20,7 +20,6 @@ import {
   type PurchasePlanItemIn,
   type PurchasePlanMonth,
   type PurchasePlanPosition,
-  type PurchasePlanSignal,
   type PurchasePlanSourceEvent,
   rejectPurchasePlan,
   reopenPurchasePlan,
@@ -31,6 +30,7 @@ import {
 } from './api'
 import { PageHelp } from './PageHelp'
 import { PurchaseConsumptionView } from './PurchaseConsumptionView'
+import { PurchasePlanHistory } from './PurchasePlanHistory'
 
 const QTY_PATTERN = /^\d+(?:[.,]\d{1,3})?$/
 const NORM_PATTERN = /^\d+(?:[.,]\d{1,4})?$/
@@ -131,18 +131,6 @@ function splitPreview(
     })
   })
   return result
-}
-
-/** Кг в истории изменений: всегда три знака и пробелы между тысячами. */
-const KG_FORMAT = new Intl.NumberFormat('ru-RU', {
-  minimumFractionDigits: 3,
-  maximumFractionDigits: 3,
-})
-
-function formatKg(value: string | null): string {
-  if (value === null) return '—'
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? KG_FORMAT.format(parsed) : value
 }
 
 /** Потребность по норме: продажи месяца × норма (тот же расчёт, что на сервере). */
@@ -747,7 +735,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
   const [year, setYear] = useState(focus?.[0] ? Number(focus[0]) : thisYear)
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>('summary')
   /** Вид плана: обычная разузловка или зеркальный расход сырья. */
-  const [view, setView] = useState<'plan' | 'consumption'>('plan')
+  const [view, setView] = useState<'plan' | 'consumption' | 'history'>('plan')
   /** У каждой позиции своя таблица: раскрытые строки помним по ключу. */
   const [openSchedule, setOpenSchedule] = useState<string[]>([])
 
@@ -763,7 +751,6 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
   const [error, setError] = useState<string | null>(null)
   const [rejectReason, setRejectReason] = useState('')
   const [showChanges, setShowChanges] = useState(false)
-  const [openSignals, setOpenSignals] = useState<string[]>([])
   const [flashId, setFlashId] = useState<string | null>(null)
 
   const plan = plans.find((row) => row.year === year) ?? null
@@ -976,38 +963,6 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
     return sum + Number(normalize(row.priceRub) || 0) * Number(normalize(row.quantity) || 0)
   }, 0)
 
-  // Новое изменение раскрыто, остальные свёрнуты; «свернуть все» не разворачивает снова.
-  useEffect(() => {
-    const signals = plan?.signals ?? []
-    if (signals.length === 0) return
-    setOpenSignals((current) => {
-      const known = new Set(signals.map((signal) => signal.id))
-      const kept = current.filter((id) => known.has(id))
-      const first = signals[0]
-      return kept.length > 0 || first === undefined ? kept : [first.id]
-    })
-  }, [plan?.signals])
-
-  const historySignals = plan?.signals ?? []
-
-  const signalGroups = useMemo(() => {
-    const groups = new Map<number, PurchasePlanSignal[]>()
-    for (const signal of plan?.signals ?? []) {
-      const key = signal.month ?? 0
-      groups.set(key, [...(groups.get(key) ?? []), signal])
-    }
-    return [...groups.entries()].map(([month, signals]) => ({
-      month,
-      signals,
-      added: signals.reduce(
-        (total, signal) =>
-          total +
-          signal.lines.reduce((sum, line) => sum + (line.delta_kg ? Number(line.delta_kg) : 0), 0),
-        0,
-      ),
-    }))
-  }, [plan?.signals])
-
   const changedPositions = new Set((plan?.source.changes ?? []).map((row) => row.product_id))
   const source = plan?.source
   const closedMonths = new Set(plan?.closed_months ?? [])
@@ -1030,6 +985,12 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
               считаются по факту продаж. Альтернативные строки — расход при замене основного сырья,
               к основному он не прибавляется. Разверните «по месяцам», чтобы увидеть расход по
               каждому месяцу.
+            </p>
+          ) : view === 'history' ? (
+            <p>
+              История изменений плана: когда перевыполнили продажи или пересмотрели план. В каждой
+              записи — месяц, причина, автор и «было → стало» по строкам; раскройте запись, чтобы
+              увидеть подробности.
             </p>
           ) : null}
         </PageHelp>
@@ -1131,6 +1092,15 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
             >
               Расход сырья
             </button>
+            <button
+              type="button"
+              className={view === 'history' ? 'mini active' : 'mini'}
+              aria-pressed={view === 'history'}
+              data-testid="view-history"
+              onClick={() => setView('history')}
+            >
+              История изменений
+            </button>
           </fieldset>
 
           {view === 'plan' ? (
@@ -1213,127 +1183,6 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                   )}
                   <HistoryBlock events={source.history} />
                 </>
-              ) : null}
-
-              {historySignals.length > 0 ? (
-                <section className="signal-history" data-testid="signal-history">
-                  <div className="signal-head">
-                    <h2 className="section-title">История изменений</h2>
-                    <span className="hint" data-testid="signal-count">
-                      Изменений: {historySignals.length}
-                    </span>
-                    {openSignals.length > 0 ? (
-                      <button type="button" className="mini" onClick={() => setOpenSignals([])}>
-                        Свернуть все
-                      </button>
-                    ) : null}
-                  </div>
-                  {signalGroups.map((group) => (
-                    <div className="signal-group" key={group.month}>
-                      {historySignals.length > 1 && group.month > 0 ? (
-                        <div className="signal-group-head">
-                          <span>
-                            {MONTH_TITLES[group.month - 1]} {plan.year}
-                          </span>
-                          <span className="hint">
-                            изменений: {group.signals.length} · +{formatKg(group.added.toFixed(3))}{' '}
-                            кг
-                          </span>
-                        </div>
-                      ) : null}
-                      {group.signals.map((signal) => {
-                        const isOpen = openSignals.includes(signal.id)
-                        const positions = new Set(signal.lines.map((line) => line.sales_product))
-                          .size
-                        const added = signal.lines.reduce(
-                          (total, line) => total + (line.delta_kg ? Number(line.delta_kg) : 0),
-                          0,
-                        )
-                        return (
-                          <div
-                            className={isOpen ? 'signal-item open' : 'signal-item'}
-                            key={signal.id}
-                          >
-                            <button
-                              type="button"
-                              className="signal-toggle"
-                              aria-expanded={isOpen}
-                              data-testid={`signal-toggle-${signal.id}`}
-                              onClick={() =>
-                                setOpenSignals((current) =>
-                                  current.includes(signal.id)
-                                    ? current.filter((id) => id !== signal.id)
-                                    : [...current, signal.id],
-                                )
-                              }
-                            >
-                              <span className="signal-caret">{isOpen ? '▾' : '▸'}</span>
-                              <span className="signal-date">{formatDate(signal.created_at)}</span>
-                              <span className="signal-month">
-                                {signal.month
-                                  ? `${MONTH_TITLES[signal.month - 1]} ${plan.year}`
-                                  : 'месяц не указан'}
-                              </span>
-                              <span className="signal-reason">
-                                {signal.reason ?? 'изменение плана'}
-                              </span>
-                              <span className="signal-stats">
-                                {positions} поз. · {signal.lines.length} стр. · +
-                                {formatKg(added.toFixed(3))} кг
-                              </span>
-                              <span className="signal-actor">{signal.actor_name ?? '—'}</span>
-                            </button>
-                            {isOpen ? (
-                              <div className="table-scroll">
-                                <table className="signal-table">
-                                  <thead>
-                                    <tr>
-                                      <th scope="col">Позиция</th>
-                                      <th scope="col">Сырьё</th>
-                                      <th scope="col" className="num">
-                                        Было, кг
-                                      </th>
-                                      <th scope="col" className="num">
-                                        Стало, кг
-                                      </th>
-                                      <th scope="col" className="num">
-                                        Δ, кг
-                                      </th>
-                                      <th scope="col" className="num">
-                                        Ед.: план → факт
-                                      </th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {signal.lines.map((line) => (
-                                      <tr
-                                        key={`${signal.id}-${line.sales_product}-${line.product}-${line.alternative}`}
-                                      >
-                                        <td>{line.sales_product}</td>
-                                        <td>
-                                          {line.product}
-                                          {line.alternative ? ' (альтернатива)' : ''}
-                                        </td>
-                                        <td className="num">{formatKg(line.was_kg)}</td>
-                                        <td className="num">{formatKg(line.now_kg)}</td>
-                                        <td className="num">
-                                          {line.delta_kg ? `+${formatKg(line.delta_kg)}` : '—'}
-                                        </td>
-                                        <td className="num">
-                                          {formatKg(line.plan_units)} → {formatKg(line.fact_units)}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            ) : null}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  ))}
-                </section>
               ) : null}
 
               {source?.revision_requested_at ? (
@@ -1893,8 +1742,10 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
                 </table>
               </div>
             </>
-          ) : (
+          ) : view === 'consumption' ? (
             <PurchaseConsumptionView plan={plan} drafts={drafts} />
+          ) : (
+            <PurchasePlanHistory plan={plan} />
           )}
         </>
       )}

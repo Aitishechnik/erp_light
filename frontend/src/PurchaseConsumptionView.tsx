@@ -214,7 +214,7 @@ export function PurchaseConsumptionView({
 
   return (
     <div className="consumption-view" data-testid="consumption-view">
-      <div className="consumption-head">
+      <div className="view-head">
         <h2>Расход сырья на {plan.year} год</h2>
       </div>
 

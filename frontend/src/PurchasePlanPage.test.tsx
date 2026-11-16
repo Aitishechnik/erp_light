@@ -333,6 +333,7 @@ describe('PurchasePlanPage', () => {
   })
 
   it('показывает историю изменений: было → стало', async () => {
+    const user = userEvent.setup()
     const signal: PurchasePlanSignal = {
       id: 'sig-1',
       created_at: '2026-11-05T10:30:00Z',
@@ -358,10 +359,12 @@ describe('PurchasePlanPage', () => {
     mockApi(routes([plan({ signals: [signal] })]))
     render(<PurchasePlanPage user={DIRECTOR} />)
 
+    await screen.findByTestId('purchase-table')
+    await user.click(screen.getByTestId('view-history'))
+    expect(screen.getByTestId('history-view')).toHaveTextContent('История изменений на')
     const block = await screen.findByTestId('signal-history')
     // Новое изменение раскрывается эффектом после загрузки плана.
     await waitFor(() => expect(block).toHaveTextContent('150,000'))
-    expect(block).toHaveTextContent('История изменений')
     expect(block).toHaveTextContent('перевыполнение плана продаж за март 2026')
     expect(block).toHaveTextContent('225,000')
     expect(block).toHaveTextContent('+75,000')
@@ -404,8 +407,10 @@ describe('PurchasePlanPage', () => {
     mockApi(routes([plan({ signals })]))
     render(<PurchasePlanPage user={DIRECTOR} />)
 
-    const block = await screen.findByTestId('signal-history')
-    expect(block).toHaveTextContent('Изменений: 2')
+    await screen.findByTestId('purchase-table')
+    await user.click(screen.getByTestId('view-history'))
+    await screen.findByTestId('signal-history')
+    expect(screen.getByTestId('signal-count')).toHaveTextContent('Изменений: 2')
     // Новое раскрыто, старое свёрнуто (раскрытие ставит эффект после загрузки).
     await waitFor(() =>
       expect(screen.getByTestId('signal-toggle-sig-2')).toHaveAttribute('aria-expanded', 'true'),
@@ -418,6 +423,22 @@ describe('PurchasePlanPage', () => {
     await user.click(screen.getByRole('button', { name: 'Свернуть все' }))
     expect(screen.getByTestId('signal-toggle-sig-2')).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByTestId('signal-toggle-sig-1')).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('история изменений — отдельный вид с пустым состоянием', async () => {
+    const user = userEvent.setup()
+    mockApi(routes([plan()]))
+    render(<PurchasePlanPage user={DIRECTOR} />)
+
+    await screen.findByTestId('purchase-table')
+    await user.click(screen.getByTestId('view-history'))
+    expect(screen.getByTestId('history-view')).toBeInTheDocument()
+    expect(screen.getByTestId('history-empty')).toHaveTextContent('Изменений пока нет')
+    expect(screen.queryByTestId('purchase-table')).toBeNull()
+    expect(screen.getByText(/История изменений плана:/)).toBeInTheDocument()
+
+    await user.click(screen.getByTestId('view-plan'))
+    expect(screen.getByTestId('purchase-table')).toBeInTheDocument()
   })
 
   it('приход перекрывает следующие месяцы и не даёт больше 100 %', async () => {

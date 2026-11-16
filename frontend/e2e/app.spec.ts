@@ -769,6 +769,12 @@ test('закупщик раскладывает потребность план�
   await expect(months).toContainText('150')
   await expect(months).toContainText('300')
 
+  // История изменений — третьим видом, а не внутри плана.
+  await page.getByTestId('view-history').click()
+  await expect(page.getByTestId('history-view')).toBeVisible()
+  await expect(page.getByTestId('purchase-table')).toHaveCount(0)
+  await expect(page.getByTestId('history-empty')).toContainText('Изменений пока нет')
+
   await page.getByTestId('view-plan').click()
   await expect(page.getByTestId('purchase-table')).toBeVisible()
 
