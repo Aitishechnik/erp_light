@@ -20,7 +20,7 @@ export function useVirtualRows(options: { count: number; resetKey: string }) {
   const [viewportHeight, setViewportHeight] = useState(0)
 
   /** Подогнать высоту области под окно: всё, что ниже шапки страницы. */
-  const fit = useCallback(() => {
+  const measureViewport = useCallback(() => {
     const element = viewportRef.current
     if (!element) return
     const top = element.getBoundingClientRect().top
@@ -37,15 +37,15 @@ export function useVirtualRows(options: { count: number; resetKey: string }) {
   useEffect(() => {
     const element = viewportRef.current
     if (!element) return
-    fit()
+    measureViewport()
     const onScroll = () => setScrollTop(element.scrollTop)
     element.addEventListener('scroll', onScroll, { passive: true })
-    window.addEventListener('resize', fit)
+    window.addEventListener('resize', measureViewport)
     return () => {
       element.removeEventListener('scroll', onScroll)
-      window.removeEventListener('resize', fit)
+      window.removeEventListener('resize', measureViewport)
     }
-  }, [fit])
+  }, [measureViewport])
 
   // Сменили фильтр или сортировку — показываем список с начала.
   useEffect(() => {
@@ -54,8 +54,8 @@ export function useVirtualRows(options: { count: number; resetKey: string }) {
     const element = viewportRef.current
     if (element) element.scrollTop = 0
     setScrollTop(0)
-    fit()
-  }, [resetKey, fit])
+    measureViewport()
+  }, [resetKey, measureViewport])
 
   const range = visibleRange({ count, scrollTop, viewportHeight, rowHeight: ROW_HEIGHT })
 
