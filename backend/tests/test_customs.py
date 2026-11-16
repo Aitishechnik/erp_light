@@ -75,6 +75,16 @@ def _customs(client: TestClient, batch_id: object, **body: object) -> Response:
     return client.post(f"/api/v1/batches/{batch_id}/customs", json=payload)
 
 
+def _payment(amount: str, rate: str, category: str = "invoice") -> dict[str, object]:
+    """Валютный платёж сегодняшней датой — в расчёте он «факт», а не план."""
+    return {
+        "payment_date": date.today().isoformat(),
+        "amount_currency": amount,
+        "exchange_rate": rate,
+        "category": category,
+    }
+
+
 def _draft(client: TestClient) -> dict[str, Any]:
     """Черновик из выгрузки 1С: поступление без позиций."""
     workbook = Workbook()
@@ -131,6 +141,69 @@ def test_customs_fixes_duty_and_vat_in_rubles(
     assert Decimal(after["finance"]["vat_rub"]) == Decimal("18480.00")
     # 1000 × 95 + 4 000 + 18 480 + 10 × 95 = 118 430 ₽.
     assert Decimal(after["finance"]["final_cost_rub"]) == Decimal("118430.00")
+
+
+def test_payments_do_not_change_duty_and_vat_before_customs(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """До растаможки налоги — по курсу ЦБ, а не по курсу инвойса.
+
+    Инвойс 1000 $, пошлина 5 %, НДС 22 %, курс ЦБ 90. Платёж 1000 $ по 95 даёт
+    курс инвойса 95, но пошлина — 4 500 ₽, НДС — 20 790 ₽ (по курсу ЦБ).
+    """
+    login("purchase")
+    _no_network(monkeypatch)
+    batch = _create(client, payments=[_payment("1000", "95")])
+    finance = batch["finance"]
+    assert Decimal(finance["invoice_rate"]) == Decimal("95.000000")
+    assert Decimal(finance["duty_rub"]) == Decimal("4500.00")
+    assert Decimal(finance["vat_rub"]) == Decimal("20790.00")
+    # Товар по 95, налоги — по 90: 1000 × 95 + 4 500 + 20 790 + 10 × 90 = 121 190 ₽.
+    assert Decimal(finance["final_cost_rub"]) == Decimal("121190.00")
+
+
+def test_customs_rate_ignores_payment_rate(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Фиксация — по курсу ЦБ на дату растаможки, а не по курсу инвойса.
+
+    Платёж по 95 даёт курс инвойса 95, но растаможка по 80:
+    пошлина 50 $ × 80 = 4 000 ₽, НДС 231 $ × 80 = 18 480 ₽.
+    """
+    login("purchase")
+    _no_network(monkeypatch)
+    batch = _create(client, payments=[_payment("1000", "95")])
+    response = _customs(client, batch["id"])
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (Decimal(body["finance"]["duty_rub"]), Decimal(body["finance"]["vat_rub"])) == (
+        Decimal("4000.00"),
+        Decimal("18480.00"),
+    )
+
+
+def test_payments_after_customs_do_not_touch_fixed_totals(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """После растаможки платёж меняет товар, но не зафиксированные налоги."""
+    login("purchase")
+    _no_network(monkeypatch)
+    batch = _create(client)
+    assert _customs(client, batch["id"]).status_code == 200
+
+    updated = client.put(
+        f"/api/v1/batches/{batch['id']}",
+        json=_payload(payments=[_payment("1000", "95")]),
+    )
+    assert updated.status_code == 200, updated.text
+    finance = updated.json()["finance"]
+    assert (Decimal(finance["duty_rub"]), Decimal(finance["vat_rub"])) == (
+        Decimal("4000.00"),
+        Decimal("18480.00"),
+    )
+    # Товар по 95, налоги — фикс по 80, Risk по ЦБ 90:
+    # 95 000 + 4 000 + 18 480 + 900 = 118 380 ₽.
+    assert Decimal(finance["final_cost_rub"]) == Decimal("118380.00")
 
 
 def test_customs_manual_totals_are_distributed_exactly(

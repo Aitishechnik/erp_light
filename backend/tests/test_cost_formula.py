@@ -268,6 +268,56 @@ def test_customs_totals_match_percent_formula_at_fixing_rate() -> None:
     assert (duty, vat) == (finance.duty_rub, finance.vat_rub)
 
 
+def test_payments_do_not_revalue_duty_and_vat_before_customs() -> None:
+    """До растаможки налоги — по курсу ЦБ, даже если инвойс закрыт по другому курсу.
+
+    10 000 $, пошлина 5 %, НДС 22 %, курс ЦБ 82,1516. Платёж 10 000 $ по 90:
+    курс инвойса 90, но пошлина 41 075,80 ₽ и НДС 189 770,20 ₽ — по курсу ЦБ.
+    """
+    item = ItemInput(
+        unit_price_currency=Decimal("100"),
+        quantity=Decimal("100"),
+        duty_percent=Decimal("5"),
+        vat_percent=Decimal("22"),
+    )
+    at_cbr = calculate_finance([item], cbr_rate=Decimal("82.1516"))
+    paid = calculate_finance(
+        [item],
+        cbr_rate=Decimal("82.1516"),
+        invoice=CategoryPayments(paid_currency=Decimal("10000"), paid_rub=Decimal("900000")),
+    )
+    assert paid.invoice.rate == Decimal("90.000000")
+    assert (at_cbr.duty_rub, at_cbr.vat_rub) == (
+        Decimal("41075.80"),
+        Decimal("189770.20"),
+    )
+    assert (paid.duty_rub, paid.vat_rub) == (at_cbr.duty_rub, at_cbr.vat_rub)
+    # Товар подорожал до 90, налоги остались по 82,1516: 900 000 + 41 075,80 + 189 770,20.
+    assert paid.final_cost_rub == Decimal("1130846.00")
+
+
+def test_customs_totals_ignore_invoice_rate() -> None:
+    """Курс фиксации — только курс растаможки: курс инвойса в фикс не входит.
+
+    Инвойс 1000 $ закрыт платежом по 95 (курс инвойса 95), растаможка по 80:
+    пошлина 50 $ × 80 = 4 000 ₽, НДС 231 $ × 80 = 18 480 ₽.
+    """
+    item = ItemInput(
+        unit_price_currency=Decimal("100"),
+        quantity=Decimal("10"),
+        duty_percent=Decimal("5"),
+        vat_percent=Decimal("22"),
+    )
+    paid = calculate_finance(
+        [item],
+        cbr_rate=Decimal("90"),
+        invoice=CategoryPayments(paid_currency=Decimal("1000"), paid_rub=Decimal("95000")),
+    )
+    assert paid.invoice.rate == Decimal("95.000000")
+    duty, vat = customs_totals_rub(customs_lines([item]), Decimal("80"))
+    assert (duty, vat) == (Decimal("4000.00"), Decimal("18480.00"))
+
+
 def test_customs_fixes_duty_and_vat_forever() -> None:
     """После растаможки пошлина и НДС — фикс в рублях: курс их больше не меняет.
 

@@ -9,10 +9,15 @@
     НДС$         = (стоимость за ед. + пошлина$) × НДС %
     остаток кат. = max(0, сумма категории$ − оплачено по категории$)
     курс кат.    = (Σ платёж × курс платежа + остаток × курс ЦБ) ÷ сумма категории$
-    цена за ед.₽ = (стоимость за ед. + пошлина$ + НДС$) × курс инвойса
+    цена за ед.₽ = стоимость за ед. × курс инвойса
+                   + (пошлина$ + НДС$) × курс ЦБ
                    + risk за ед. × курс risk
                    + доля общих расходов на единицу
     сумма строки = цена за ед.₽ × кол-во
+
+Курс ЦБ для пошлины и НДС — текущий (последний доступный), пока партия не растаможена;
+после растаможки налоги берутся из фикса строки по курсу на дату растаможки. Курс инвойса
+(средневзвешенный по платежам) применяется к товару и на налоги не влияет.
 
 Что сохранено из формулы custom_erp (`erp_v_2`): незакрытая часть валютного долга
 оценивается по текущему курсу ЦБ и потому переоценивается, а курсы уже сделанных
@@ -228,12 +233,16 @@ def calculate_finance(
             base_rub = goods_rub + duty_item_rub + vat_item_rub + risk_item_rub
             item_total_rub = q2(base_rub + expenses_item_rub)
         else:
+            # До растаможки пошлина и НДС — по курсу ЦБ на текущий день, а не по
+            # курсу инвойса: платежи не переоценивают таможенные платежи (контракт §3).
+            duty_item_rub = q2(duty_unit * item.quantity * rate)
+            vat_item_rub = q2(vat_unit * item.quantity * rate)
             base_unit_rub = (
-                item.unit_price_currency + duty_unit + vat_unit
-            ) * invoice_finance.rate + item.risk_unit_currency * risk_finance.rate
+                item.unit_price_currency * invoice_finance.rate
+                + (duty_unit + vat_unit) * rate
+                + item.risk_unit_currency * risk_finance.rate
+            )
             item_total_rub = q2(base_unit_rub * item.quantity + expenses_item_rub)
-            duty_item_rub = q2(duty_unit * item.quantity * invoice_finance.rate)
-            vat_item_rub = q2(vat_unit * item.quantity * invoice_finance.rate)
 
         unit_cost = q2(item_total_rub / item.quantity) if item.quantity != 0 else ZERO
         duty_rub += duty_item_rub

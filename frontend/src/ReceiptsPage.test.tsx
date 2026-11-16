@@ -675,6 +675,36 @@ describe('ReceiptsPage — пошлина, НДС, Risk и общие расхо
     expect(screen.getByTestId('receipt-risk-total')).toHaveTextContent('100,00')
   })
 
+  it('до растаможки НДС и пошлина считаются по курсу ЦБ, а не по курсу инвойса', async () => {
+    const user = userEvent.setup()
+    const source = batch()
+    const baseItem = source.items[0]
+    if (!baseItem) throw new Error('в тестовой партии нет строки')
+    source.items = [
+      {
+        ...baseItem,
+        duty_percent: '5.0000',
+        vat_percent: '22.0000',
+        duty_rub: '4500.00',
+        vat_rub: '20790.00',
+        item_total_rub: '109290.00',
+        unit_cost: '10929.00',
+      },
+    ]
+    mockApi(routes({ '/api/v1/batches': { body: [source] } }))
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await openBatch(user)
+    // Инвойс 1000 $: платёж 600 $ по 80 + остаток 400 $ по ЦБ 90 = курс инвойса 84.
+    await openSection(user, 'Себестоимость')
+    expect(screen.getByTestId('receipt-effective')).toHaveTextContent('84')
+    // Пошлина 50 $ и НДС 231 $ — по курсу ЦБ 90, а не по курсу инвойса 84.
+    expect(screen.getByTestId('receipt-duty')).toHaveTextContent('4 500,00')
+    expect(screen.getByTestId('receipt-vat')).toHaveTextContent('20 790,00')
+    expect(screen.getByTestId('receipt-total')).toHaveTextContent('109 290,00')
+  })
+
   it('добавляет общий расход в usd и пересчитывает его по курсу ЦБ', async () => {
     const user = userEvent.setup()
     mockApi(routes({ '/api/v1/batches': { body: [draftBatch({ currency: 'RUB' })] } }))

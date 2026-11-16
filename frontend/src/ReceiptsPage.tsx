@@ -368,8 +368,9 @@ type CategoryTotals = {
  * Живой расчёт себестоимости — та же формула, что на сервере:
  *   пошлина$ = цена × %пошлины;  НДС$ = (цена + пошлина$) × %НДС
  *   курс кат. = (Σ платёж × курс платежа + остаток × курс ЦБ) ÷ сумма категории$
- *   цена за ед.₽ = (цена + пошлина$ + НДС$) × курс инвойса + Risk$ × курс Risk
- *                  + доля общих расходов на единицу
+ *   цена за ед.₽ = цена × курс инвойса + (пошлина$ + НДС$) × курс ЦБ
+ *                  + Risk$ × курс Risk + доля общих расходов на единицу
+ * Налоги до растаможки — по курсу ЦБ на текущий день; после — из фикса строки.
  * Общие расходы делятся по полной валютной стоимости строки (инвойс + Risk).
  */
 type LiveCost = {
@@ -496,10 +497,11 @@ function liveCost(draft: Draft, usdRate: number | null): LiveCost {
     } else {
       const dutyUnit = (price * number(item.duty)) / 100
       const vatUnit = ((price + dutyUnit) * number(item.vat)) / 100
-      const baseUnit = (price + dutyUnit + vatUnit) * invoice.rate + riskUnit * risk.rate
+      // До растаможки налоги — по курсу ЦБ, товар — по курсу инвойса.
+      const baseUnit = price * invoice.rate + (dutyUnit + vatUnit) * cbrRate + riskUnit * risk.rate
       rowTotal = round2(baseUnit * quantity + expensesItem)
-      dutyRub += dutyUnit * quantity * invoice.rate
-      vatRub += vatUnit * quantity * invoice.rate
+      dutyRub += round2(dutyUnit * quantity * cbrRate)
+      vatRub += round2(vatUnit * quantity * cbrRate)
     }
     itemTotal[item.key] = rowTotal
     unit[item.key] = quantity > 0 ? round2(rowTotal / quantity) : 0
@@ -1365,7 +1367,8 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
             <div className="page-help-body">
               <p>
                 Себестоимость = сумма по инвойсу + Risk + пошлина + НДС + общие расходы. Незакрытый
-                остаток оценивается по актуальному курсу ЦБ.
+                остаток оценивается по актуальному курсу ЦБ; пошлина и НДС до растаможки — по нему
+                же, после — по курсу фиксации.
               </p>
               <p data-testid="receipt-cbr-rate">{rateCaption}</p>
             </div>
@@ -2476,7 +2479,7 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                       <p className="hint doc-inline-hint">
                         {cleared
                           ? 'Пошлина и НДС зафиксированы в рублях по курсу на дату растаможки и больше не пересчитываются. Строки партии изменить нельзя — сначала отмените растаможку.'
-                          : 'Пока партия не растаможена, пошлина и НДС считаются в процентах от стоимости строки. При растаможке они зафиксируются в рублях по курсу на выбранную дату — курс и суммы можно поправить вручную.'}
+                          : 'Пока партия не растаможена, пошлина и НДС считаются в процентах от стоимости строки по курсу ЦБ на текущую дату. При растаможке они зафиксируются в рублях по курсу на выбранную дату — курс и суммы можно поправить вручную.'}
                       </p>
                     </fieldset>
                   ) : null}
@@ -2647,7 +2650,7 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                             <tr>
                               <td>Пошлина</td>
                               <td className="muted">
-                                {cleared ? 'зафиксирована при растаможке' : 'проценты по строкам'}
+                                {cleared ? 'зафиксирована при растаможке' : 'проценты × курс ЦБ'}
                               </td>
                               <td className="num" data-testid="receipt-duty">
                                 {money(cost.dutyRub)}
@@ -2656,7 +2659,7 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                             <tr>
                               <td>НДС</td>
                               <td className="muted">
-                                {cleared ? 'зафиксирован при растаможке' : 'проценты по строкам'}
+                                {cleared ? 'зафиксирован при растаможке' : 'проценты × курс ЦБ'}
                               </td>
                               <td className="num" data-testid="receipt-vat">
                                 {money(cost.vatRub)}
