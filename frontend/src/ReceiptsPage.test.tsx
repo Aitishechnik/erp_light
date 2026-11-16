@@ -83,6 +83,7 @@ function batch(overrides: Partial<Batch> = {}): Batch {
         payment_date: TODAY,
         amount_currency: '600.00',
         exchange_rate: '80',
+        auto_rate: false,
         amount_rub: '48000.00',
         category: 'invoice',
         comment: null,
@@ -485,6 +486,134 @@ describe('ReceiptsPage — план и лимит', () => {
     expect(screen.getByTestId('receipt-total')).toHaveTextContent('90 000,00 ₽')
   })
 
+  it('автокурс подставляет ЦБ + 8 % и сохраняет признак', async () => {
+    const user = userEvent.setup()
+    const saved = batch({
+      payments: [
+        {
+          id: 'pay1',
+          payment_date: TODAY,
+          amount_currency: '600.00',
+          exchange_rate: '97.74',
+          auto_rate: true,
+          amount_rub: '58644.00',
+          category: 'invoice',
+          comment: null,
+        },
+      ],
+    })
+    mockApi({
+      'PUT /api/v1/batches/b1': { body: saved },
+      ...routes({ '/api/v1/batches': { body: [batch({ payments: [] })] } }),
+    })
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await openBatch(user)
+    await user.click(screen.getByRole('button', { name: 'Платежи' }))
+    await user.click(screen.getByRole('button', { name: 'Добавить валютный платёж' }))
+    await user.type(screen.getByLabelText('Сумма платежа pnew1'), '600')
+    // Курс ЦБ 90,5 × 1,08 = 97,74.
+    await user.click(screen.getByLabelText('Автокурс pnew1'))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Курс платежа pnew1')).toHaveValue('97.74')
+    })
+    expect(screen.getByLabelText('Курс платежа pnew1')).toHaveAttribute('readonly')
+    expect(screen.getByLabelText('Автокурс pnew1')).toBeChecked()
+    expect(screen.getByTestId('payment-rub-pnew1')).toHaveTextContent('58 644,00')
+    expect(screen.getByTestId('payment-rate-hint')).toHaveTextContent('90.5')
+    expect(screen.getByTestId('payment-rate-hint')).toHaveTextContent('97.74')
+
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('receipt-saved')).toHaveTextContent('Поступление сохранено')
+    })
+    const sent = bodies().find((body) => body.includes('"auto_rate":true')) ?? ''
+    expect(sent).toContain('"exchange_rate":"97.74"')
+
+    // После сохранения карточка показывает то, что записал сервер: признак и курс на месте.
+    expect(screen.getByLabelText('Автокурс p0')).toBeChecked()
+    expect(screen.getByLabelText('Курс платежа p0')).toHaveValue('97.74')
+    expect(screen.getByLabelText('Курс платежа p0')).toHaveAttribute('readonly')
+  })
+
+  it('снимает автокурс, если курс поправили руками', async () => {
+    const user = userEvent.setup()
+    mockApi(routes())
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await openBatch(user)
+    await user.click(screen.getByRole('button', { name: 'Платежи' }))
+    await user.click(screen.getByLabelText('Автокурс p0'))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Курс платежа p0')).toHaveValue('97.74')
+    })
+    // Сняли галочку — поле снова правится, значение остаётся подсказкой.
+    await user.click(screen.getByLabelText('Автокурс p0'))
+    expect(screen.getByLabelText('Курс платежа p0')).not.toHaveAttribute('readonly')
+    await user.clear(screen.getByLabelText('Курс платежа p0'))
+    await user.type(screen.getByLabelText('Курс платежа p0'), '80')
+    expect(screen.getByLabelText('Автокурс p0')).not.toBeChecked()
+    expect(screen.getByTestId('payment-rub-p0')).toHaveTextContent('48 000,00')
+  })
+
+  it('если ЦБ недоступен, автокурс не подставляется и объясняет почему', async () => {
+    const user = userEvent.setup()
+    mockApi(
+      routes({
+        '/api/v1/rates/USD': { status: 502, body: { detail: 'ЦБ РФ недоступен' } },
+      }),
+    )
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await openBatch(user)
+    await user.click(screen.getByRole('button', { name: 'Платежи' }))
+    await user.click(screen.getByLabelText('Автокурс p0'))
+
+    expect(await screen.findByTestId('payment-rate-hint')).toHaveTextContent('ЦБ РФ недоступен')
+    expect(screen.getByLabelText('Автокурс p0')).not.toBeChecked()
+    // Курс остался прежним — его можно ввести руками.
+    expect(screen.getByLabelText('Курс платежа p0')).toHaveValue('80')
+  })
+
+  it('для рублёвой партии автокурса нет', async () => {
+    const user = userEvent.setup()
+    mockApi(
+      routes({
+        '/api/v1/batches': {
+          body: [
+            batch({
+              currency: 'RUB',
+              payments: [
+                {
+                  id: 'pay1',
+                  payment_date: TODAY,
+                  amount_currency: '600.00',
+                  exchange_rate: '1',
+                  auto_rate: false,
+                  amount_rub: '600.00',
+                  category: 'invoice',
+                  comment: null,
+                },
+              ],
+            }),
+          ],
+        },
+      }),
+    )
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await openBatch(user)
+    await user.click(screen.getByRole('button', { name: 'Платежи' }))
+    expect(screen.queryByLabelText('Автокурс p0')).toBeNull()
+    expect(screen.queryByTestId('payment-rate-hint')).toBeNull()
+  })
+
   it('платёж больше стоимости товаров — предупреждение и блокировка сохранения', async () => {
     const user = userEvent.setup()
     mockApi(routes({ '/api/v1/batches': { body: [draftBatch()] } }))
@@ -605,6 +734,7 @@ describe('ReceiptsPage — план и лимит', () => {
           payment_date: TODAY,
           amount_currency: '124000.00',
           exchange_rate: '88',
+          auto_rate: false,
           amount_rub: '10912000.00',
           category: 'invoice',
           comment: null,
@@ -614,6 +744,7 @@ describe('ReceiptsPage — план и лимит', () => {
           payment_date: TODAY,
           amount_currency: '60000.00',
           exchange_rate: '91',
+          auto_rate: false,
           amount_rub: '5460000.00',
           category: 'risk',
           comment: null,

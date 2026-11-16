@@ -448,6 +448,8 @@ export type BatchPayment = {
   payment_date: string
   amount_currency: string
   exchange_rate: string
+  /** Курс подставлен автокурсом (ЦБ на день + 8 %), а не введён вручную. */
+  auto_rate: boolean
   amount_rub: string
   category: PaymentCategory
   comment: string | null
@@ -457,6 +459,7 @@ export type BatchPaymentIn = {
   payment_date: string
   amount_currency: string
   exchange_rate: string
+  auto_rate: boolean
   category: PaymentCategory
   comment?: string | null
 }

@@ -291,12 +291,20 @@ def test_unknown_supplier_is_rejected(
     assert "не найден" in response.json()["detail"]
 
 
-def _payment(amount: str, rate: str, day: str = DAY, category: str = "invoice") -> dict[str, str]:
+def _payment(
+    amount: str,
+    rate: str,
+    day: str = DAY,
+    category: str = "invoice",
+    *,
+    auto: bool = False,
+) -> dict[str, object]:
     return {
         "payment_date": day,
         "amount_currency": amount,
         "exchange_rate": rate,
         "category": category,
+        "auto_rate": auto,
     }
 
 
@@ -421,6 +429,41 @@ def test_payments_can_be_edited(client: TestClient, login, monkeypatch: pytest.M
     assert Decimal(finance["invoice_remaining_currency"]) == Decimal("0.00")
     assert Decimal(finance["final_cost_rub"]) == Decimal("83000.00")
     assert len(updated.json()["payments"]) == 2
+
+
+def test_auto_rate_is_saved_as_sent_and_not_recalculated(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Автокурс — разовый: карточка присылает ЦБ + 8 %, сервер хранит его как ручной.
+
+    90,5 × 1,08 = 97,74. Признак сохраняется, чтобы в карточке было видно, что
+    курс — оценка; сам курс сервер не пересчитывает.
+    """
+    login("purchase")
+    _with_cbr(monkeypatch)
+    created = _put(
+        client,
+        _payload(current_exchange_rate=None, payments=[_payment("600", "97.74", auto=True)]),
+    )
+    assert created.status_code == 200, created.text
+    body = created.json()
+    assert body["payments"][0]["auto_rate"] is True
+    assert Decimal(body["payments"][0]["exchange_rate"]) == Decimal("97.740000")
+    # 600 $ по 97,74 = 58 644 ₽; остаток 400 $ по ЦБ 90,5 = 36 200 ₽ + 500 ₽ доставки.
+    assert Decimal(body["payments"][0]["amount_rub"]) == Decimal("58644.00")
+    assert Decimal(body["finance"]["invoice_paid_rub"]) == Decimal("58644.00")
+    assert Decimal(body["finance"]["final_cost_rub"]) == Decimal("95344.00")
+
+
+def test_manual_payment_is_not_marked_as_auto(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    login("purchase")
+    _no_network(monkeypatch)
+    created = _put(
+        client, _payload(current_exchange_rate="90", payments=[_payment("500", "80")])
+    ).json()
+    assert created["payments"][0]["auto_rate"] is False
 
 
 def test_calendar_does_not_go_to_cbr(

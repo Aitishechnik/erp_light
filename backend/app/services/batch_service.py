@@ -276,6 +276,7 @@ def serialize_batch(
             payment_date=payment.payment_date,
             amount_currency=payment.amount_currency,
             exchange_rate=payment.exchange_rate,
+            auto_rate=payment.auto_rate,
             amount_rub=q2(payment.amount_currency * payment.exchange_rate),
             category=payment.category,
             comment=payment.comment,
@@ -457,6 +458,7 @@ def _items_expenses_payments(
                 payment_date=payment.payment_date,
                 amount_currency=payment.amount_currency,
                 exchange_rate=payment.exchange_rate,
+                auto_rate=payment.auto_rate,
                 category=payment.category,
                 comment=payment.comment,
             )

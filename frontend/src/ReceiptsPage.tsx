@@ -217,6 +217,8 @@ type PaymentDraft = {
   date: string
   amount: string
   rate: string
+  /** Курс подставлен автокурсом (ЦБ на день + 8 %), а не введён вручную. */
+  auto: boolean
   /** Какой валютный долг закрывает платёж: инвойс или Risk. */
   category: PaymentCategory
   comment: string
@@ -399,6 +401,14 @@ function round6(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000
 }
 
+/**
+ * Надбавка автокурса: курс ЦБ на текущий день + 8 %.
+ *
+ * Правило одно на всю карточку: автокурс подставляет оценку один раз, при
+ * сохранении она фиксируется как обычный курс платежа и больше не пересчитывается.
+ */
+const AUTO_RATE_MARKUP = 1.08
+
 /** Сумма одного общего расхода в рублях: рубли как есть, usd — по курсу ЦБ на сегодня. */
 function expenseRub(row: ExpenseDraft, usdRate: number | null): number {
   const amount = number(row.amount)
@@ -566,6 +576,7 @@ function draftFrom(batch: Batch): Draft {
       date: payment.payment_date,
       amount: trim(payment.amount_currency),
       rate: trim(payment.exchange_rate),
+      auto: payment.auto_rate,
       category: payment.category,
       comment: payment.comment ?? '',
     })),
@@ -613,6 +624,7 @@ function snapshot(source: Draft): string {
       row.date,
       row.amount,
       row.rate,
+      row.auto,
       row.category,
       row.comment,
     ]),
@@ -638,6 +650,13 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
   /** Утверждённые планы закупок: из них выбирается строка для позиции. */
   const [plans, setPlans] = useState<PurchasePlan[]>([])
   const [rateHint, setRateHint] = useState<string | null>(null)
+  /** Автокурс: что подставили в платёж или почему не получилось. */
+  const [paymentRateHint, setPaymentRateHint] = useState<{
+    text: string
+    bad?: boolean
+  } | null>(null)
+  /** Ждём курс ЦБ для автокурса: сохранять карточку в этот момент нельзя. */
+  const [autoBusy, setAutoBusy] = useState(false)
   const [itemsFile, setItemsFile] = useState<File | null>(null)
   const [itemsHint, setItemsHint] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -756,6 +775,8 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
   const startEdit = useCallback((batch: Batch) => {
     setOpenSections(['items'])
     setRateHint(null)
+    setPaymentRateHint(null)
+    setAutoBusy(false)
     setError(null)
     setItemsFile(null)
     setItemsHint(null)
@@ -816,6 +837,86 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
       )
     } catch (err) {
       setRateHint(errorMessage(err))
+    }
+  }
+
+  /** Снять признак «автокурс» у платежа — например, если ЦБ не ответил. */
+  const setPaymentAutoOff = (key: string) => {
+    setDraft((current) =>
+      current === null
+        ? current
+        : {
+            ...current,
+            payments: current.payments.map((payment) =>
+              payment.key === key && payment.auto ? { ...payment, auto: false } : payment,
+            ),
+          },
+    )
+  }
+
+  /**
+   * «Автокурс» — подставить курс ЦБ на сегодня + 8 %.
+   *
+   * Курс берётся один раз: при сохранении он фиксируется в платеже как обычный
+   * ручной курс и больше не пересчитывается. Чтобы обновить оценку, нужно снять
+   * и снова включить «автокурс» (или ввести фактический курс руками).
+   */
+  const applyAutoRate = async (row: PaymentDraft) => {
+    if (!draft) return
+    const code = draft.currency.trim().toUpperCase() || 'RUB'
+    if (code === 'RUB') return
+    setAutoBusy(true)
+    setPaymentRateHint({ text: 'Считаем курс ЦБ…' })
+    // Отмечаем выбор сразу: запрос курса в ЦБ может занять секунду, и галочка
+    // не должна «залипать». Не получится курс — снимем её и объясним причину.
+    setDraft((current) =>
+      current === null
+        ? current
+        : {
+            ...current,
+            payments: current.payments.map((payment) =>
+              payment.key === row.key ? { ...payment, auto: true } : payment,
+            ),
+          },
+    )
+    try {
+      const rate = await fetchRate(code)
+      const value = round6(number(rate.rate) * AUTO_RATE_MARKUP)
+      if (value <= 0) {
+        setPaymentAutoOff(row.key)
+        setPaymentRateHint({
+          text: 'Курс ЦБ не получен — введите курс вручную',
+          bad: true,
+        })
+        return
+      }
+      // Пока ходили в ЦБ, галочку могли снять — курс обратно не навязываем.
+      setDraft((current) => {
+        if (current === null) return current
+        const target = current.payments.find((payment) => payment.key === row.key)
+        if (!target?.auto) return current
+        return {
+          ...current,
+          payments: current.payments.map((payment) =>
+            payment.key === row.key
+              ? { ...payment, rate: trim(String(value)), auto: true }
+              : payment,
+          ),
+        }
+      })
+      setPaymentRateHint({
+        text:
+          `Автокурс: ЦБ ${trim(rate.rate)} на ${ruDate(rate.rate_date)} + 8 % = ` +
+          `${trim(String(value))} ₽. Курс зафиксируется при сохранении.`,
+      })
+    } catch (err) {
+      setPaymentAutoOff(row.key)
+      setPaymentRateHint({
+        text: `${errorMessage(err)} — введите курс вручную`,
+        bad: true,
+      })
+    } finally {
+      setAutoBusy(false)
     }
   }
 
@@ -946,6 +1047,13 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!mayEdit || !draft?.id) return
+    // Автокурс ещё считается: сохранили бы платеж со старым курсом.
+    if (autoBusy) {
+      setError('Дождитесь курса ЦБ для автокурса или снимите галочку')
+      return
+    }
+    // Для рублёвой партии автокурса нет: галочка могла остаться от прежней валюты.
+    const batchCurrency = draft.currency.trim().toUpperCase() || 'RUB'
     const current = liveCost(draft, usdRate === null ? null : number(usdRate))
     if (current.limitInvoiceExceeded || current.limitRiskExceeded) {
       setError('Сумма валютных платежей больше суммы партии по этой категории')
@@ -986,6 +1094,7 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
           payment_date: row.date,
           amount_currency: row.amount.replace(',', '.'),
           exchange_rate: row.rate.replace(',', '.'),
+          auto_rate: row.auto && batchCurrency !== 'RUB',
           category: row.category,
           comment: row.comment.trim() === '' ? null : row.comment.trim(),
         })),
@@ -2135,6 +2244,7 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                                   date: draft.date,
                                   amount: '',
                                   rate: draft.currency === 'RUB' ? '1' : draft.rate,
+                                  auto: false,
                                   category: 'invoice',
                                   comment: '',
                                 },
@@ -2233,22 +2343,57 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                                       }
                                     />
                                   </td>
-                                  <td className="num">
+                                  <td className="num payment-rate">
                                     <input
                                       className="cell"
                                       aria-label={`Курс платежа ${row.key}`}
                                       value={row.rate}
-                                      onChange={(event) =>
+                                      readOnly={row.auto && currency !== 'RUB'}
+                                      onChange={(event) => {
+                                        // Курс поправили руками — это уже не автокурс.
+                                        setPaymentRateHint(null)
                                         setDraft({
                                           ...draft,
                                           payments: draft.payments.map((payment) =>
                                             payment.key === row.key
-                                              ? { ...payment, rate: event.target.value }
+                                              ? {
+                                                  ...payment,
+                                                  rate: event.target.value,
+                                                  auto: false,
+                                                }
                                               : payment,
                                           ),
                                         })
-                                      }
+                                      }}
                                     />
+                                    {currency !== 'RUB' ? (
+                                      <label
+                                        className="payment-auto"
+                                        title="Курс ЦБ на сегодня + 8 %"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          aria-label={`Автокурс ${row.key}`}
+                                          checked={row.auto}
+                                          onChange={(event) => {
+                                            if (event.target.checked) {
+                                              void applyAutoRate(row)
+                                              return
+                                            }
+                                            setPaymentRateHint(null)
+                                            setDraft({
+                                              ...draft,
+                                              payments: draft.payments.map((payment) =>
+                                                payment.key === row.key
+                                                  ? { ...payment, auto: false }
+                                                  : payment,
+                                              ),
+                                            })
+                                          }}
+                                        />
+                                        автокурс
+                                      </label>
+                                    ) : null}
                                   </td>
                                   <td className="num" data-testid={`payment-rub-${row.key}`}>
                                     {formatMoney(String(number(row.amount) * number(row.rate)))}
@@ -2294,6 +2439,22 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                           </tbody>
                         </table>
                       </div>
+
+                      {paymentRateHint ? (
+                        <p
+                          className={paymentRateHint.bad ? 'error' : 'hint'}
+                          role={paymentRateHint.bad ? 'alert' : 'status'}
+                          data-testid="payment-rate-hint"
+                        >
+                          {paymentRateHint.text}
+                        </p>
+                      ) : null}
+                      {currency !== 'RUB' ? (
+                        <p className="hint payments-hint">
+                          Автокурс = курс ЦБ на сегодня + 8 %; курс фиксируется при сохранении.
+                          Чтобы пересчитать — снимите и снова включите галочку.
+                        </p>
+                      ) : null}
 
                       <div className="closing">
                         <div className="closing-group">
@@ -2705,7 +2866,14 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                     type="submit"
                     className="primary"
                     // Пока открыто окно растаможки, карточку не сохраняем: сначала подтвердите её.
-                    disabled={busy || locked || cost.limitInvoiceExceeded || cost.limitRiskExceeded}
+                    // И пока считается автокурс — иначе уйдёт старый курс.
+                    disabled={
+                      busy ||
+                      locked ||
+                      autoBusy ||
+                      cost.limitInvoiceExceeded ||
+                      cost.limitRiskExceeded
+                    }
                   >
                     Сохранить
                   </button>

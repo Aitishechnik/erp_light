@@ -971,6 +971,66 @@ test('поступление из 1С открывается в календар
   await expect(page.getByTestId('receipt-form')).toBeVisible()
 })
 
+test('автокурс: платёж получает ЦБ + 8 % и сохраняет признак', async ({ page }) => {
+  const posted: Record<string, unknown>[] = []
+  await mockSession(page, PURCHASE_DIRECTOR)
+  const saved = {
+    ...RECEIPT,
+    batch_date: localToday(),
+    payments: [
+      {
+        id: 'pay1',
+        payment_date: localToday(),
+        amount_currency: '600.00',
+        exchange_rate: '97.740000',
+        auto_rate: true,
+        amount_rub: '58644.00',
+        category: 'invoice',
+        comment: null,
+      },
+    ],
+  }
+  await page.route('**/api/v1/batches**', (route) => {
+    if (route.request().method() === 'PUT') {
+      posted.push(route.request().postDataJSON() as Record<string, unknown>)
+      return route.fulfill({ json: saved })
+    }
+    return route.fulfill({ json: [{ ...RECEIPT, batch_date: localToday() }] })
+  })
+  await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/products**', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/purchase-plans**', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/rates/USD', (route) =>
+    route.fulfill({
+      json: { code: 'USD', rate_date: '2026-10-14', rate: '90.5000', nominal: 1, source: 'cbr' },
+    }),
+  )
+
+  await page.goto('/')
+  await openSection(page, 'Закупки', 'Поступления')
+  await page.getByTestId('day-receipt-b1').click()
+  await page.getByRole('button', { name: 'Платежи' }).click()
+  await page.getByRole('button', { name: 'Добавить валютный платёж' }).click()
+  await page.getByLabel('Сумма платежа pnew1').fill('600')
+  await page.getByLabel('Автокурс pnew1').check()
+
+  // Курс ЦБ 90,5 × 1,08 = 97,74; 600 $ × 97,74 = 58 644 ₽.
+  await expect(page.getByLabel('Курс платежа pnew1')).toHaveValue('97.74')
+  await expect(page.getByTestId('payment-rub-pnew1')).toHaveText('58 644,00')
+  await expect(page.getByTestId('payment-rate-hint')).toContainText('90.5')
+
+  await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+  await expect(page.getByTestId('receipt-saved')).toBeVisible()
+  const body = posted[0] as {
+    payments: { auto_rate: boolean; exchange_rate: string }[]
+  }
+  expect(body.payments[0]?.auto_rate).toBe(true)
+  expect(body.payments[0]?.exchange_rate).toBe('97.74')
+  // Карточка показывает сохранённый платёж: признак и курс на месте.
+  await expect(page.getByLabel('Автокурс p0')).toBeChecked()
+  await expect(page.getByLabel('Курс платежа p0')).toHaveValue('97.74')
+})
+
 test('пошлина, Risk и общие расходы считаются в карточке партии', async ({ page }) => {
   const posted: Record<string, unknown>[] = []
   await mockSession(page, PURCHASE_DIRECTOR)
@@ -1905,7 +1965,10 @@ test('меню сворачивается, а тёмная тема запоми
   // Панель сообщений живёт в верхней панели и не обрезается меню.
   await page.getByLabel(/Служебные сообщения/).click()
   const panel = await page.locator('.bell-panel').boundingBox()
+  const viewport = page.viewportSize()
   expect(panel).not.toBeNull()
-  expect(panel!.x).toBeGreaterThan(250)
-  expect(panel!.x + panel!.width).toBeLessThanOrEqual(page.viewportSize()!.width)
+  expect(viewport).not.toBeNull()
+  if (panel === null || viewport === null) throw new Error('панель или окно не измерены')
+  expect(panel.x).toBeGreaterThan(250)
+  expect(panel.x + panel.width).toBeLessThanOrEqual(viewport.width)
 })

@@ -78,11 +78,15 @@ class BatchItemCreate(BaseModel):
 
 
 class BatchPaymentCreate(BaseModel):
-    """Валютный платёж: закрывает инвойс или Risk, курс фиксируется вручную."""
+    """Валютный платёж: закрывает инвойс или Risk, курс фиксируется навсегда."""
 
     payment_date: date
     amount_currency: Decimal = Field(gt=0)
     exchange_rate: Decimal = Field(gt=0, description="Курс платежа, фиксируется навсегда")
+    auto_rate: bool = Field(
+        default=False,
+        description="Курс подставлен автокурсом (ЦБ на день + 8 %), а не введён вручную",
+    )
     category: Literal["invoice", "risk"] = Field(
         default="invoice", description="Какой валютный долг закрывает платёж"
     )
@@ -139,6 +143,9 @@ class BatchPaymentOut(BaseModel):
     payment_date: date
     amount_currency: Decimal
     exchange_rate: Decimal
+    auto_rate: bool = Field(
+        default=False, description="Курс подставлен автокурсом (ЦБ на день + 8 %)"
+    )
     amount_rub: Decimal
     category: str
     comment: str | None

@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    Boolean,
     Date,
     DateTime,
     ForeignKey,
@@ -24,6 +25,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    false,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -235,8 +237,9 @@ class BatchPayment(Base):
     """Валютный платёж по партии: закрывает инвойс или Risk.
 
     Категория (``invoice`` или ``risk``) говорит, какой валютный долг закрывает
-    платёж. Курс фиксируется в момент платежа (вручную) и больше никогда не
-    меняется — поэтому уже сделанные платежи не пересчитываются при движении валюты.
+    платёж. Курс фиксируется в момент платежа (вручную или автокурсом — ЦБ на день
+    + 8 %) и больше никогда не меняется — поэтому уже сделанные платежи не
+    пересчитываются при движении валюты.
     """
 
     __tablename__ = "batch_payments"
@@ -249,6 +252,13 @@ class BatchPayment(Base):
     amount_currency: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     exchange_rate: Mapped[Decimal] = mapped_column(
         Numeric(15, 6), nullable=False, comment="Курс платежа, зафиксирован вручную"
+    )
+    auto_rate: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=false(),
+        comment="Курс подставлен автокурсом (ЦБ на день + 8 %), а не введён вручную",
     )
     category: Mapped[str] = mapped_column(
         String(16), nullable=False, default="invoice", comment="invoice или risk"
