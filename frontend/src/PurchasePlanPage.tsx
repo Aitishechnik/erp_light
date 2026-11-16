@@ -30,6 +30,7 @@ import {
   submitPurchasePlan,
 } from './api'
 import { PageHelp } from './PageHelp'
+import { PurchaseConsumptionView } from './PurchaseConsumptionView'
 
 const QTY_PATTERN = /^\d+(?:[.,]\d{1,3})?$/
 const NORM_PATTERN = /^\d+(?:[.,]\d{1,4})?$/
@@ -60,6 +61,7 @@ type DraftRow = {
   alternativeOfId: string | null
   salesProductId: string
   productId: string
+  productCode: string
   productName: string
   countryId: string
   countryName: string
@@ -644,6 +646,7 @@ function draftsFromPlan(plan: PurchasePlan): DraftRow[] {
     alternativeOfId: item.alternative_of_id,
     salesProductId: item.sales_product_id,
     productId: item.product_id,
+    productCode: item.product_code,
     productName: item.product_name,
     countryId: item.country_id,
     countryName: item.country_name,
@@ -743,6 +746,8 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
   const thisYear = new Date().getFullYear()
   const [year, setYear] = useState(focus?.[0] ? Number(focus[0]) : thisYear)
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>('summary')
+  /** Вид плана: обычная разузловка или зеркальный расход сырья. */
+  const [view, setView] = useState<'plan' | 'consumption'>('plan')
   /** У каждой позиции своя таблица: раскрытые строки помним по ключу. */
   const [openSchedule, setOpenSchedule] = useState<string[]>([])
 
@@ -837,6 +842,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
         alternativeOfId: null,
         salesProductId: position.product_id,
         productId: '',
+        productCode: '',
         productName: '',
         countryId: '',
         countryName: '',
@@ -866,6 +872,7 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
         alternativeOfId: main.id,
         salesProductId: main.salesProductId,
         productId: '',
+        productCode: '',
         productName: '',
         countryId: '',
         countryName: '',
@@ -1011,9 +1018,20 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
       <header className="page-head">
         <h1>План закупок сырья</h1>
         <PageHelp>
-          Годовой план строится из финально согласованного годового плана продаж. Позиция
-          раскладывается на сырьё вручную: страна задаёт срок доставки, по нему считается месяц
-          заказа. Утверждает исполнительный директор.
+          <p>
+            Годовой план строится из финально согласованного годового плана продаж. Позиция
+            раскладывается на сырьё вручную: страна задаёт срок доставки, по нему считается месяц
+            заказа. Утверждает исполнительный директор.
+          </p>
+          {view === 'consumption' ? (
+            <p>
+              В режиме «Расход сырья» план показан наоборот: сначала сырьё, под ним — готовая
+              продукция и нормы. Потребность = план продаж позиции × норма расхода; закрытые месяцы
+              считаются по факту продаж. Альтернативные строки — расход при замене основного сырья,
+              к основному он не прибавляется. Разверните «по месяцам», чтобы увидеть расход по
+              каждому месяцу.
+            </p>
+          ) : null}
         </PageHelp>
         <div className="toolbar">
           <button
@@ -1092,734 +1110,792 @@ export function PurchasePlanPage({ user, focus }: { user: SessionUser; focus?: s
             </p>
           ) : null}
 
-          {source ? (
-            <>
-              {source.state === 'changed' || source.state === 'no_snapshot' ? (
-                <div className="source-alert" data-testid="source-alert">
-                  <div className="source-alert-head">
-                    <strong>{source.title}</strong>
-                    <span className="hint">
-                      снимок: {formatDate(source.snapshot_at)} · годовой план:{' '}
-                      {source.annual_status_title ?? '—'}
-                    </span>
-                  </div>
-                  <p className="hint">
-                    Затронуто позиций: {changedPositions.size}.{' '}
-                    {plan.status === 'approved'
-                      ? isExecutive
-                        ? 'План утверждён: верните его в работу, чтобы директор по закупкам поправил строки сырья.'
-                        : 'План утверждён: запросите пересмотр, чтобы вернуть его в работу и поправить строки сырья.'
-                      : 'Проверьте строки сырья и примите изменения к сведению — после этого план можно отправлять на согласование.'}
-                  </p>
-                  <div className="toolbar">
-                    {canRequestRevision ? (
-                      <button
-                        type="button"
-                        className="primary"
-                        disabled={busy}
-                        data-testid="source-request-revision"
-                        onClick={() =>
-                          run(
-                            () =>
-                              requestPurchasePlanRevision(
-                                plan.id,
-                                rejectReason || 'план продаж пересмотрен',
-                              ),
-                            'Запрос на пересмотр отправлен',
-                          )
-                        }
-                      >
-                        Запросить пересмотр
-                      </button>
-                    ) : null}
-                    {canAcknowledge ? (
-                      <button
-                        type="button"
-                        className="primary"
-                        disabled={busy}
-                        data-testid="source-ack"
-                        onClick={() =>
-                          void run(
-                            () => acknowledgePurchasePlanSource(plan.id),
-                            'Изменения плана продаж приняты к сведению',
-                          )
-                        }
-                      >
-                        Принять к сведению
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => setShowChanges(!showChanges)}
-                    >
-                      {showChanges ? 'Скрыть изменения' : 'Показать изменения'}
-                    </button>
-                  </div>
-                  {showChanges ? <ChangesTable changes={source.changes} onGo={goTo} /> : null}
-                </div>
-              ) : (
-                <div className="source-info" data-testid="source-info">
-                  <strong>{source.title}</strong>
-                  <span className="hint">
-                    {source.state === 'ok'
-                      ? `снимок от ${formatDate(source.snapshot_at)}`
-                      : `годовой план: ${source.annual_status_title ?? 'не согласован'}`}
-                  </span>
-                </div>
-              )}
-              <HistoryBlock events={source.history} />
-            </>
-          ) : null}
-
-          {historySignals.length > 0 ? (
-            <section className="signal-history" data-testid="signal-history">
-              <div className="signal-head">
-                <h2 className="section-title">История изменений</h2>
-                <span className="hint" data-testid="signal-count">
-                  Изменений: {historySignals.length}
-                </span>
-                {openSignals.length > 0 ? (
-                  <button type="button" className="mini" onClick={() => setOpenSignals([])}>
-                    Свернуть все
-                  </button>
-                ) : null}
-              </div>
-              {signalGroups.map((group) => (
-                <div className="signal-group" key={group.month}>
-                  {historySignals.length > 1 && group.month > 0 ? (
-                    <div className="signal-group-head">
-                      <span>
-                        {MONTH_TITLES[group.month - 1]} {plan.year}
-                      </span>
-                      <span className="hint">
-                        изменений: {group.signals.length} · +{formatKg(group.added.toFixed(3))} кг
-                      </span>
-                    </div>
-                  ) : null}
-                  {group.signals.map((signal) => {
-                    const isOpen = openSignals.includes(signal.id)
-                    const positions = new Set(signal.lines.map((line) => line.sales_product)).size
-                    const added = signal.lines.reduce(
-                      (total, line) => total + (line.delta_kg ? Number(line.delta_kg) : 0),
-                      0,
-                    )
-                    return (
-                      <div className={isOpen ? 'signal-item open' : 'signal-item'} key={signal.id}>
-                        <button
-                          type="button"
-                          className="signal-toggle"
-                          aria-expanded={isOpen}
-                          data-testid={`signal-toggle-${signal.id}`}
-                          onClick={() =>
-                            setOpenSignals((current) =>
-                              current.includes(signal.id)
-                                ? current.filter((id) => id !== signal.id)
-                                : [...current, signal.id],
-                            )
-                          }
-                        >
-                          <span className="signal-caret">{isOpen ? '▾' : '▸'}</span>
-                          <span className="signal-date">{formatDate(signal.created_at)}</span>
-                          <span className="signal-month">
-                            {signal.month
-                              ? `${MONTH_TITLES[signal.month - 1]} ${plan.year}`
-                              : 'месяц не указан'}
-                          </span>
-                          <span className="signal-reason">
-                            {signal.reason ?? 'изменение плана'}
-                          </span>
-                          <span className="signal-stats">
-                            {positions} поз. · {signal.lines.length} стр. · +
-                            {formatKg(added.toFixed(3))} кг
-                          </span>
-                          <span className="signal-actor">{signal.actor_name ?? '—'}</span>
-                        </button>
-                        {isOpen ? (
-                          <div className="table-scroll">
-                            <table className="signal-table">
-                              <thead>
-                                <tr>
-                                  <th scope="col">Позиция</th>
-                                  <th scope="col">Сырьё</th>
-                                  <th scope="col" className="num">
-                                    Было, кг
-                                  </th>
-                                  <th scope="col" className="num">
-                                    Стало, кг
-                                  </th>
-                                  <th scope="col" className="num">
-                                    Δ, кг
-                                  </th>
-                                  <th scope="col" className="num">
-                                    Ед.: план → факт
-                                  </th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {signal.lines.map((line) => (
-                                  <tr
-                                    key={`${signal.id}-${line.sales_product}-${line.product}-${line.alternative}`}
-                                  >
-                                    <td>{line.sales_product}</td>
-                                    <td>
-                                      {line.product}
-                                      {line.alternative ? ' (альтернатива)' : ''}
-                                    </td>
-                                    <td className="num">{formatKg(line.was_kg)}</td>
-                                    <td className="num">{formatKg(line.now_kg)}</td>
-                                    <td className="num">
-                                      {line.delta_kg ? `+${formatKg(line.delta_kg)}` : '—'}
-                                    </td>
-                                    <td className="num">
-                                      {formatKg(line.plan_units)} → {formatKg(line.fact_units)}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        ) : null}
-                      </div>
-                    )
-                  })}
-                </div>
-              ))}
-            </section>
-          ) : null}
-
-          {source?.revision_requested_at ? (
-            <p className="hint warn" data-testid="revision-requested">
-              {isExecutive
-                ? `Директор по закупкам просит пересмотреть план (${
-                    source.revision_requested_by_name ?? '—'
-                  }, ${formatDate(source.revision_requested_at)}). Верните план в работу, чтобы он
-                  его поправил.`
-                : `Запрос на пересмотр отправлен исполнительному директору (${formatDate(
-                    source.revision_requested_at,
-                  )}).`}
-            </p>
-          ) : null}
-
-          <div className="toolbar">
-            {canEdit ? (
-              <button type="button" className="primary" disabled={busy} onClick={save}>
-                Сохранить
-              </button>
-            ) : null}
-            {canEdit ? (
-              <button
-                type="button"
-                disabled={busy || !canSubmit}
-                title={
-                  plan.source.state === 'changed'
-                    ? 'Сначала примите изменения плана продаж'
-                    : undefined
-                }
-                onClick={submit}
-              >
-                Отправить на согласование
-              </button>
-            ) : null}
-            {canApprove ? (
-              <button
-                type="button"
-                className="primary"
-                disabled={busy || plan.source.state === 'changed'}
-                onClick={() => run(() => approvePurchasePlan(plan.id), 'План утверждён')}
-              >
-                Утвердить
-              </button>
-            ) : null}
-            {canApprove || canReopen ? (
-              <input
-                aria-label="Причина"
-                placeholder="Причина"
-                value={rejectReason}
-                onChange={(event) => setRejectReason(event.target.value)}
-              />
-            ) : null}
-            {canApprove ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() =>
-                  run(async () => {
-                    await rejectPurchasePlan(plan.id, rejectReason)
-                    setRejectReason('')
-                  }, 'План возвращён на доработку')
-                }
-              >
-                Вернуть на доработку
-              </button>
-            ) : null}
-            {canReopen ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() =>
-                  run(async () => {
-                    await reopenPurchasePlan(plan.id, rejectReason)
-                    setRejectReason('')
-                  }, 'План возвращён в работу')
-                }
-              >
-                Вернуть в работу
-              </button>
-            ) : null}
-            {canDelete ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  if (confirm('Удалить план закупок сырья?')) {
-                    void run(() => deletePurchasePlan(plan.id), 'План удалён')
-                  }
-                }}
-              >
-                Удалить
-              </button>
-            ) : null}
-            {isEditor && plan.status === 'approved' ? (
-              <span className="status-chip" data-testid="plan-approved-chip">
-                Утверждён
-              </span>
-            ) : null}
-          </div>
-
-          <fieldset className="sched-switch">
-            <legend className="sr-only">Вид графика заказа</legend>
-            <span className="hint">График заказа:</span>
-            {SCHEDULE_MODES.map((mode) => (
-              <button
-                key={mode.id}
-                type="button"
-                className={scheduleMode === mode.id ? 'mini active' : 'mini'}
-                aria-pressed={scheduleMode === mode.id}
-                onClick={() => setScheduleMode(mode.id)}
-              >
-                {mode.title}
-              </button>
-            ))}
+          <fieldset className="sched-switch view-switch">
+            <legend>Вид плана</legend>
+            <span className="hint">Вид:</span>
+            <button
+              type="button"
+              className={view === 'plan' ? 'mini active' : 'mini'}
+              aria-pressed={view === 'plan'}
+              data-testid="view-plan"
+              onClick={() => setView('plan')}
+            >
+              План закупок
+            </button>
+            <button
+              type="button"
+              className={view === 'consumption' ? 'mini active' : 'mini'}
+              aria-pressed={view === 'consumption'}
+              data-testid="view-consumption"
+              onClick={() => setView('consumption')}
+            >
+              Расход сырья
+            </button>
           </fieldset>
 
-          <div className="purchase-table">
-            <table className="plan-grid" data-testid="purchase-table">
-              <thead>
-                <tr>
-                  <th scope="col">Сырьё</th>
-                  <th scope="col">Страна</th>
-                  <th scope="col" className="num">
-                    Кол-во (год)
-                  </th>
-                  <th scope="col" className="num">
-                    Цена, ₽
-                  </th>
-                  <th scope="col" className="num">
-                    Сумма, ₽
-                  </th>
-                  <th scope="col">График заказа</th>
-                  <th scope="col" aria-label="Действия" />
-                </tr>
-              </thead>
-              {plan.positions.map((position) => {
-                const rows = drafts.filter((row) => row.salesProductId === position.product_id)
-                // Альтернатива показывается сразу под своей основной строкой.
-                const ordered: DraftRow[] = []
-                for (const row of rows.filter((item) => item.alternativeOfId === null)) {
-                  ordered.push(row)
-                  if (row.id !== null) {
-                    ordered.push(...rows.filter((item) => item.alternativeOfId === row.id))
-                  }
-                }
-                return (
-                  <tbody key={position.product_id}>
-                    <tr
-                      className={`need-row${flashId === position.product_id ? ' flash' : ''}`}
-                      id={`position-${position.product_id}`}
-                      data-testid={`position-${position.code}`}
-                    >
-                      <td colSpan={7}>
-                        <div className="need-head">
-                          <span
-                            className="need-total"
-                            title="Итог по позиции плана продаж (готовая продукция)"
+          {view === 'plan' ? (
+            <>
+              {source ? (
+                <>
+                  {source.state === 'changed' || source.state === 'no_snapshot' ? (
+                    <div className="source-alert" data-testid="source-alert">
+                      <div className="source-alert-head">
+                        <strong>{source.title}</strong>
+                        <span className="hint">
+                          снимок: {formatDate(source.snapshot_at)} · годовой план:{' '}
+                          {source.annual_status_title ?? '—'}
+                        </span>
+                      </div>
+                      <p className="hint">
+                        Затронуто позиций: {changedPositions.size}.{' '}
+                        {plan.status === 'approved'
+                          ? isExecutive
+                            ? 'План утверждён: верните его в работу, чтобы директор по закупкам поправил строки сырья.'
+                            : 'План утверждён: запросите пересмотр, чтобы вернуть его в работу и поправить строки сырья.'
+                          : 'Проверьте строки сырья и примите изменения к сведению — после этого план можно отправлять на согласование.'}
+                      </p>
+                      <div className="toolbar">
+                        {canRequestRevision ? (
+                          <button
+                            type="button"
+                            className="primary"
+                            disabled={busy}
+                            data-testid="source-request-revision"
+                            onClick={() =>
+                              run(
+                                () =>
+                                  requestPurchasePlanRevision(
+                                    plan.id,
+                                    rejectReason || 'план продаж пересмотрен',
+                                  ),
+                                'Запрос на пересмотр отправлен',
+                              )
+                            }
                           >
-                            <span className="need-total-caption">итог позиции</span>
-                            {formatQuantity(position.total)}
-                            <small>{position.unit}</small>
+                            Запросить пересмотр
+                          </button>
+                        ) : null}
+                        {canAcknowledge ? (
+                          <button
+                            type="button"
+                            className="primary"
+                            disabled={busy}
+                            data-testid="source-ack"
+                            onClick={() =>
+                              void run(
+                                () => acknowledgePurchasePlanSource(plan.id),
+                                'Изменения плана продаж приняты к сведению',
+                              )
+                            }
+                          >
+                            Принять к сведению
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => setShowChanges(!showChanges)}
+                        >
+                          {showChanges ? 'Скрыть изменения' : 'Показать изменения'}
+                        </button>
+                      </div>
+                      {showChanges ? <ChangesTable changes={source.changes} onGo={goTo} /> : null}
+                    </div>
+                  ) : (
+                    <div className="source-info" data-testid="source-info">
+                      <strong>{source.title}</strong>
+                      <span className="hint">
+                        {source.state === 'ok'
+                          ? `снимок от ${formatDate(source.snapshot_at)}`
+                          : `годовой план: ${source.annual_status_title ?? 'не согласован'}`}
+                      </span>
+                    </div>
+                  )}
+                  <HistoryBlock events={source.history} />
+                </>
+              ) : null}
+
+              {historySignals.length > 0 ? (
+                <section className="signal-history" data-testid="signal-history">
+                  <div className="signal-head">
+                    <h2 className="section-title">История изменений</h2>
+                    <span className="hint" data-testid="signal-count">
+                      Изменений: {historySignals.length}
+                    </span>
+                    {openSignals.length > 0 ? (
+                      <button type="button" className="mini" onClick={() => setOpenSignals([])}>
+                        Свернуть все
+                      </button>
+                    ) : null}
+                  </div>
+                  {signalGroups.map((group) => (
+                    <div className="signal-group" key={group.month}>
+                      {historySignals.length > 1 && group.month > 0 ? (
+                        <div className="signal-group-head">
+                          <span>
+                            {MONTH_TITLES[group.month - 1]} {plan.year}
                           </span>
-                          <span className="need-title-block">
-                            <span className="need-title">
-                              {position.code} · {position.name}
-                            </span>
+                          <span className="hint">
+                            изменений: {group.signals.length} · +{formatKg(group.added.toFixed(3))}{' '}
+                            кг
                           </span>
-                          {position.changed ? (
-                            <span className="badge need-changed">изменено</span>
-                          ) : null}
-                          {position.status === 'added' ? (
-                            <span className="badge need-added">новая позиция</span>
-                          ) : null}
-                          {position.status === 'removed' ? (
-                            <span className="badge need-removed">
-                              позиции больше нет в плане продаж
-                            </span>
-                          ) : null}
-                          {position.status === 'orphan' ? (
-                            <span className="badge need-removed">вне плана продаж</span>
-                          ) : null}
-                          <span className={position.decomposed ? 'need-state ok' : 'need-state'}>
-                            {position.decomposed ? 'разложено' : 'не разложено'}
-                          </span>
-                          {canEdit ? (
+                        </div>
+                      ) : null}
+                      {group.signals.map((signal) => {
+                        const isOpen = openSignals.includes(signal.id)
+                        const positions = new Set(signal.lines.map((line) => line.sales_product))
+                          .size
+                        const added = signal.lines.reduce(
+                          (total, line) => total + (line.delta_kg ? Number(line.delta_kg) : 0),
+                          0,
+                        )
+                        return (
+                          <div
+                            className={isOpen ? 'signal-item open' : 'signal-item'}
+                            key={signal.id}
+                          >
                             <button
                               type="button"
-                              className="mini"
-                              aria-label={`Добавить сырьё ${position.code}`}
-                              onClick={() => addRow(position)}
+                              className="signal-toggle"
+                              aria-expanded={isOpen}
+                              data-testid={`signal-toggle-${signal.id}`}
+                              onClick={() =>
+                                setOpenSignals((current) =>
+                                  current.includes(signal.id)
+                                    ? current.filter((id) => id !== signal.id)
+                                    : [...current, signal.id],
+                                )
+                              }
                             >
-                              + Добавить сырьё
+                              <span className="signal-caret">{isOpen ? '▾' : '▸'}</span>
+                              <span className="signal-date">{formatDate(signal.created_at)}</span>
+                              <span className="signal-month">
+                                {signal.month
+                                  ? `${MONTH_TITLES[signal.month - 1]} ${plan.year}`
+                                  : 'месяц не указан'}
+                              </span>
+                              <span className="signal-reason">
+                                {signal.reason ?? 'изменение плана'}
+                              </span>
+                              <span className="signal-stats">
+                                {positions} поз. · {signal.lines.length} стр. · +
+                                {formatKg(added.toFixed(3))} кг
+                              </span>
+                              <span className="signal-actor">{signal.actor_name ?? '—'}</span>
                             </button>
-                          ) : null}
-                        </div>
-                      </td>
+                            {isOpen ? (
+                              <div className="table-scroll">
+                                <table className="signal-table">
+                                  <thead>
+                                    <tr>
+                                      <th scope="col">Позиция</th>
+                                      <th scope="col">Сырьё</th>
+                                      <th scope="col" className="num">
+                                        Было, кг
+                                      </th>
+                                      <th scope="col" className="num">
+                                        Стало, кг
+                                      </th>
+                                      <th scope="col" className="num">
+                                        Δ, кг
+                                      </th>
+                                      <th scope="col" className="num">
+                                        Ед.: план → факт
+                                      </th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {signal.lines.map((line) => (
+                                      <tr
+                                        key={`${signal.id}-${line.sales_product}-${line.product}-${line.alternative}`}
+                                      >
+                                        <td>{line.sales_product}</td>
+                                        <td>
+                                          {line.product}
+                                          {line.alternative ? ' (альтернатива)' : ''}
+                                        </td>
+                                        <td className="num">{formatKg(line.was_kg)}</td>
+                                        <td className="num">{formatKg(line.now_kg)}</td>
+                                        <td className="num">
+                                          {line.delta_kg ? `+${formatKg(line.delta_kg)}` : '—'}
+                                        </td>
+                                        <td className="num">
+                                          {formatKg(line.plan_units)} → {formatKg(line.fact_units)}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : null}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ))}
+                </section>
+              ) : null}
+
+              {source?.revision_requested_at ? (
+                <p className="hint warn" data-testid="revision-requested">
+                  {isExecutive
+                    ? `Директор по закупкам просит пересмотреть план (${
+                        source.revision_requested_by_name ?? '—'
+                      }, ${formatDate(source.revision_requested_at)}). Верните план в работу, чтобы он
+                  его поправил.`
+                    : `Запрос на пересмотр отправлен исполнительному директору (${formatDate(
+                        source.revision_requested_at,
+                      )}).`}
+                </p>
+              ) : null}
+
+              <div className="toolbar">
+                {canEdit ? (
+                  <button type="button" className="primary" disabled={busy} onClick={save}>
+                    Сохранить
+                  </button>
+                ) : null}
+                {canEdit ? (
+                  <button
+                    type="button"
+                    disabled={busy || !canSubmit}
+                    title={
+                      plan.source.state === 'changed'
+                        ? 'Сначала примите изменения плана продаж'
+                        : undefined
+                    }
+                    onClick={submit}
+                  >
+                    Отправить на согласование
+                  </button>
+                ) : null}
+                {canApprove ? (
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={busy || plan.source.state === 'changed'}
+                    onClick={() => run(() => approvePurchasePlan(plan.id), 'План утверждён')}
+                  >
+                    Утвердить
+                  </button>
+                ) : null}
+                {canApprove || canReopen ? (
+                  <input
+                    aria-label="Причина"
+                    placeholder="Причина"
+                    value={rejectReason}
+                    onChange={(event) => setRejectReason(event.target.value)}
+                  />
+                ) : null}
+                {canApprove ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      run(async () => {
+                        await rejectPurchasePlan(plan.id, rejectReason)
+                        setRejectReason('')
+                      }, 'План возвращён на доработку')
+                    }
+                  >
+                    Вернуть на доработку
+                  </button>
+                ) : null}
+                {canReopen ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      run(async () => {
+                        await reopenPurchasePlan(plan.id, rejectReason)
+                        setRejectReason('')
+                      }, 'План возвращён в работу')
+                    }
+                  >
+                    Вернуть в работу
+                  </button>
+                ) : null}
+                {canDelete ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      if (confirm('Удалить план закупок сырья?')) {
+                        void run(() => deletePurchasePlan(plan.id), 'План удалён')
+                      }
+                    }}
+                  >
+                    Удалить
+                  </button>
+                ) : null}
+                {isEditor && plan.status === 'approved' ? (
+                  <span className="status-chip" data-testid="plan-approved-chip">
+                    Утверждён
+                  </span>
+                ) : null}
+              </div>
+
+              <fieldset className="sched-switch">
+                <legend className="sr-only">Вид графика заказа</legend>
+                <span className="hint">График заказа:</span>
+                {SCHEDULE_MODES.map((mode) => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    className={scheduleMode === mode.id ? 'mini active' : 'mini'}
+                    aria-pressed={scheduleMode === mode.id}
+                    onClick={() => setScheduleMode(mode.id)}
+                  >
+                    {mode.title}
+                  </button>
+                ))}
+              </fieldset>
+
+              <div className="purchase-table">
+                <table className="plan-grid" data-testid="purchase-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Сырьё</th>
+                      <th scope="col">Страна</th>
+                      <th scope="col" className="num">
+                        Кол-во (год)
+                      </th>
+                      <th scope="col" className="num">
+                        Цена, ₽
+                      </th>
+                      <th scope="col" className="num">
+                        Сумма, ₽
+                      </th>
+                      <th scope="col">График заказа</th>
+                      <th scope="col" aria-label="Действия" />
                     </tr>
-                    {rows.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="hint" data-testid={`empty-${position.code}`}>
-                          Сырьё не добавлено.
-                        </td>
-                      </tr>
-                    ) : (
-                      ordered.map((row, index) => {
-                        const quantity = normalize(row.quantity)
-                        const normText = normalize(row.norm)
-                        const normValue = Number(normText)
-                        const hasNorm =
-                          normText !== '' && Number.isFinite(normValue) && normValue > 0
-                        const monthsForNeed = hasNorm
-                          ? positionNeedMonths(position, closedMonths)
-                          : []
-                        const schedule = hasNorm
-                          ? previewByNorm(normValue, monthsForNeed, row.deliveryDays, plan.year)
-                          : splitPreview(toMilli(quantity), position, row.deliveryDays, plan.year)
-                        const needTotal = hasNorm ? needTotalOf(monthsForNeed, normValue) : 0
-                        const planQuantity = Number(quantity)
-                        const gap =
-                          hasNorm && Number.isFinite(planQuantity) ? planQuantity - needTotal : 0
-                        const price = normalize(row.priceRub)
-                        const sum =
-                          price !== '' && QTY_PATTERN.test(quantity)
-                            ? Number(price) * Number(quantity)
-                            : null
-                        const label = `${position.code} ${index + 1}`
-                        const isAlternative = row.alternativeOfId !== null
-                        const alternativeUsed = (coverage.used.get(row.key)?.total ?? 0) / 1000
-                        const group = coverage.group.get(groupKey(row))
-                        const rowSchedule = coverage.byRow.get(row.key) ?? []
-                        const grouped = (group?.rows ?? 1) > 1 || (group?.alternatives ?? 0) > 0
-                        const expanded = openSchedule.includes(row.key)
-                        // График «ниже» — сразу под своей строкой, а не в конце позиции.
-                        const wideGrouped = (group?.rows ?? 1) > 1
-                        // Таблица и кварталы — сразу под своей строкой, а не в конце позиции.
-                        const showWide =
-                          !isAlternative &&
-                          schedule.length > 0 &&
-                          (scheduleMode === 'quarters' || expanded)
-                        const wideRow = showWide ? (
-                          <tr className="schedule-wide">
-                            <td colSpan={7}>
-                              {scheduleMode === 'quarters' ? (
-                                <>
-                                  <div className="sched-wide-head">
-                                    <b>{row.productName || 'Сырьё'}</b>
-                                    {row.countryName ? ` · ${row.countryName}` : ''}
-                                    {wideGrouped && group ? (
-                                      <GroupNote
-                                        group={group}
-                                        year={plan.year}
-                                        unit={row.unit || 'ед.'}
-                                      />
-                                    ) : null}
-                                  </div>
-                                  <ScheduleView
-                                    rows={rowSchedule}
-                                    mode="quarters"
-                                    year={plan.year}
-                                    extra={extraFacts(row, group?.months ?? monthsOf(schedule))}
-                                    unit={row.unit || 'ед.'}
-                                    showCarry={!wideGrouped}
-                                  />
-                                </>
+                  </thead>
+                  {plan.positions.map((position) => {
+                    const rows = drafts.filter((row) => row.salesProductId === position.product_id)
+                    // Альтернатива показывается сразу под своей основной строкой.
+                    const ordered: DraftRow[] = []
+                    for (const row of rows.filter((item) => item.alternativeOfId === null)) {
+                      ordered.push(row)
+                      if (row.id !== null) {
+                        ordered.push(...rows.filter((item) => item.alternativeOfId === row.id))
+                      }
+                    }
+                    return (
+                      <tbody key={position.product_id}>
+                        <tr
+                          className={`need-row${flashId === position.product_id ? ' flash' : ''}`}
+                          id={`position-${position.product_id}`}
+                          data-testid={`position-${position.code}`}
+                        >
+                          <td colSpan={7}>
+                            <div className="need-head">
+                              <span
+                                className="need-total"
+                                title="Итог по позиции плана продаж (готовая продукция)"
+                              >
+                                <span className="need-total-caption">итог позиции</span>
+                                {formatQuantity(position.total)}
+                                <small>{position.unit}</small>
+                              </span>
+                              <span className="need-title-block">
+                                <span className="need-title">
+                                  {position.code} · {position.name}
+                                </span>
+                              </span>
+                              {position.changed ? (
+                                <span className="badge need-changed">изменено</span>
                               ) : null}
-                              {expanded ? (
-                                <ScheduleTable
-                                  rows={rowSchedule}
-                                  year={plan.year}
-                                  extra=""
-                                  unit={row.unit || 'ед.'}
-                                />
+                              {position.status === 'added' ? (
+                                <span className="badge need-added">новая позиция</span>
                               ) : null}
+                              {position.status === 'removed' ? (
+                                <span className="badge need-removed">
+                                  позиции больше нет в плане продаж
+                                </span>
+                              ) : null}
+                              {position.status === 'orphan' ? (
+                                <span className="badge need-removed">вне плана продаж</span>
+                              ) : null}
+                              <span
+                                className={position.decomposed ? 'need-state ok' : 'need-state'}
+                              >
+                                {position.decomposed ? 'разложено' : 'не разложено'}
+                              </span>
+                              {canEdit ? (
+                                <button
+                                  type="button"
+                                  className="mini"
+                                  aria-label={`Добавить сырьё ${position.code}`}
+                                  onClick={() => addRow(position)}
+                                >
+                                  + Добавить сырьё
+                                </button>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                        {rows.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="hint" data-testid={`empty-${position.code}`}>
+                              Сырьё не добавлено.
                             </td>
                           </tr>
-                        ) : null
-                        return (
-                          <Fragment key={row.key}>
-                            <tr
-                              className={isAlternative ? 'alt-row' : undefined}
-                              data-testid={`purchase-row-${row.key}`}
-                            >
-                              <td>
-                                {canEdit ? (
-                                  <select
-                                    className="plan-select"
-                                    aria-label={`Сырьё ${label}`}
-                                    title={row.productName || undefined}
-                                    value={row.productId}
-                                    onChange={(event) => {
-                                      const chosen = products.find(
-                                        (item) => item.id === event.target.value,
-                                      )
-                                      updateRow(row.key, {
-                                        productId: event.target.value,
-                                        productName: chosen?.name ?? '',
-                                        unit: chosen?.unit ?? '',
-                                      })
-                                    }}
-                                  >
-                                    <option value="">— сырьё —</option>
-                                    {row.productId &&
-                                    !products.some((item) => item.id === row.productId) ? (
-                                      <option value={row.productId}>
-                                        {row.productName} (отключён)
-                                      </option>
-                                    ) : null}
-                                    {products.map((product) => (
-                                      <option key={product.id} value={product.id}>
-                                        {product.code} · {product.name} ({product.unit})
-                                      </option>
-                                    ))}
-                                  </select>
-                                ) : (
-                                  row.productName
-                                )}
-                                {isAlternative ? (
-                                  <span
-                                    className="badge badge-alt"
-                                    data-testid={`alt-badge-${row.key}`}
-                                  >
-                                    альтернатива
-                                  </span>
-                                ) : null}
-                                {canEdit && !isAlternative && row.id ? (
-                                  <button
-                                    type="button"
-                                    className="mini alt-add"
-                                    aria-label={`Добавить альтернативу ${label}`}
-                                    title="Альтернативное сырьё для этой строки: другой сорт, калибр или страна"
-                                    onClick={() => addAlternative(row)}
-                                  >
-                                    + альтернатива
-                                  </button>
-                                ) : null}
-                              </td>
-                              <td>
-                                {canEdit ? (
-                                  <select
-                                    aria-label={`Страна ${label}`}
-                                    value={row.countryId}
-                                    onChange={(event) => {
-                                      const chosen = countries.find(
-                                        (item) => item.id === event.target.value,
-                                      )
-                                      updateRow(row.key, {
-                                        countryId: event.target.value,
-                                        countryName: chosen?.name ?? '',
-                                        deliveryDays: chosen?.delivery_days ?? 30,
-                                      })
-                                    }}
-                                  >
-                                    <option value="">— страна —</option>
-                                    {row.countryId &&
-                                    !countries.some((item) => item.id === row.countryId) ? (
-                                      <option value={row.countryId}>
-                                        {row.countryName} (отключена)
-                                      </option>
-                                    ) : null}
-                                    {countries.map((item) => (
-                                      <option key={item.id} value={item.id}>
-                                        {item.name} · {item.delivery_days} дн
-                                      </option>
-                                    ))}
-                                  </select>
-                                ) : (
-                                  <>
-                                    {row.countryName || '—'}
-                                    {row.deliveryDays ? (
-                                      <span className="unit"> · {row.deliveryDays} дн</span>
-                                    ) : null}
-                                  </>
-                                )}
-                              </td>
-                              <td className="num">
-                                {canEdit ? (
-                                  <>
-                                    <input
-                                      className="cell"
-                                      aria-label={`Количество ${label}`}
-                                      value={row.quantity}
-                                      onChange={(event) =>
-                                        updateRow(row.key, { quantity: event.target.value })
-                                      }
-                                    />
-                                    <input
-                                      className="cell norm-cell"
-                                      aria-label={`Норма ${label}`}
-                                      placeholder="норма"
-                                      title="Норма расхода: единиц сырья на единицу позиции плана продаж"
-                                      value={row.norm}
-                                      onChange={(event) =>
-                                        updateRow(row.key, { norm: event.target.value })
-                                      }
-                                    />
-                                  </>
-                                ) : (
-                                  <>
-                                    {formatQuantity(row.quantity)}
-                                    {row.norm ? (
-                                      <span className="norm-inline">
-                                        норма {formatQuantity(row.norm)}
-                                      </span>
-                                    ) : null}
-                                  </>
-                                )}
-                              </td>
-                              <td className="num">
-                                {canEdit ? (
-                                  <input
-                                    className="cell"
-                                    aria-label={`Цена ${label}`}
-                                    value={row.priceRub}
-                                    onChange={(event) =>
-                                      updateRow(row.key, { priceRub: event.target.value })
-                                    }
-                                  />
-                                ) : (
-                                  formatMoney(row.priceRub || null)
-                                )}
-                              </td>
-                              <td className="num">
-                                {sum === null ? '—' : formatMoney(sum.toFixed(2))}
-                              </td>
-                              <td>
-                                {position.status === 'orphan' ? (
-                                  '—'
-                                ) : isAlternative ? (
-                                  <span className="sched-summary" data-testid={`alt-${row.key}`}>
-                                    <span className="sched-line">
-                                      план {formatQuantity(row.quantity || '0')} · пришло{' '}
-                                      {formatQuantity(row.factQuantity)}
-                                      {alternativeUsed > 0
-                                        ? ` · на покрытие ${formatQuantity(
-                                            alternativeUsed.toFixed(3),
-                                          )}`
-                                        : ''}
-                                    </span>
-                                    {hasNorm ? (
-                                      <span className="sched-line" data-testid={`need-${row.key}`}>
-                                        потребность {formatQuantity(needTotal.toFixed(3))}{' '}
-                                        {row.unit || 'ед.'} · {gap >= 0 ? 'запас' : 'дефицит'}{' '}
-                                        {formatQuantity(Math.abs(gap).toFixed(3))}
-                                      </span>
-                                    ) : (
-                                      <span className="hint">норма не задана</span>
-                                    )}
-                                    <span className="alt-note">
-                                      закрывает потребность основной строки, когда основного сырья
-                                      не хватает
-                                    </span>
-                                  </span>
-                                ) : (
-                                  <>
-                                    {hasNorm ? (
-                                      <span className="sched-line" data-testid={`need-${row.key}`}>
-                                        потребность {formatQuantity(needTotal.toFixed(3))}{' '}
-                                        {row.unit || 'ед.'} · {gap >= 0 ? 'запас' : 'дефицит'}{' '}
-                                        {formatQuantity(Math.abs(gap).toFixed(3))}
-                                      </span>
-                                    ) : (
-                                      <span className="hint">норма не задана</span>
-                                    )}
-                                    {Number(row.carryover) > 0 && row.carryoverMonth ? (
-                                      <span
-                                        className="sched-line sched-carryover"
-                                        data-testid={`carryover-${row.key}`}
-                                      >
-                                        остаток после {monthShort(row.carryoverMonth)} {plan.year}:{' '}
-                                        {formatQuantity(Number(row.carryover).toFixed(3))}{' '}
-                                        {row.unit || 'ед.'} — на складе, закрывает следующие месяцы
-                                      </span>
-                                    ) : null}
-                                    {scheduleMode === 'summary' ? (
+                        ) : (
+                          ordered.map((row, index) => {
+                            const quantity = normalize(row.quantity)
+                            const normText = normalize(row.norm)
+                            const normValue = Number(normText)
+                            const hasNorm =
+                              normText !== '' && Number.isFinite(normValue) && normValue > 0
+                            const monthsForNeed = hasNorm
+                              ? positionNeedMonths(position, closedMonths)
+                              : []
+                            const schedule = hasNorm
+                              ? previewByNorm(normValue, monthsForNeed, row.deliveryDays, plan.year)
+                              : splitPreview(
+                                  toMilli(quantity),
+                                  position,
+                                  row.deliveryDays,
+                                  plan.year,
+                                )
+                            const needTotal = hasNorm ? needTotalOf(monthsForNeed, normValue) : 0
+                            const planQuantity = Number(quantity)
+                            const gap =
+                              hasNorm && Number.isFinite(planQuantity)
+                                ? planQuantity - needTotal
+                                : 0
+                            const price = normalize(row.priceRub)
+                            const sum =
+                              price !== '' && QTY_PATTERN.test(quantity)
+                                ? Number(price) * Number(quantity)
+                                : null
+                            const label = `${position.code} ${index + 1}`
+                            const isAlternative = row.alternativeOfId !== null
+                            const alternativeUsed = (coverage.used.get(row.key)?.total ?? 0) / 1000
+                            const group = coverage.group.get(groupKey(row))
+                            const rowSchedule = coverage.byRow.get(row.key) ?? []
+                            const grouped = (group?.rows ?? 1) > 1 || (group?.alternatives ?? 0) > 0
+                            const expanded = openSchedule.includes(row.key)
+                            // График «ниже» — сразу под своей строкой, а не в конце позиции.
+                            const wideGrouped = (group?.rows ?? 1) > 1
+                            // Таблица и кварталы — сразу под своей строкой, а не в конце позиции.
+                            const showWide =
+                              !isAlternative &&
+                              schedule.length > 0 &&
+                              (scheduleMode === 'quarters' || expanded)
+                            const wideRow = showWide ? (
+                              <tr className="schedule-wide">
+                                <td colSpan={7}>
+                                  {scheduleMode === 'quarters' ? (
+                                    <>
+                                      <div className="sched-wide-head">
+                                        <b>{row.productName || 'Сырьё'}</b>
+                                        {row.countryName ? ` · ${row.countryName}` : ''}
+                                        {wideGrouped && group ? (
+                                          <GroupNote
+                                            group={group}
+                                            year={plan.year}
+                                            unit={row.unit || 'ед.'}
+                                          />
+                                        ) : null}
+                                      </div>
                                       <ScheduleView
                                         rows={rowSchedule}
-                                        mode="summary"
+                                        mode="quarters"
                                         year={plan.year}
                                         extra={extraFacts(row, group?.months ?? monthsOf(schedule))}
                                         unit={row.unit || 'ед.'}
-                                        showCarry={!grouped}
+                                        showCarry={!wideGrouped}
+                                      />
+                                    </>
+                                  ) : null}
+                                  {expanded ? (
+                                    <ScheduleTable
+                                      rows={rowSchedule}
+                                      year={plan.year}
+                                      extra=""
+                                      unit={row.unit || 'ед.'}
+                                    />
+                                  ) : null}
+                                </td>
+                              </tr>
+                            ) : null
+                            return (
+                              <Fragment key={row.key}>
+                                <tr
+                                  className={isAlternative ? 'alt-row' : undefined}
+                                  data-testid={`purchase-row-${row.key}`}
+                                >
+                                  <td>
+                                    {canEdit ? (
+                                      <select
+                                        className="plan-select"
+                                        aria-label={`Сырьё ${label}`}
+                                        title={row.productName || undefined}
+                                        value={row.productId}
+                                        onChange={(event) => {
+                                          const chosen = products.find(
+                                            (item) => item.id === event.target.value,
+                                          )
+                                          updateRow(row.key, {
+                                            productId: event.target.value,
+                                            productCode: chosen?.code ?? '',
+                                            productName: chosen?.name ?? '',
+                                            unit: chosen?.unit ?? '',
+                                          })
+                                        }}
+                                      >
+                                        <option value="">— сырьё —</option>
+                                        {row.productId &&
+                                        !products.some((item) => item.id === row.productId) ? (
+                                          <option value={row.productId}>
+                                            {row.productName} (отключён)
+                                          </option>
+                                        ) : null}
+                                        {products.map((product) => (
+                                          <option key={product.id} value={product.id}>
+                                            {product.code} · {product.name} ({product.unit})
+                                          </option>
+                                        ))}
+                                      </select>
+                                    ) : (
+                                      row.productName
+                                    )}
+                                    {isAlternative ? (
+                                      <span
+                                        className="badge badge-alt"
+                                        data-testid={`alt-badge-${row.key}`}
+                                      >
+                                        альтернатива
+                                      </span>
+                                    ) : null}
+                                    {canEdit && !isAlternative && row.id ? (
+                                      <button
+                                        type="button"
+                                        className="mini alt-add"
+                                        aria-label={`Добавить альтернативу ${label}`}
+                                        title="Альтернативное сырьё для этой строки: другой сорт, калибр или страна"
+                                        onClick={() => addAlternative(row)}
+                                      >
+                                        + альтернатива
+                                      </button>
+                                    ) : null}
+                                  </td>
+                                  <td>
+                                    {canEdit ? (
+                                      <select
+                                        aria-label={`Страна ${label}`}
+                                        value={row.countryId}
+                                        onChange={(event) => {
+                                          const chosen = countries.find(
+                                            (item) => item.id === event.target.value,
+                                          )
+                                          updateRow(row.key, {
+                                            countryId: event.target.value,
+                                            countryName: chosen?.name ?? '',
+                                            deliveryDays: chosen?.delivery_days ?? 30,
+                                          })
+                                        }}
+                                      >
+                                        <option value="">— страна —</option>
+                                        {row.countryId &&
+                                        !countries.some((item) => item.id === row.countryId) ? (
+                                          <option value={row.countryId}>
+                                            {row.countryName} (отключена)
+                                          </option>
+                                        ) : null}
+                                        {countries.map((item) => (
+                                          <option key={item.id} value={item.id}>
+                                            {item.name} · {item.delivery_days} дн
+                                          </option>
+                                        ))}
+                                      </select>
+                                    ) : (
+                                      <>
+                                        {row.countryName || '—'}
+                                        {row.deliveryDays ? (
+                                          <span className="unit"> · {row.deliveryDays} дн</span>
+                                        ) : null}
+                                      </>
+                                    )}
+                                  </td>
+                                  <td className="num">
+                                    {canEdit ? (
+                                      <>
+                                        <input
+                                          className="cell"
+                                          aria-label={`Количество ${label}`}
+                                          value={row.quantity}
+                                          onChange={(event) =>
+                                            updateRow(row.key, { quantity: event.target.value })
+                                          }
+                                        />
+                                        <input
+                                          className="cell norm-cell"
+                                          aria-label={`Норма ${label}`}
+                                          placeholder="норма"
+                                          title="Норма расхода: единиц сырья на единицу позиции плана продаж"
+                                          value={row.norm}
+                                          onChange={(event) =>
+                                            updateRow(row.key, { norm: event.target.value })
+                                          }
+                                        />
+                                      </>
+                                    ) : (
+                                      <>
+                                        {formatQuantity(row.quantity)}
+                                        {row.norm ? (
+                                          <span className="norm-inline">
+                                            норма {formatQuantity(row.norm)}
+                                          </span>
+                                        ) : null}
+                                      </>
+                                    )}
+                                  </td>
+                                  <td className="num">
+                                    {canEdit ? (
+                                      <input
+                                        className="cell"
+                                        aria-label={`Цена ${label}`}
+                                        value={row.priceRub}
+                                        onChange={(event) =>
+                                          updateRow(row.key, { priceRub: event.target.value })
+                                        }
                                       />
                                     ) : (
-                                      <span className="hint sched-below">график ниже</span>
+                                      formatMoney(row.priceRub || null)
                                     )}
-                                    {scheduleMode === 'summary' && grouped && group ? (
-                                      <GroupNote
-                                        group={group}
-                                        year={plan.year}
-                                        unit={row.unit || 'ед.'}
-                                      />
+                                  </td>
+                                  <td className="num">
+                                    {sum === null ? '—' : formatMoney(sum.toFixed(2))}
+                                  </td>
+                                  <td>
+                                    {position.status === 'orphan' ? (
+                                      '—'
+                                    ) : isAlternative ? (
+                                      <span
+                                        className="sched-summary"
+                                        data-testid={`alt-${row.key}`}
+                                      >
+                                        <span className="sched-line">
+                                          план {formatQuantity(row.quantity || '0')} · пришло{' '}
+                                          {formatQuantity(row.factQuantity)}
+                                          {alternativeUsed > 0
+                                            ? ` · на покрытие ${formatQuantity(
+                                                alternativeUsed.toFixed(3),
+                                              )}`
+                                            : ''}
+                                        </span>
+                                        {hasNorm ? (
+                                          <span
+                                            className="sched-line"
+                                            data-testid={`need-${row.key}`}
+                                          >
+                                            потребность {formatQuantity(needTotal.toFixed(3))}{' '}
+                                            {row.unit || 'ед.'} · {gap >= 0 ? 'запас' : 'дефицит'}{' '}
+                                            {formatQuantity(Math.abs(gap).toFixed(3))}
+                                          </span>
+                                        ) : (
+                                          <span className="hint">норма не задана</span>
+                                        )}
+                                        <span className="alt-note">
+                                          закрывает потребность основной строки, когда основного
+                                          сырья не хватает
+                                        </span>
+                                      </span>
+                                    ) : (
+                                      <>
+                                        {hasNorm ? (
+                                          <span
+                                            className="sched-line"
+                                            data-testid={`need-${row.key}`}
+                                          >
+                                            потребность {formatQuantity(needTotal.toFixed(3))}{' '}
+                                            {row.unit || 'ед.'} · {gap >= 0 ? 'запас' : 'дефицит'}{' '}
+                                            {formatQuantity(Math.abs(gap).toFixed(3))}
+                                          </span>
+                                        ) : (
+                                          <span className="hint">норма не задана</span>
+                                        )}
+                                        {Number(row.carryover) > 0 && row.carryoverMonth ? (
+                                          <span
+                                            className="sched-line sched-carryover"
+                                            data-testid={`carryover-${row.key}`}
+                                          >
+                                            остаток после {monthShort(row.carryoverMonth)}{' '}
+                                            {plan.year}:{' '}
+                                            {formatQuantity(Number(row.carryover).toFixed(3))}{' '}
+                                            {row.unit || 'ед.'} — на складе, закрывает следующие
+                                            месяцы
+                                          </span>
+                                        ) : null}
+                                        {scheduleMode === 'summary' ? (
+                                          <ScheduleView
+                                            rows={rowSchedule}
+                                            mode="summary"
+                                            year={plan.year}
+                                            extra={extraFacts(
+                                              row,
+                                              group?.months ?? monthsOf(schedule),
+                                            )}
+                                            unit={row.unit || 'ед.'}
+                                            showCarry={!grouped}
+                                          />
+                                        ) : (
+                                          <span className="hint sched-below">график ниже</span>
+                                        )}
+                                        {scheduleMode === 'summary' && grouped && group ? (
+                                          <GroupNote
+                                            group={group}
+                                            year={plan.year}
+                                            unit={row.unit || 'ед.'}
+                                          />
+                                        ) : null}
+                                        <button
+                                          type="button"
+                                          className={
+                                            openSchedule.includes(row.key)
+                                              ? 'mini sched-toggle active'
+                                              : 'mini sched-toggle'
+                                          }
+                                          aria-expanded={openSchedule.includes(row.key)}
+                                          onClick={() => toggleSchedule(row.key)}
+                                        >
+                                          {openSchedule.includes(row.key)
+                                            ? 'Скрыть таблицу'
+                                            : 'Показать таблицей'}
+                                        </button>
+                                      </>
+                                    )}
+                                  </td>
+                                  <td>
+                                    {canEdit ? (
+                                      <button
+                                        type="button"
+                                        className="row-remove"
+                                        aria-label={`Убрать ${label}`}
+                                        title="Убрать строку"
+                                        onClick={() => removeRow(row.key)}
+                                      >
+                                        ×
+                                      </button>
                                     ) : null}
-                                    <button
-                                      type="button"
-                                      className={
-                                        openSchedule.includes(row.key)
-                                          ? 'mini sched-toggle active'
-                                          : 'mini sched-toggle'
-                                      }
-                                      aria-expanded={openSchedule.includes(row.key)}
-                                      onClick={() => toggleSchedule(row.key)}
-                                    >
-                                      {openSchedule.includes(row.key)
-                                        ? 'Скрыть таблицу'
-                                        : 'Показать таблицей'}
-                                    </button>
-                                  </>
-                                )}
-                              </td>
-                              <td>
-                                {canEdit ? (
-                                  <button
-                                    type="button"
-                                    className="row-remove"
-                                    aria-label={`Убрать ${label}`}
-                                    title="Убрать строку"
-                                    onClick={() => removeRow(row.key)}
-                                  >
-                                    ×
-                                  </button>
-                                ) : null}
-                              </td>
-                            </tr>
-                            {wideRow}
-                          </Fragment>
-                        )
-                      })
-                    )}
-                  </tbody>
-                )
-              })}
-            </table>
-          </div>
+                                  </td>
+                                </tr>
+                                {wideRow}
+                              </Fragment>
+                            )
+                          })
+                        )}
+                      </tbody>
+                    )
+                  })}
+                </table>
+              </div>
+            </>
+          ) : (
+            <PurchaseConsumptionView plan={plan} drafts={drafts} />
+          )}
         </>
       )}
     </section>

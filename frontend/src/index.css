@@ -5705,3 +5705,235 @@ input[type="radio"] {
     min-width: 15rem;
   }
 }
+
+/* ── План закупок: зеркальный вид «Расход сырья» ───────────────────────── */
+
+/* Переключатель вида — та же строка пилюль, что и «График заказа». */
+.view-switch {
+  margin-top: -0.25rem;
+}
+
+.consumption-view {
+  margin-top: 0.5rem;
+}
+
+.consumption-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.consumption-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+}
+
+.consumption-search {
+  min-width: 20rem;
+}
+
+.consumption-view .filter-bar {
+  margin-bottom: 0.75rem;
+}
+
+.consumption-view .filter-reset:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.need-missing {
+  color: var(--muted);
+}
+
+.need-unit {
+  margin-left: 0.15rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+/* Карточка сырья: раскрывается целиком, по умолчанию открыта. */
+.material-card {
+  margin-bottom: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.material-card > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.55rem;
+  padding: 0.7rem 0.9rem;
+  list-style: none;
+  cursor: pointer;
+}
+
+.material-card > summary::-webkit-details-marker {
+  display: none;
+}
+
+.material-card > summary:hover {
+  background: var(--hover);
+}
+
+.mc-name {
+  font-weight: 600;
+}
+
+.mc-code {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.mc-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.mc-caret {
+  width: 1rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.card-table {
+  table-layout: fixed;
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.card-table td {
+  white-space: normal;
+  vertical-align: middle;
+}
+
+.card-table td .badge {
+  margin-left: 0.4rem;
+}
+
+.card-table th:nth-child(1) {
+  width: 42%;
+}
+
+.card-table th:nth-child(2) {
+  width: 11%;
+}
+
+.card-table th:nth-child(3) {
+  width: 11%;
+}
+
+.card-table th:nth-child(4) {
+  width: 22%;
+}
+
+.card-table th:nth-child(5) {
+  width: 14%;
+}
+
+/* Расход по месяцам: строка-раскрытие под продукцией. */
+.month-toggle {
+  font-size: 0.78rem;
+  padding: 0.12rem 0.5rem;
+  white-space: nowrap;
+}
+
+.month-toggle[aria-expanded="true"] {
+  border-color: #2563eb;
+  background: #eef4ff;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.months-row > td {
+  padding: 0 0.65rem 0.7rem;
+  background: var(--surface-2);
+}
+
+.months-panel {
+  padding: 0.45rem 0.55rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.months-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: 0.4rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.months-head b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.months-strip {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.months-strip li {
+  padding: 0.22rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.months-strip .m {
+  display: block;
+  color: var(--muted);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.months-strip b {
+  display: block;
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.months-strip li.zero b {
+  color: var(--muted);
+}
+
+/* На узком экране 12 месяцев не помещаются в строку — раскладываем в две. */
+@media (max-width: 1180px) {
+  .months-strip {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  /* Колонки уже — длинные заголовки переносим, иначе они наезжают друг на друга. */
+  .card-table th {
+    white-space: normal;
+  }
+
+  .card-table th:nth-child(1) {
+    width: 38%;
+  }
+
+  .card-table th:nth-child(5) {
+    width: 17%;
+  }
+}

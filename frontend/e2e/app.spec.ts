@@ -751,6 +751,27 @@ test('закупщик раскладывает потребность план�
   await expect(page.getByTestId('alt-pi-1')).toContainText('план 10')
   await expect(page.getByTestId('need-pi-1')).toContainText('потребность 600')
 
+  // Зеркальный вид: сырьё → продукция, у строки — расход по месяцам.
+  await page.getByTestId('view-consumption').click()
+  const card = page.getByTestId('consumption-card-RAW-1')
+  await expect(card).toContainText('Смесь ореховая, 100 гр')
+  await expect(card).toContainText('позиций: 1 · строк: 2')
+  await expect(card).toContainText('альтернатива')
+  await expect(page.getByRole('button', { name: 'Сохранить', exact: true })).toHaveCount(0)
+  await card
+    .getByRole('button', { name: 'Расход по месяцам: Смесь ореховая, 100 гр' })
+    .first()
+    .click()
+  const months = page.locator('.months-row').first()
+  await expect(months).toBeVisible()
+  await expect(months).toContainText('янв')
+  // Январь: 100 × 1,5 = 150; февраль: 200 × 1,5 = 300.
+  await expect(months).toContainText('150')
+  await expect(months).toContainText('300')
+
+  await page.getByTestId('view-plan').click()
+  await expect(page.getByTestId('purchase-table')).toBeVisible()
+
   await page.getByRole('button', { name: 'Отправить на согласование' }).click()
   await expect(page.getByTestId('purchase-status')).toHaveText('На проверке')
 })

@@ -897,4 +897,33 @@ describe('PurchasePlanPage', () => {
     await user.click(screen.getByRole('button', { name: 'Отправить на согласование' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Укажите цену у всех строк')
   })
+
+  it('переключается на зеркальный вид расхода сырья и обратно', async () => {
+    const user = userEvent.setup()
+    mockApi(routes([plan({ items: [planItem({ norm: '1.5' })] })]))
+    render(<PurchasePlanPage user={DIRECTOR} />)
+
+    await screen.findByTestId('purchase-table')
+    expect(screen.getByRole('button', { name: 'Сохранить' })).toBeInTheDocument()
+
+    await user.click(screen.getByTestId('view-consumption'))
+    expect(screen.queryByTestId('purchase-table')).toBeNull()
+    // В зеркальном виде план только читают: кнопок правки и согласования нет.
+    expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull()
+    expect(screen.getByTestId('consumption-view')).toBeInTheDocument()
+    expect(screen.getByText(/В режиме «Расход сырья»/)).toBeInTheDocument()
+
+    const card = screen.getByTestId('consumption-card-RAW-1')
+    expect(card).toHaveTextContent('Смесь ореховая, 100 гр')
+    expect(card).toHaveTextContent('450')
+
+    await user.click(screen.getByTestId('months-toggle-item-1'))
+    expect(screen.getByText(/расход по месяцам, кг/)).toBeInTheDocument()
+    expect(screen.getByText(/за год:/)).toHaveTextContent('450')
+
+    await user.click(screen.getByTestId('view-plan'))
+    expect(screen.getByTestId('purchase-table')).toBeInTheDocument()
+    expect(screen.queryByTestId('consumption-view')).toBeNull()
+    expect(screen.getByLabelText('Норма FIN-1 1')).toHaveValue('1.5')
+  })
 })
