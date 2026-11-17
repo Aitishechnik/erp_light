@@ -901,7 +901,7 @@ test('поступление из 1С открывается в календар
   await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [] }))
   await page.route('**/api/v1/products**', (route) => route.fulfill({ json: PRODUCTS }))
   await page.route('**/api/v1/purchase-plans**', (route) => route.fulfill({ json: [] }))
-  await page.route('**/api/v1/rates/USD', (route) =>
+  await page.route('**/api/v1/rates/USD**', (route) =>
     route.fulfill({
       json: { code: 'USD', rate_date: '2026-10-14', rate: '90.5000', nominal: 1, source: 'cbr' },
     }),
@@ -1000,7 +1000,7 @@ test('автокурс: платёж получает ЦБ + 8 % и сохран
   await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [] }))
   await page.route('**/api/v1/products**', (route) => route.fulfill({ json: PRODUCTS }))
   await page.route('**/api/v1/purchase-plans**', (route) => route.fulfill({ json: [] }))
-  await page.route('**/api/v1/rates/USD', (route) =>
+  await page.route('**/api/v1/rates/USD**', (route) =>
     route.fulfill({
       json: { code: 'USD', rate_date: '2026-10-14', rate: '90.5000', nominal: 1, source: 'cbr' },
     }),
@@ -1044,7 +1044,7 @@ test('пошлина, Risk и общие расходы считаются в к
   await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [] }))
   await page.route('**/api/v1/products**', (route) => route.fulfill({ json: PRODUCTS }))
   await page.route('**/api/v1/purchase-plans**', (route) => route.fulfill({ json: [] }))
-  await page.route('**/api/v1/rates/USD', (route) =>
+  await page.route('**/api/v1/rates/USD**', (route) =>
     route.fulfill({
       json: { code: 'USD', rate_date: '2026-10-14', rate: '90.5000', nominal: 1, source: 'cbr' },
     }),

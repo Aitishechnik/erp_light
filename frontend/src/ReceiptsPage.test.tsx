@@ -519,11 +519,15 @@ describe('ReceiptsPage — план и лимит', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Курс платежа pnew1')).toHaveValue('97.74')
     })
+    // Курс спрашивается на дату платежа, а не «на сегодня».
+    expect(fetchUrls().some((url) => url.includes(`/api/v1/rates/USD?date=${TODAY}`))).toBe(true)
     expect(screen.getByLabelText('Курс платежа pnew1')).toHaveAttribute('readonly')
     expect(screen.getByLabelText('Автокурс pnew1')).toBeChecked()
     expect(screen.getByTestId('payment-rub-pnew1')).toHaveTextContent('58 644,00')
     expect(screen.getByTestId('payment-rate-hint')).toHaveTextContent('90.5')
     expect(screen.getByTestId('payment-rate-hint')).toHaveTextContent('97.74')
+    // Пояснение убрано в «i»-значок, а не висит абзацем под таблицей.
+    expect(screen.getByText('Как работает автокурс')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Сохранить' }))
     await waitFor(() => {
@@ -558,6 +562,29 @@ describe('ReceiptsPage — план и лимит', () => {
     await user.type(screen.getByLabelText('Курс платежа p0'), '80')
     expect(screen.getByLabelText('Автокурс p0')).not.toBeChecked()
     expect(screen.getByTestId('payment-rub-p0')).toHaveTextContent('48 000,00')
+  })
+
+  it('автокурс пересчитывается при смене даты платежа', async () => {
+    const user = userEvent.setup()
+    mockApi(routes())
+    render(<ReceiptsPage />)
+
+    await screen.findByTestId('receipts-calendar')
+    await openBatch(user)
+    await user.click(screen.getByRole('button', { name: 'Платежи' }))
+    await user.click(screen.getByLabelText('Автокурс p0'))
+    await waitFor(() => {
+      expect(screen.getByLabelText('Курс платежа p0')).toHaveValue('97.74')
+    })
+
+    // Перенесли платёж на другую дату — курс должен прийти уже на неё.
+    const past = '2026-09-15'
+    await user.clear(screen.getByLabelText('Дата платежа p0'))
+    await user.type(screen.getByLabelText('Дата платежа p0'), past)
+    await waitFor(() => {
+      expect(fetchUrls().some((url) => url.includes(`/api/v1/rates/USD?date=${past}`))).toBe(true)
+    })
+    expect(screen.getByLabelText('Автокурс p0')).toBeChecked()
   })
 
   it('если ЦБ недоступен, автокурс не подставляется и объясняет почему', async () => {
@@ -611,6 +638,7 @@ describe('ReceiptsPage — план и лимит', () => {
     await openBatch(user)
     await user.click(screen.getByRole('button', { name: 'Платежи' }))
     expect(screen.queryByLabelText('Автокурс p0')).toBeNull()
+    expect(screen.queryByText('Как работает автокурс')).toBeNull()
     expect(screen.queryByTestId('payment-rate-hint')).toBeNull()
   })
 

@@ -855,13 +855,14 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
   }
 
   /**
-   * «Автокурс» — подставить курс ЦБ на сегодня + 8 %.
+   * «Автокурс» — подставить курс ЦБ на дату платежа + 8 %.
    *
-   * Курс берётся один раз: при сохранении он фиксируется в платеже как обычный
-   * ручной курс и больше не пересчитывается. Чтобы обновить оценку, нужно снять
-   * и снова включить «автокурс» (или ввести фактический курс руками).
+   * Дата берётся из платежа (по умолчанию — дата поступления, выбранная в
+   * календаре). Если на эту дату курса ещё нет — платёж в будущем, — ЦБ отдаёт
+   * последний доступный. Курс подставляется один раз и фиксируется при сохранении;
+   * при смене даты платежа пересчитывается, чтобы не остаться от старой даты.
    */
-  const applyAutoRate = async (row: PaymentDraft) => {
+  const applyAutoRate = async (key: string, day: string) => {
     if (!draft) return
     const code = draft.currency.trim().toUpperCase() || 'RUB'
     if (code === 'RUB') return
@@ -875,42 +876,43 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
         : {
             ...current,
             payments: current.payments.map((payment) =>
-              payment.key === row.key ? { ...payment, auto: true } : payment,
+              payment.key === key ? { ...payment, auto: true } : payment,
             ),
           },
     )
     try {
-      const rate = await fetchRate(code)
+      const rate = await fetchRate(code, day)
       const value = round6(number(rate.rate) * AUTO_RATE_MARKUP)
       if (value <= 0) {
-        setPaymentAutoOff(row.key)
+        setPaymentAutoOff(key)
         setPaymentRateHint({
           text: 'Курс ЦБ не получен — введите курс вручную',
           bad: true,
         })
         return
       }
-      // Пока ходили в ЦБ, галочку могли снять — курс обратно не навязываем.
+      // Пока ходили в ЦБ, галочку могли снять или сменить дату — чужой курс не навязываем.
       setDraft((current) => {
         if (current === null) return current
-        const target = current.payments.find((payment) => payment.key === row.key)
-        if (!target?.auto) return current
+        const target = current.payments.find((payment) => payment.key === key)
+        if (!target?.auto || target.date !== day) return current
         return {
           ...current,
           payments: current.payments.map((payment) =>
-            payment.key === row.key
-              ? { ...payment, rate: trim(String(value)), auto: true }
-              : payment,
+            payment.key === key ? { ...payment, rate: trim(String(value)), auto: true } : payment,
           ),
         }
       })
+      const cbrDate = ruDate(rate.rate_date)
+      const chosen = day ? ruDate(day) : ''
+      const dayNote = chosen && chosen !== cbrDate ? ` (дата платежа ${chosen})` : ''
       setPaymentRateHint({
         text:
-          `Автокурс: ЦБ ${trim(rate.rate)} на ${ruDate(rate.rate_date)} + 8 % = ` +
+          `Автокурс: ЦБ ${trim(rate.rate)} на ${cbrDate}${dayNote} + 8 % = ` +
           `${trim(String(value))} ₽. Курс зафиксируется при сохранении.`,
       })
     } catch (err) {
-      setPaymentAutoOff(row.key)
+      setPaymentAutoOff(key)
       setPaymentRateHint({
         text: `${errorMessage(err)} — введите курс вручную`,
         bad: true,
@@ -2255,6 +2257,23 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                           Добавить валютный платёж
                         </button>
                       </div>
+                      {currency !== 'RUB' ? (
+                        <details className="page-help payments-help">
+                          <summary>Как работает автокурс</summary>
+                          <div className="page-help-body">
+                            <p>
+                              Автокурс = курс ЦБ валюты партии на дату платежа + 8 %. Курс
+                              подставляется в поле и фиксируется при сохранении; при смене даты
+                              платежа пересчитывается. Если на эту дату курса ещё нет (платёж в
+                              будущем), берётся последний доступный — в выходные это курс прошлого
+                              рабочего дня.
+                            </p>
+                            <p>
+                              Чтобы записать фактический курс, снимите галочку и введите его руками.
+                            </p>
+                          </div>
+                        </details>
+                      ) : null}
                       <div className="table-scroll">
                         <table className="receipt-payments" data-testid="receipt-payments">
                           <thead>
@@ -2314,16 +2333,19 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                                       type="date"
                                       aria-label={`Дата платежа ${row.key}`}
                                       value={row.date}
-                                      onChange={(event) =>
+                                      onChange={(event) => {
+                                        const nextDate = event.target.value
                                         setDraft({
                                           ...draft,
                                           payments: draft.payments.map((payment) =>
                                             payment.key === row.key
-                                              ? { ...payment, date: event.target.value }
+                                              ? { ...payment, date: nextDate }
                                               : payment,
                                           ),
                                         })
-                                      }
+                                        // Автокурс привязан к дате платежа: сменили дату — пересчитываем.
+                                        if (row.auto) void applyAutoRate(row.key, nextDate)
+                                      }}
                                     />
                                   </td>
                                   <td className="num">
@@ -2369,7 +2391,7 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                                     {currency !== 'RUB' ? (
                                       <label
                                         className="payment-auto"
-                                        title="Курс ЦБ на сегодня + 8 %"
+                                        title="Курс ЦБ на дату платежа + 8 %"
                                       >
                                         <input
                                           type="checkbox"
@@ -2377,7 +2399,7 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
                                           checked={row.auto}
                                           onChange={(event) => {
                                             if (event.target.checked) {
-                                              void applyAutoRate(row)
+                                              void applyAutoRate(row.key, row.date)
                                               return
                                             }
                                             setPaymentRateHint(null)
@@ -2442,17 +2464,11 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
 
                       {paymentRateHint ? (
                         <p
-                          className={paymentRateHint.bad ? 'error' : 'hint'}
+                          className={`payments-rate-hint ${paymentRateHint.bad ? 'error' : 'hint'}`}
                           role={paymentRateHint.bad ? 'alert' : 'status'}
                           data-testid="payment-rate-hint"
                         >
                           {paymentRateHint.text}
-                        </p>
-                      ) : null}
-                      {currency !== 'RUB' ? (
-                        <p className="hint payments-hint">
-                          Автокурс = курс ЦБ на сегодня + 8 %; курс фиксируется при сохранении.
-                          Чтобы пересчитать — снимите и снова включите галочку.
                         </p>
                       ) : null}
 
