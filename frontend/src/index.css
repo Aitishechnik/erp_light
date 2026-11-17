@@ -2160,6 +2160,15 @@ button.primary:disabled,
   }
 }
 
+/* 125 % масштаба и уже: поля суммы и курса платежа не должны прятать цифры.
+   Лучше горизонтальная прокрутка строки, чем обрезанная сумма в деньгах. */
+@media (max-width: 1240px) {
+  .receipt-payments td:nth-child(3) input,
+  .receipt-payments td:nth-child(4) input:not([type="checkbox"]) {
+    min-width: 6.5rem;
+  }
+}
+
 /* ── Рабочее место: календарь и партии слева, карточка справа ─────────── */
 
 .receipts-head {
@@ -5709,7 +5718,7 @@ input[type="radio"] {
    места, а курс переезжает на вторую строку. */
 @media (max-width: 1400px) {
   .receipt-doc-page .doc-passport {
-    grid-template-columns: 10rem 7rem minmax(14rem, 1fr);
+    grid-template-columns: 10rem 7rem minmax(10rem, 1fr);
   }
 
   .receipt-doc-page .doc-passport .field:nth-child(1) {
