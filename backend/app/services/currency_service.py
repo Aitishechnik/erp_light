@@ -142,7 +142,12 @@ def refresh_rates(db: Session, day: date) -> list[CurrencyRate]:
 def get_rate_row(
     db: Session, code: str, day: date, *, allow_fetch: bool = True
 ) -> CurrencyRate | None:
-    """Курс на конкретную дату: из кэша или с сайта ЦБ."""
+    """Курс на конкретную дату: из кэша или с сайта ЦБ.
+
+    На будущую дату курса ещё нет — ЦБ отвечает пустым списком. Тогда отдаём
+    последний доступный курс: платежи и растаможка планируются заранее, и оценка
+    по актуальному курсу лучше, чем «курс не найден».
+    """
     currency = code.strip().upper()
     if currency == BASE_CURRENCY:
         return None
@@ -151,6 +156,8 @@ def get_rate_row(
         return row
     if not allow_fetch:
         return None
+    if day > date.today():
+        return latest_rate_row(db, currency, allow_fetch=allow_fetch)
     try:
         fetched = fetch_cbr_rates(day)
     except RateError:

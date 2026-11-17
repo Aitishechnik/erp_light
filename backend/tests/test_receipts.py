@@ -160,6 +160,23 @@ def test_unknown_currency_without_network(
     assert "введите вручную" in response.json()["detail"]
 
 
+def test_rate_for_future_date_falls_back_to_latest(
+    client: TestClient, login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """На будущую дату ЦБ пуст: отдаём последний доступный курс, а не 404.
+
+    Автокурс платежа с датой в будущем должен работать: курса на эту дату ещё нет,
+    поэтому берётся актуальный — подсказка в карточке покажет его настоящую дату.
+    """
+    login("purchase")
+    _with_cbr(monkeypatch)
+    response = client.get("/api/v1/rates/USD", params={"date": "2099-01-01"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["rate_date"] == DAY
+    assert Decimal(body["rate"]) == Decimal("90.5")
+
+
 def test_batch_rate_ignores_arrival_date(
     client: TestClient, login, monkeypatch: pytest.MonkeyPatch
 ) -> None:
