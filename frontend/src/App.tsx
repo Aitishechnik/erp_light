@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnnualSalesPlanPage } from './AnnualSalesPlanPage'
 import {
   ANNUAL_SALES_PLAN_ROLES,
@@ -16,7 +16,6 @@ import {
   IconCatalogs,
   IconLogout,
   IconMoon,
-  IconPalette,
   IconPanel,
   IconPlanning,
   IconPurchases,
@@ -35,11 +34,7 @@ import { SalesPlansPage } from './SalesPlansPage'
 import { StockPage } from './StockPage'
 import { TasksPage } from './TasksPage'
 import {
-  applyDarkVariant,
   applyTheme,
-  DARK_VARIANTS,
-  type DarkVariant,
-  readDarkVariant,
   readSidebarCollapsed,
   readTheme,
   saveSidebarCollapsed,
@@ -215,47 +210,13 @@ export function App() {
       ?.id ?? 'reports',
   )
   const [theme, setTheme] = useState<Theme>(readTheme)
-  const [darkVariant, setDarkVariant] = useState<DarkVariant>(readDarkVariant)
-  const [themeOpen, setThemeOpen] = useState(false)
   const [collapsed, setCollapsed] = useState<boolean>(readSidebarCollapsed)
-  const themeMenuRef = useRef<HTMLDivElement | null>(null)
 
   const toggleTheme = () => {
     const next: Theme = theme === 'dark' ? 'light' : 'dark'
     setTheme(next)
-    applyTheme(next, darkVariant)
+    applyTheme(next)
   }
-
-  /** Выбор палитры сразу включает тёмную тему: иначе переключение не видно. */
-  const chooseVariant = (variant: DarkVariant) => {
-    setDarkVariant(variant)
-    setTheme('dark')
-    applyDarkVariant(variant)
-  }
-
-  const chooseLight = () => {
-    setTheme('light')
-    applyTheme('light', darkVariant)
-  }
-
-  // Клик мимо панели и Esc закрывают выбор палитры, как у колокольчика.
-  useEffect(() => {
-    if (!themeOpen) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setThemeOpen(false)
-    }
-    const onPointer = (event: MouseEvent) => {
-      if (themeMenuRef.current && !themeMenuRef.current.contains(event.target as Node)) {
-        setThemeOpen(false)
-      }
-    }
-    document.addEventListener('keydown', onKey)
-    document.addEventListener('mousedown', onPointer)
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.removeEventListener('mousedown', onPointer)
-    }
-  }, [themeOpen])
 
   const toggleSidebar = () => {
     const next = !collapsed
@@ -437,79 +398,15 @@ export function App() {
               setOpenGroup('admin')
             }}
           />
-          <div className="theme-menu" ref={themeMenuRef}>
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label="Оформление"
-              title="Оформление"
-              aria-expanded={themeOpen}
-              aria-haspopup="dialog"
-              onClick={() => setThemeOpen((open) => !open)}
-            >
-              <IconPalette />
-            </button>
-            <button
-              type="button"
-              className="icon-btn theme-toggle"
-              aria-label={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
-              title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
-              onClick={toggleTheme}
-            >
-              {theme === 'dark' ? <IconSun /> : <IconMoon />}
-            </button>
-            {themeOpen ? (
-              <div className="theme-panel" role="dialog" aria-label="Оформление">
-                <div className="theme-panel-head">
-                  <strong>Оформление</strong>
-                  <span className="theme-note">Светлая тема или тёмная палитра</span>
-                </div>
-                <div className="theme-options">
-                  <button
-                    type="button"
-                    className="theme-option"
-                    aria-pressed={theme === 'light'}
-                    onClick={chooseLight}
-                  >
-                    <span className="theme-swatch" aria-hidden="true">
-                      <i style={{ background: '#f4f5fb' }} />
-                      <i style={{ background: '#ffffff' }} />
-                      <i style={{ background: '#4f46e5' }} />
-                    </span>
-                    <span className="theme-option-text">
-                      <strong>Светлая</strong>
-                      <span className="theme-note">Как сейчас</span>
-                    </span>
-                    <span className="theme-picked" aria-hidden="true">
-                      {theme === 'light' ? '✓' : ''}
-                    </span>
-                  </button>
-                  {DARK_VARIANTS.map((variant) => (
-                    <button
-                      type="button"
-                      className="theme-option"
-                      key={variant.id}
-                      aria-pressed={theme === 'dark' && darkVariant === variant.id}
-                      onClick={() => chooseVariant(variant.id)}
-                    >
-                      <span className="theme-swatch" aria-hidden="true">
-                        <i style={{ background: variant.swatches[0] }} />
-                        <i style={{ background: variant.swatches[1] }} />
-                        <i style={{ background: variant.swatches[2] }} />
-                      </span>
-                      <span className="theme-option-text">
-                        <strong>{variant.name}</strong>
-                        <span className="theme-note">{variant.note}</span>
-                      </span>
-                      <span className="theme-picked" aria-hidden="true">
-                        {theme === 'dark' && darkVariant === variant.id ? '✓' : ''}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </div>
+          <button
+            type="button"
+            className="icon-btn theme-toggle"
+            aria-label={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+            title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+            onClick={toggleTheme}
+          >
+            {theme === 'dark' ? <IconSun /> : <IconMoon />}
+          </button>
           <div className="profile">
             <div className="user-avatar" aria-hidden="true">
               {initials}

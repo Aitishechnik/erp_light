@@ -1958,14 +1958,8 @@ test('меню сворачивается, а тёмная тема запоми
   await page.getByRole('button', { name: 'Тёмная тема' }).click()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
 
-  // Палитра выбирается отдельно и переживает перезагрузку: Nord — не «Индиго».
-  await page.getByRole('button', { name: 'Оформление' }).click()
-  await page.getByRole('button', { name: /Nord/ }).click()
-  await expect(page.locator('html')).toHaveAttribute('data-dark', 'nord')
-
   await page.reload()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
-  await expect(page.locator('html')).toHaveAttribute('data-dark', 'nord')
   await expect(page.getByRole('button', { name: 'Светлая тема' })).toBeVisible()
 
   // Панель сообщений живёт в верхней панели и не обрезается меню.
