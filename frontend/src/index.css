@@ -26,6 +26,11 @@
   --shadow: 0 8px 22px rgba(30, 27, 75, 0.05);
 }
 
+/*
+ * Тёмная тема — набор палитр. data-dark выбирает вариант, не трогая data-theme:
+ * переключатель «светлая/тёмная» продолжает работать как раньше.
+ * Цветные плашки вынесены в общие переменные --tint-*, чтобы палитра меняла и их.
+ */
 [data-theme="dark"] {
   color-scheme: dark;
   --bg: #101019;
@@ -39,13 +44,135 @@
   --muted: #a2a6bd;
   --accent: #8b87f5;
   --accent-solid: #5b52e8;
-  --accent-ink: #b3afff;
+  --accent-ink: #6c64ea;
   --accent-soft: #262449;
   --hover: #222234;
   --good: #4ade80;
   --bad: #f87171;
   --warn: #fbbf24;
+  --tint-warn-bg: #2b2416;
+  --tint-warn-border: #57471f;
+  --tint-warn-fg: #fcd34d;
+  --tint-danger-bg: #341b1e;
+  --tint-danger-border: #5c2a2f;
+  --tint-danger-fg: #fca5a5;
+  --tint-good-bg: #142b1c;
+  --tint-good-fg: #6ee7a0;
+  --tint-attn-bg: #2e2214;
+  --tint-attn-fg: #fbbf24;
+  --tint-info-bg: #1f2340;
+  --tint-info-fg: #b3afff;
+  --kpi-tint: #1f2340;
   --shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+}
+
+/* Claude Code: тёплый уголь вместо синевы, терракота на кремовом тексте. */
+[data-theme="dark"][data-dark="claude"] {
+  --bg: #1a1917;
+  --surface: #22211e;
+  --surface-2: #262522;
+  --surface-3: #2d2b27;
+  --border: #38352f;
+  --border-strong: #4a463e;
+  --text: #f0eee6;
+  --text-soft: #ddd9cd;
+  --muted: #aca696;
+  --accent: #e39172;
+  --accent-solid: #b8563a;
+  --accent-ink: #a94e34;
+  --accent-soft: #38271f;
+  --hover: #2a2824;
+  --good: #a3c88f;
+  --bad: #eba088;
+  --warn: #e0b072;
+  --tint-warn-bg: #33291c;
+  --tint-warn-border: #5c4a2a;
+  --tint-warn-fg: #e8c07a;
+  --tint-danger-bg: #351f1b;
+  --tint-danger-border: #5d332b;
+  --tint-danger-fg: #eba088;
+  --tint-good-bg: #1f2a1d;
+  --tint-good-fg: #a3c88f;
+  --tint-attn-bg: #3a2c1b;
+  --tint-attn-fg: #d9a05f;
+  --tint-info-bg: #322a24;
+  --tint-info-fg: #e0a184;
+  --kpi-tint: #33251f;
+  --radius: 10px;
+  --radius-sm: 7px;
+  --shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+}
+
+/* Nord: полярная ночь, приглушённый холод и морозный голубой акцент. */
+[data-theme="dark"][data-dark="nord"] {
+  --bg: #242933;
+  --surface: #2e3440;
+  --surface-2: #343b48;
+  --surface-3: #3b4252;
+  --border: #3f4857;
+  --border-strong: #4c566a;
+  --text: #eceff4;
+  --text-soft: #d8dee9;
+  --muted: #9aa5b7;
+  --accent: #88c0d0;
+  --accent-solid: #4c6a92;
+  --accent-ink: #46618a;
+  --accent-soft: #344962;
+  --hover: #333b48;
+  --good: #b6d3a0;
+  --bad: #e08f96;
+  --warn: #ebcb8b;
+  --tint-warn-bg: #3a3326;
+  --tint-warn-border: #5a4c33;
+  --tint-warn-fg: #ebcb8b;
+  --tint-danger-bg: #3a2428;
+  --tint-danger-border: #5e343c;
+  --tint-danger-fg: #e08f96;
+  --tint-good-bg: #2b3629;
+  --tint-good-fg: #b6d3a0;
+  --tint-attn-bg: #3a3122;
+  --tint-attn-fg: #ebcb8b;
+  --tint-info-bg: #2c3648;
+  --tint-info-fg: #9fc7d8;
+  --kpi-tint: #2b3442;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* Графит: почти чёрный нейтральный холст и небесно-голубой акцент. */
+[data-theme="dark"][data-dark="graphite"] {
+  --bg: #0b0d0f;
+  --surface: #171a1d;
+  --surface-2: #1c2024;
+  --surface-3: #22272b;
+  --border: #2b3238;
+  --border-strong: #3a424a;
+  --text: #e9edf0;
+  --text-soft: #c6ced4;
+  --muted: #98a3ac;
+  --accent: #7cc4ea;
+  --accent-solid: #2b6f93;
+  --accent-ink: #23607f;
+  --accent-soft: #183a4a;
+  --hover: #1f2428;
+  --good: #7ddba4;
+  --bad: #ef9a9a;
+  --warn: #e7c168;
+  --tint-warn-bg: #2e2818;
+  --tint-warn-border: #4f4526;
+  --tint-warn-fg: #e7c168;
+  --tint-danger-bg: #302022;
+  --tint-danger-border: #543035;
+  --tint-danger-fg: #ef9a9a;
+  --tint-good-bg: #182b22;
+  --tint-good-fg: #7ddba4;
+  --tint-attn-bg: #302919;
+  --tint-attn-fg: #e2ba62;
+  --tint-info-bg: #1b2933;
+  --tint-info-fg: #86c7ea;
+  --kpi-tint: #182630;
+  --shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
 }
 
 * {
@@ -4787,13 +4914,13 @@ textarea:focus-visible {
 [data-theme="dark"] .badge-wait,
 [data-theme="dark"] .from,
 [data-theme="dark"] .purchase-table .sched-table tr.soon td {
-  background: #2b2416;
-  border-color: #57471f;
-  color: #fcd34d;
+  background: var(--tint-warn-bg);
+  border-color: var(--tint-warn-border);
+  color: var(--tint-warn-fg);
 }
 
 [data-theme="dark"] .hint.saved {
-  color: #6ee7a0;
+  color: var(--tint-good-fg);
 }
 
 [data-theme="dark"] .error,
@@ -4802,9 +4929,9 @@ textarea:focus-visible {
 [data-theme="dark"] .badge-critical,
 [data-theme="dark"] .gantt-overdue,
 [data-theme="dark"] .purchase-table .sched-table tr.overdue td {
-  background: #341b1e;
-  border-color: #5c2a2f;
-  color: #fca5a5;
+  background: var(--tint-danger-bg);
+  border-color: var(--tint-danger-border);
+  color: var(--tint-danger-fg);
 }
 
 [data-theme="dark"] .status-approved,
@@ -4813,16 +4940,16 @@ textarea:focus-visible {
 [data-theme="dark"] .need-added,
 [data-theme="dark"] .need-state.ok,
 [data-theme="dark"] .badge-open {
-  background: #142b1c;
-  color: #6ee7a0;
+  background: var(--tint-good-bg);
+  color: var(--tint-good-fg);
 }
 
 [data-theme="dark"] .status-on_review,
 [data-theme="dark"] .status-draft,
 [data-theme="dark"] .status-revision,
 [data-theme="dark"] .badge-short {
-  background: #2e2214;
-  color: #fbbf24;
+  background: var(--tint-attn-bg);
+  color: var(--tint-attn-fg);
 }
 
 [data-theme="dark"] .status-filling,
@@ -4832,8 +4959,8 @@ textarea:focus-visible {
 [data-theme="dark"] .sched-switch .mini.active,
 [data-theme="dark"] .focus-row td,
 [data-theme="dark"] .receipt-tabs .tab.active .tab-count {
-  background: #1f2340;
-  color: #b3afff;
+  background: var(--tint-info-bg);
+  color: var(--tint-info-fg);
 }
 
 [data-theme="dark"] .reason-add,
@@ -4851,7 +4978,7 @@ textarea:focus-visible {
 }
 
 [data-theme="dark"] .kpi-primary {
-  background: linear-gradient(180deg, #1f2340, var(--surface));
+  background: linear-gradient(180deg, var(--kpi-tint), var(--surface));
 }
 
 [data-theme="dark"] .priority-yellow .gantt-bar,
@@ -4860,7 +4987,7 @@ textarea:focus-visible {
 }
 
 [data-theme="dark"] .gantt-today {
-  background: #f87171;
+  background: var(--bad);
 }
 
 [data-theme="dark"] .page-help summary::before {
@@ -4919,7 +5046,7 @@ input[type="file"]::file-selector-button:hover {
 }
 
 [data-theme="dark"] {
-  scrollbar-color: #3a3a52 #181826;
+  scrollbar-color: var(--border-strong) var(--surface);
 }
 
 .sidebar {
@@ -5211,6 +5338,110 @@ input[type="radio"] {
 .topbar .icon-btn {
   width: 34px;
   height: 34px;
+}
+
+/* Выбор палитры: панель прижата к правому краю и не вылезает за окно. */
+.theme-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.theme-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  display: grid;
+  gap: 10px;
+  width: min(19rem, calc(100vw - 2rem));
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.theme-panel-head {
+  display: grid;
+  gap: 1px;
+  padding: 2px 4px 0;
+}
+
+.theme-panel-head strong {
+  font-size: 0.86rem;
+}
+
+.theme-note {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.theme-options {
+  display: grid;
+  gap: 3px;
+}
+
+.theme-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+
+.theme-option:hover {
+  background: var(--hover);
+}
+
+.theme-option[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: var(--accent-soft);
+}
+
+.theme-swatch {
+  display: flex;
+  flex: none;
+  width: 46px;
+  height: 30px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+.theme-swatch i {
+  display: block;
+  flex: 1;
+  height: 100%;
+}
+
+.theme-option-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 1px;
+}
+
+.theme-option-text strong {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.theme-picked {
+  flex: none;
+  width: 1rem;
+  color: var(--accent);
+  font-weight: 700;
+  text-align: center;
 }
 
 .topbar .bell-button {

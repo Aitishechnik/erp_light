@@ -97,6 +97,18 @@ export function IconMoon(props: SVGProps<SVGSVGElement>) {
   )
 }
 
+/** Палитра: выбор варианта тёмной темы. */
+export function IconPalette(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H16a5 5 0 0 0 5-5c0-3.9-4-7-9-7z" />
+      <circle cx="7.5" cy="11.5" r="1" />
+      <circle cx="10" cy="7.5" r="1" />
+      <circle cx="15" cy="8" r="1" />
+    </svg>
+  )
+}
+
 export function IconLogout(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base} {...props}>

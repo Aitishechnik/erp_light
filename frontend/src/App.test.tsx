@@ -54,6 +54,7 @@ beforeEach(() => {
   window.location.hash = ''
   localStorage.clear()
   delete document.documentElement.dataset.theme
+  delete document.documentElement.dataset.dark
 })
 
 afterEach(() => {
@@ -282,5 +283,28 @@ describe('App', () => {
 
     await user.click(screen.getByRole('button', { name: 'Светлая тема' }))
     expect(document.documentElement.dataset.theme).toBe('light')
+  })
+
+  it('выбирает палитру тёмной темы и запоминает её', async () => {
+    const user = userEvent.setup()
+    mockApi({ '/api/v1/auth/me': { body: MANAGER }, '/api/v1/stock': { body: [] } })
+    render(<App />)
+
+    await screen.findByText('Иван Петров')
+    await user.click(screen.getByRole('button', { name: 'Оформление' }))
+
+    expect(screen.getByRole('dialog', { name: 'Оформление' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Claude Code/ }))
+
+    // Выбор палитры сразу включает тёмную тему и запоминает вариант.
+    expect(document.documentElement.dataset.theme).toBe('dark')
+    expect(document.documentElement.dataset.dark).toBe('claude')
+    expect(localStorage.getItem('erp_lite_dark_variant')).toBe('claude')
+
+    // Переключатель «светлая/тёмная» возвращает ту же палитру.
+    await user.click(screen.getByRole('button', { name: 'Светлая тема' }))
+    expect(document.documentElement.dataset.theme).toBe('light')
+    await user.click(screen.getByRole('button', { name: 'Тёмная тема' }))
+    expect(document.documentElement.dataset.dark).toBe('claude')
   })
 })
