@@ -6105,8 +6105,8 @@ input[type="radio"] {
   text-align: right;
 }
 
-.monthly-qty {
-  width: 100%;
+input.monthly-qty {
+  width: 6.5rem;
 }
 
 .monthly-reason {
