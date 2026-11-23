@@ -348,6 +348,8 @@ describe('Закрытие месяца и решение', () => {
     return render(<MonthResultsPage user={user} />)
   }
 
+  const CLOSABLE: MonthResult = { ...RESULT, without_reason: 0 }
+
   const CLOSED: MonthResult = {
     ...RESULT,
     status: 'closed',
@@ -362,7 +364,7 @@ describe('Закрытие месяца и решение', () => {
         status: 409,
         body: { detail: 'За этот месяц нет факта продаж' },
       },
-      'month-results': { body: RESULT },
+      'month-results': { body: CLOSABLE },
       '/api/v1/products': { body: PRODUCTS },
     })
     render(<MonthResultsPage user={COMMERCIAL} />)
@@ -382,7 +384,7 @@ describe('Закрытие месяца и решение', () => {
         status: 409,
         body: { detail: 'За этот месяц нет факта продаж' },
       },
-      'month-results': { body: RESULT },
+      'month-results': { body: CLOSABLE },
       '/api/v1/products': { body: PRODUCTS },
     })
     render(<MonthResultsPage user={COMMERCIAL} />)
@@ -397,15 +399,26 @@ describe('Закрытие месяца и решение', () => {
     await waitFor(() => expect(screen.queryByText(/нет факта продаж/)).toBeNull())
   })
 
-  it('закрывает месяц через подтверждение', async () => {
+  it('не даёт закрыть месяц с расхождениями без причины', async () => {
     const user = userEvent.setup()
     setupState(RESULT)
+    const close = await screen.findByRole('button', { name: 'Закрыть месяц' })
+    expect(close).toBeDisabled()
+    expect(screen.getByTestId('close-blocked')).toHaveTextContent('3')
+
+    await user.click(close)
+    expect(screen.queryByTestId('close-confirm')).toBeNull()
+  })
+
+  it('закрывает месяц через подтверждение, когда причины есть', async () => {
+    const user = userEvent.setup()
+    setupState(CLOSABLE)
     const state = await screen.findByTestId('month-state')
     expect(state).toHaveTextContent('месяц открыт')
 
     await user.click(screen.getByRole('button', { name: 'Закрыть месяц' }))
     const confirm = screen.getByTestId('close-confirm')
-    expect(confirm).toHaveTextContent('без причины: 3')
+    expect(confirm).toHaveTextContent('без причины: 0')
 
     await user.click(within(confirm).getByRole('button', { name: 'Закрыть месяц' }))
     await waitFor(() => {

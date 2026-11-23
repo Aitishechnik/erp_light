@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.audit import AuditEvent
+from tests.helpers import fill_month_reasons
 from tests.test_month_results import sales_xlsx, upload_sales
 from tests.test_purchase_plans import (
     YEAR,
@@ -260,6 +261,7 @@ def test_month_reopen_recalculates_signals_and_carryover(
         ),
     )
     assert uploaded.status_code == 200, uploaded.text
+    fill_month_reasons(client, YEAR, MONTH)
     closed = client.post(f"/api/v1/month-results/{YEAR}/{MONTH}/close")
     assert closed.status_code == 200, closed.text
 
@@ -298,6 +300,7 @@ def test_month_reopen_recalculates_signals_and_carryover(
         ),
     )
     assert uploaded.status_code == 200, uploaded.text
+    fill_month_reasons(client, YEAR, MONTH)
     assert client.post(f"/api/v1/month-results/{YEAR}/{MONTH}/close").status_code == 200
 
     carry = list(
@@ -351,6 +354,7 @@ def test_transfer_drafts_from_month_decision(client: TestClient, login, catalog)
         },
     )
     assert decision.status_code == 200, decision.text
+    fill_month_reasons(client, YEAR, MONTH)
     assert client.post(f"/api/v1/month-results/{YEAR}/{MONTH}/close").status_code == 200
 
     drafts = client.post(f"/api/v1/month-results/{YEAR}/{MONTH}/transfer-draft")

@@ -569,7 +569,7 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
         <PageHelp>
           План продаж против факта из выгрузки 1С по клиенту и позиции. План — утверждённые планы
           менеджеров; факт — продажи за месяц, возвраты идут минусом. Сравнение по количеству: в
-          плане продаж цен нет.
+          плане продаж цен нет. Месяц не закроется, пока у каждого расхождения нет причины.
         </PageHelp>
       </header>
 
@@ -664,9 +664,26 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
                 Открыть заново
               </button>
             ) : (
-              <button type="button" className="primary" onClick={() => setConfirmClose(true)}>
-                Закрыть месяц
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={result.without_reason > 0}
+                  title={
+                    result.without_reason > 0
+                      ? 'Сначала укажите причины всех расхождений'
+                      : undefined
+                  }
+                  onClick={() => setConfirmClose(true)}
+                >
+                  Закрыть месяц
+                </button>
+                {result.without_reason > 0 ? (
+                  <span className="hint" data-testid="close-blocked">
+                    Нельзя закрыть: расхождений без причины — {result.without_reason}
+                  </span>
+                ) : null}
+              </>
             )
           ) : null}
           {mayUpload ? (

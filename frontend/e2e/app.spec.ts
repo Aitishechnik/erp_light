@@ -1427,6 +1427,7 @@ test('месяц закрывается и показывает снимок', a
   let closed = false
   const state = () => ({
     ...MONTH_RESULT,
+    without_reason: 0,
     status: closed ? 'closed' : 'open',
     closed_by_name: closed ? 'Коммерческий директор' : null,
     closed_at: closed ? '2026-10-26T10:00:00Z' : null,
@@ -2122,4 +2123,19 @@ test('план и факт: месяц раскрывается, выведен�
   await page.getByRole('row', { name: /Апрель/ }).click()
   await expect(page.getByText('выведена')).toBeVisible()
   await expect(page.getByText('Сеть вывела позицию из торговой матрицы')).toBeVisible()
+})
+
+test('месяц с расхождениями без причины не закрывается', async ({ page }) => {
+  await mockSession(page, COMMERCIAL)
+  await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/products**', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/month-results**', (route) =>
+    route.fulfill({ json: { ...MONTH_RESULT, without_reason: 2 } }),
+  )
+
+  await page.goto('/')
+  await openSection(page, 'Отчёты', 'Итоги месяца')
+
+  await expect(page.getByRole('button', { name: 'Закрыть месяц' })).toBeDisabled()
+  await expect(page.getByTestId('close-blocked')).toContainText('2')
 })

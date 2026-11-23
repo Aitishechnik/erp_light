@@ -57,3 +57,21 @@ def put_batch(client: TestClient, payload: dict[str, Any], *, expect: int = 200)
     response = client.put(f"/api/v1/batches/{draft['id']}", json=payload)
     assert response.status_code == expect, response.text
     return response.json() if expect == 200 else response
+
+
+def fill_month_reasons(client: TestClient, year: int, month: int, reason: str = "other") -> None:
+    """Проставить причину всем расхождениям месяца — без этого месяц не закрыть."""
+    body = client.get("/api/v1/month-results", params={"year": year, "month": month}).json()
+    for row in body["rows"]:
+        if row["deviation"] == "0.000" or row.get("reason"):
+            continue
+        response = client.put(
+            f"/api/v1/month-results/{year}/{month}/reasons",
+            json={
+                "client_id": row["client_id"],
+                "product_id": row["product_id"],
+                "reason": reason,
+                "comment": "причина для закрытия в тесте",
+            },
+        )
+        assert response.status_code == 200, response.text

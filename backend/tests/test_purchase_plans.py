@@ -26,6 +26,7 @@ from app.services.purchase_need import (
     split_annual,
 )
 from app.services.sales_plan_approval_service import current_hash
+from tests.helpers import fill_month_reasons
 from tests.test_month_results import sales_xlsx, upload_sales
 
 TODAY = date.today()
@@ -1378,6 +1379,7 @@ def test_close_signals_purchase_on_overperformance(
     assert uploaded.status_code == 200, uploaded.text
     assert uploaded.json()["rows_created"] == 1
 
+    fill_month_reasons(client, YEAR, 1)
     closed = client.post(f"/api/v1/month-results/{YEAR}/1/close")
     assert closed.status_code == 200, closed.text
 
@@ -1433,6 +1435,7 @@ def test_no_signal_when_fact_meets_plan(
         ),
     )
     assert uploaded.status_code == 200, uploaded.text
+    fill_month_reasons(client, YEAR, 1)
     assert client.post(f"/api/v1/month-results/{YEAR}/1/close").status_code == 200
 
     assert _signal_events(db_session) == []
@@ -1455,6 +1458,7 @@ def test_underperformance_keeps_stock_and_tells_purchase(
         ),
     )
     assert uploaded.status_code == 200, uploaded.text
+    fill_month_reasons(client, YEAR, 1)
     assert client.post(f"/api/v1/month-results/{YEAR}/1/close").status_code == 200
 
     # Перевыполнения нет: запрос пересмотра не ставится, план не растёт.
@@ -1524,6 +1528,7 @@ def test_underperformance_leftover_covers_next_months(
         ),
     )
     assert uploaded.status_code == 200, uploaded.text
+    fill_month_reasons(client, YEAR, 1)
     assert client.post(f"/api/v1/month-results/{YEAR}/1/close").status_code == 200
 
     login("purchase")
@@ -1565,6 +1570,7 @@ def test_empty_sales_report_closes_month(
     assert uploaded.json()["rows_created"] == 0
     assert uploaded.json()["rows_total"] == 0
 
+    fill_month_reasons(client, YEAR, 2)
     closed = client.post(f"/api/v1/month-results/{YEAR}/2/close")
     assert closed.status_code == 200, closed.text
     body = closed.json()

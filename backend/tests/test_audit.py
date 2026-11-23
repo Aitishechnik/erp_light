@@ -18,6 +18,7 @@ from app.models.audit import AuditEvent
 from app.models.auth import User
 from app.services import audit_service
 from app.services.plan_freeze import editable_months
+from tests.helpers import fill_month_reasons
 from tests.test_month_results import month, sales_xlsx, upload_sales
 
 
@@ -119,6 +120,7 @@ def test_month_close_and_decision_are_logged(
         },
     )
     assert decided.status_code == 200, decided.text
+    fill_month_reasons(client, 2026, 10)
     assert client.post("/api/v1/month-results/2026/10/close").status_code == 200
 
     actions = [row["action"] for row in client.get("/api/v1/audit?limit=20").json()]

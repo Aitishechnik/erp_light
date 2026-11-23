@@ -14,6 +14,7 @@ from app.models.auth import User
 from app.models.counterparties import Counterparty
 from app.models.domain import Product
 from app.models.planning import SalesPlan, SalesPlanItem
+from tests.helpers import fill_month_reasons
 
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -643,6 +644,23 @@ def test_close_fixes_snapshot_and_blocks_edits(
     assert snapshots[0].version == 1
 
 
+def test_close_blocked_until_all_reasons(
+    client: TestClient, login, catalog: dict[str, Any], db_session: Session
+) -> None:
+    """Закрыть месяц с расхождениями без причины нельзя."""
+    login("commercial")
+    _deviation_month(client, db_session, catalog)
+
+    blocked = client.post("/api/v1/month-results/2026/10/close")
+    assert blocked.status_code == 409
+    assert "без причины" in blocked.json()["detail"]
+
+    fill_month_reasons(client, 2026, 10)
+    closed = client.post("/api/v1/month-results/2026/10/close")
+    assert closed.status_code == 200, closed.text
+    assert closed.json()["status"] == "closed"
+
+
 def test_close_needs_fact_and_empty_queue(
     client: TestClient, login, catalog: dict[str, Any], db_session: Session
 ) -> None:
@@ -744,6 +762,7 @@ def test_decision_flow(
 ) -> None:
     login("commercial")
     _deviation_month(client, db_session, catalog)
+    fill_month_reasons(client, 2026, 10)
 
     no_target = client.put(
         "/api/v1/month-results/2026/10/decision",
@@ -796,6 +815,7 @@ def test_close_and_decision_permissions(
 ) -> None:
     login("commercial")
     _deviation_month(client, db_session, catalog)
+    fill_month_reasons(client, 2026, 10)
 
     login("sales")
     assert client.post("/api/v1/month-results/2026/10/close").status_code == 403
@@ -834,6 +854,7 @@ def _ready_to_transfer(
 ) -> dict[str, Any]:
     """Месяц с недобором, решением и закрытием — можно просить черновики."""
     _deviation_month(client, db_session, catalog)
+    fill_month_reasons(client, 2026, 10)
     client.put(
         "/api/v1/month-results/2026/10/decision",
         json={
@@ -903,6 +924,7 @@ def test_transfer_draft_needs_decision_and_closed_month(
 ) -> None:
     login("commercial")
     _deviation_month(client, db_session, catalog)
+    fill_month_reasons(client, 2026, 10)
     client.put(
         "/api/v1/month-results/2026/10/decision",
         json={"decision": "accept", "comment": "оставляем"},
@@ -923,6 +945,7 @@ def test_transfer_draft_skips_manager_with_open_correction(
 ) -> None:
     login("commercial")
     _deviation_month(client, db_session, catalog)
+    fill_month_reasons(client, 2026, 10)
     plan = _manager_plan(db_session)
     existing = client.post(
         "/api/v1/sales-plan-corrections", json={"plan_id": str(plan.id), "reason": "ручная"}
