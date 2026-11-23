@@ -28,6 +28,7 @@ import { MessagesPage } from './MessagesPage'
 import { MonthResultsPage } from './MonthResultsPage'
 import { NomenclaturePage } from './NomenclaturePage'
 import { NotificationsBell } from './NotificationsBell'
+import { PlanFactPage } from './PlanFactPage'
 import { PurchasePlanPage } from './PurchasePlanPage'
 import { ReceiptsPage } from './ReceiptsPage'
 import { SalesPlansPage } from './SalesPlansPage'
@@ -54,6 +55,7 @@ type SectionId =
   | 'countries'
   | 'stock'
   | 'month'
+  | 'planfact'
   | 'finance'
   | 'tasks'
   | 'imports'
@@ -130,6 +132,7 @@ const GROUPS: Group[] = [
     sections: [
       { id: 'stock', title: 'Остатки по партиям', ready: true },
       { id: 'month', title: 'Итоги месяца', ready: true, roles: MONTH_ROLES },
+      { id: 'planfact', title: 'План и факт', ready: true, roles: MONTH_ROLES },
       { id: 'finance', title: 'PnL / Cashflow', ready: false },
     ],
   },
@@ -170,6 +173,7 @@ const SECTION_TO_PATH: Record<string, string> = {
   annual: 'annual-plan',
   purchase: 'purchase-plan',
   month: 'month',
+  planfact: 'plan-fact',
   receipts: 'receipt',
   nomenclature: 'nomenclature',
   counterparties: 'counterparties',
@@ -450,6 +454,7 @@ export function App() {
           {current.id === 'month' && current.ready ? (
             <MonthResultsPage user={user} focus={focus} />
           ) : null}
+          {current.id === 'planfact' && current.ready ? <PlanFactPage user={user} /> : null}
           {current.id === 'receipts' && current.ready ? (
             <ReceiptsPage user={user} focus={focus} />
           ) : null}

@@ -86,6 +86,112 @@ export type SalesPlanItemIn = {
   quantity: string
 }
 
+/** Помесячный план: строка месяца с количеством из годового плана и причиной. */
+export type MonthlyPlanItem = {
+  client_id: string
+  client_name: string
+  product_id: string
+  product_code: string
+  product_name: string
+  unit: string
+  annual_quantity: string
+  quantity: string
+  reason: string | null
+  is_new: boolean
+  is_removed: boolean
+  updated_at: string
+  updated_by_name: string | null
+}
+
+export type MonthlyPlan = {
+  year: number
+  month: number
+  manager_id: string
+  manager_name: string
+  status: 'draft' | 'approved'
+  status_title: string
+  window_start: string
+  window_end: string
+  window_state: 'not_started' | 'open' | 'closed'
+  can_edit: boolean
+  can_approve: boolean
+  approved_at: string | null
+  approved_by_name: string | null
+  changed_lines: number
+  items: MonthlyPlanItem[]
+}
+
+export type MonthlyPlanItemIn = {
+  client_id: string
+  product_id: string
+  quantity: string
+  reason: string | null
+}
+
+export type MonthlyPlanEvent = {
+  kind: string
+  kind_title: string
+  created_at: string
+  actor_name: string | null
+  client_id: string | null
+  client_name: string | null
+  product_id: string | null
+  product_name: string | null
+  old_quantity: string | null
+  new_quantity: string | null
+  reason: string | null
+}
+
+/** Месяц на странице «План и факт». */
+export type PlanFactMonth = {
+  year: number
+  month: number
+  annual_quantity: string
+  monthly_quantity: string
+  fact_quantity: string
+  fact_loaded: boolean
+  revised: boolean
+  monthly_state: 'none' | 'partial' | 'approved'
+  month_closed: boolean
+  window_start: string
+  window_end: string
+  window_state: 'not_started' | 'open' | 'closed'
+}
+
+export type PlanFactSummary = {
+  year: number
+  annual_total: string
+  monthly_total: string
+  fact_total: string
+  months: PlanFactMonth[]
+}
+
+export type PlanFactRow = {
+  client_id: string
+  client_name: string
+  manager_id: string | null
+  manager_name: string | null
+  product_id: string
+  product_name: string
+  unit: string
+  annual_quantity: string
+  monthly_quantity: string
+  fact_quantity: string
+  plan_reason: string | null
+  fact_reason: string | null
+  is_new: boolean
+  removed: boolean
+}
+
+export type PlanFactDetail = {
+  year: number
+  month: number
+  annual_quantity: string
+  monthly_quantity: string
+  fact_quantity: string
+  rows: PlanFactRow[]
+}
+
 export type AnnualSalesPlanStatus = 'draft' | 'on_review' | 'approved' | 'revision'
 
 export type AnnualSalesPlanManager = {
@@ -960,6 +1066,69 @@ export function reopenAnnualSalesPlan(year: number, reason: string): Promise<Ann
     method: 'POST',
     body: JSON.stringify({ reason }),
   })
+}
+
+/** Помесячный план: пересмотр месяца в окне 23 — последний день предыдущего. */
+function monthlyManagerQuery(managerId?: string | null): string {
+  return managerId ? `&manager_id=${managerId}` : ''
+}
+
+export function fetchMonthlyPlan(
+  year: number,
+  month: number,
+  managerId?: string | null,
+): Promise<MonthlyPlan> {
+  return request<MonthlyPlan>(
+    `/api/v1/monthly-sales-plans?year=${year}&month=${month}${monthlyManagerQuery(managerId)}`,
+  )
+}
+
+export function saveMonthlyPlan(
+  year: number,
+  month: number,
+  items: MonthlyPlanItemIn[],
+  managerId?: string | null,
+): Promise<MonthlyPlan> {
+  return request<MonthlyPlan>(
+    `/api/v1/monthly-sales-plans/${year}/${month}${managerId ? `?manager_id=${managerId}` : ''}`,
+    { method: 'PUT', body: JSON.stringify({ items }) },
+  )
+}
+
+export function approveMonthlyPlan(
+  year: number,
+  month: number,
+  managerId?: string | null,
+): Promise<MonthlyPlan> {
+  return request<MonthlyPlan>(
+    `/api/v1/monthly-sales-plans/${year}/${month}/approve${managerId ? `?manager_id=${managerId}` : ''}`,
+    { method: 'POST' },
+  )
+}
+
+export function fetchMonthlyPlanHistory(
+  year: number,
+  month: number,
+  managerId?: string | null,
+): Promise<MonthlyPlanEvent[]> {
+  return request<MonthlyPlanEvent[]>(
+    `/api/v1/monthly-sales-plans/${year}/${month}/history${managerId ? `?manager_id=${managerId}` : ''}`,
+  )
+}
+
+/** «План и факт»: сводка года и детализация месяца. */
+export function fetchPlanFact(year: number, managerId?: string | null): Promise<PlanFactSummary> {
+  return request<PlanFactSummary>(`/api/v1/plan-fact?year=${year}${monthlyManagerQuery(managerId)}`)
+}
+
+export function fetchPlanFactMonth(
+  year: number,
+  month: number,
+  managerId?: string | null,
+): Promise<PlanFactDetail> {
+  return request<PlanFactDetail>(
+    `/api/v1/plan-fact/${year}/${month}${managerId ? `?manager_id=${managerId}` : ''}`,
+  )
 }
 
 export function fetchSalesPlanCorrections(planId: string): Promise<SalesPlanCorrection[]> {

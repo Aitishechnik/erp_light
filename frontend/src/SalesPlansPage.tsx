@@ -29,6 +29,7 @@ import {
   saveSalesPlanItems,
   submitSalesPlanCorrection,
 } from './api'
+import { MonthlyPlanTab } from './MonthlyPlanTab'
 import { PageHelp } from './PageHelp'
 
 type DraftRow = {
@@ -193,6 +194,37 @@ function countCorrectionChanges(plan: SalesPlan, drafts: Drafts): number {
   }).length
 }
 
+function PlanModeTabs({
+  mode,
+  onChange,
+}: {
+  mode: 'year' | 'month'
+  onChange: (mode: 'year' | 'month') => void
+}) {
+  return (
+    <div className="mode-tabs" role="tablist" aria-label="Режим планирования">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mode === 'year'}
+        className={mode === 'year' ? 'mode-tab active' : 'mode-tab'}
+        onClick={() => onChange('year')}
+      >
+        Год
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mode === 'month'}
+        className={mode === 'month' ? 'mode-tab active' : 'mode-tab'}
+        onClick={() => onChange('month')}
+      >
+        Месяц
+      </button>
+    </div>
+  )
+}
+
 export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: string[] }) {
   const thisYear = new Date().getFullYear()
   const [year, setYear] = useState(focus?.[0] ? Number(focus[0]) : thisYear)
@@ -216,6 +248,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
   const [correctionReason, setCorrectionReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [mode, setMode] = useState<'year' | 'month'>('year')
 
   const isCommercialDirector = user.role === 'commercial_director'
   const isExecutive = user.role === 'executive_director'
@@ -551,6 +584,32 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
     }, 'Корректировка отклонена')
   }
 
+  if (mode === 'month') {
+    return (
+      <section>
+        <header className="page-head">
+          <h1>Планирование продаж</h1>
+          <PageHelp>
+            Год — утверждённый план и корректировки. Месяц — пересмотр месяца: окно с 23-го числа
+            предыдущего месяца по его последний день. Причина обязательна для каждой изменённой
+            строки; позицию можно обнулить или добавить.
+          </PageHelp>
+          <div className="toolbar">
+            <button type="button" onClick={() => setYear(year - 1)} aria-label="Предыдущий год">
+              ←
+            </button>
+            <strong>{year}</strong>
+            <button type="button" onClick={() => setYear(year + 1)} aria-label="Следующий год">
+              →
+            </button>
+          </div>
+        </header>
+        <PlanModeTabs mode={mode} onChange={setMode} />
+        <MonthlyPlanTab user={user} year={year} managers={managers} />
+      </section>
+    )
+  }
+
   return (
     <section>
       <header className="page-head">
@@ -609,6 +668,8 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
           ) : null}
         </div>
       </header>
+
+      <PlanModeTabs mode={mode} onChange={setMode} />
 
       {error ? (
         <p className="error" role="alert">

@@ -28,6 +28,7 @@ from app.models.auth import (
 )
 from app.models.counterparties import Counterparty
 from app.models.domain import Product
+from app.models.monthly_plans import MonthlySalesPlan
 from app.models.planning import SalesPlan
 from app.models.sales import (
     REASON_CODES,
@@ -103,7 +104,11 @@ class MonthSummary:
 def _plan_map(
     db: Session, year: int, month: int
 ) -> dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, set[uuid.UUID]]]:
-    """План по ключу клиент × товар: количество и менеджеры, которые его запланировали."""
+    """План по ключу клиент × товар: количество и менеджеры, которые его запланировали.
+
+    Если у менеджера есть утверждённый помесячный план на этот месяц, берём его:
+    это и есть актуальный план месяца. Иначе месяц равен годовому плану.
+    """
     plans = (
         db.execute(
             select(SalesPlan)
@@ -113,14 +118,58 @@ def _plan_map(
         .scalars()
         .all()
     )
+    monthly = {
+        plan.manager_id: plan
+        for plan in db.execute(
+            select(MonthlySalesPlan)
+            .where(
+                MonthlySalesPlan.year == year,
+                MonthlySalesPlan.month == month,
+                MonthlySalesPlan.status == "approved",
+            )
+            .options(selectinload(MonthlySalesPlan.items))
+        )
+        .scalars()
+        .all()
+    }
     result: dict[tuple[uuid.UUID, uuid.UUID], tuple[Decimal, set[uuid.UUID]]] = {}
+
+    def add(
+        client_id: uuid.UUID, product_id: uuid.UUID, quantity: Decimal, manager_id: uuid.UUID
+    ) -> None:
+        key = (client_id, product_id)
+        current, managers = result.get(key, (ZERO, set()))
+        result[key] = (current + quantity, managers | {manager_id})
+
     for plan in plans:
-        for item in plan.items:
-            if item.month != month:
+        month_plan = monthly.pop(plan.manager_id, None)
+        if month_plan is not None:
+            for monthly_item in month_plan.items:
+                add(
+                    monthly_item.client_id,
+                    monthly_item.product_id,
+                    monthly_item.quantity,
+                    plan.manager_id,
+                )
+            continue
+        for annual_item in plan.items:
+            if annual_item.month != month:
                 continue
-            key = (item.client_id, item.product_id)
-            quantity, managers = result.get(key, (ZERO, set()))
-            result[key] = (quantity + item.quantity, managers | {plan.manager_id})
+            add(
+                annual_item.client_id,
+                annual_item.product_id,
+                annual_item.quantity,
+                plan.manager_id,
+            )
+    # План месяца мог появиться и без строк годового плана (только новые позиции).
+    for manager_id, month_plan in monthly.items():
+        for monthly_item in month_plan.items:
+            add(
+                monthly_item.client_id,
+                monthly_item.product_id,
+                monthly_item.quantity,
+                manager_id,
+            )
     return result
 
 

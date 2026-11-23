@@ -1972,3 +1972,154 @@ test('меню сворачивается, а тёмная тема запоми
   expect(panel.x).toBeGreaterThan(250)
   expect(panel.x + panel.width).toBeLessThanOrEqual(viewport.width)
 })
+
+test('месячный план: вкладка, причина обязательна, сохранение', async ({ page }) => {
+  await mockSession(page, MANAGER)
+  await page.route('**/api/v1/messages/count', (route) => route.fulfill({ json: { unread: 0 } }))
+  await page.route('**/api/v1/sales-plans**', (route) => route.fulfill({ json: [plan()] }))
+  await page.route('**/api/v1/sales-plan-corrections**', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/products**', (route) =>
+    route.fulfill({
+      json: [
+        { id: 'p-1', code: 'SKU-1', name: 'Изюм', kind: 'finished', unit: 'кг', is_active: true },
+      ],
+    }),
+  )
+  await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [] }))
+
+  const monthly = {
+    year: YEAR,
+    month: 12,
+    manager_id: 'sm-1',
+    manager_name: 'Иван Петров',
+    status: 'draft',
+    status_title: 'Черновик',
+    window_start: `${YEAR}-11-23`,
+    window_end: `${YEAR}-11-30`,
+    window_state: 'open',
+    can_edit: true,
+    can_approve: false,
+    approved_at: null,
+    approved_by_name: null,
+    changed_lines: 0,
+    items: [
+      {
+        client_id: 'client-1',
+        client_name: 'ООО Ромашка',
+        product_id: 'p-1',
+        product_code: 'SKU-1',
+        product_name: 'Изюм',
+        unit: 'кг',
+        annual_quantity: '100.000',
+        quantity: '100.000',
+        reason: null,
+        is_new: false,
+        is_removed: false,
+        updated_at: '2026-11-23T10:00:00Z',
+        updated_by_name: 'Иван Петров',
+      },
+    ],
+  }
+  await page.route(`**/api/v1/monthly-sales-plans/${YEAR}/12**`, (route) => {
+    if (route.request().method() === 'PUT') {
+      return route.fulfill({
+        json: {
+          ...monthly,
+          changed_lines: 1,
+          items: monthly.items.map((item) => ({
+            ...item,
+            quantity: '110.000',
+            reason: 'Клиент подтвердил',
+          })),
+        },
+      })
+    }
+    return route.fulfill({ json: monthly })
+  })
+  await page.route(`**/api/v1/monthly-sales-plans/${YEAR}/12/history**`, (route) =>
+    route.fulfill({ json: [] }),
+  )
+  await page.route('**/api/v1/monthly-sales-plans?**', (route) => route.fulfill({ json: monthly }))
+
+  await page.goto(`/#/sales-plan/${YEAR}`)
+  await page.getByRole('tab', { name: 'Месяц' }).click()
+  await page.getByLabel('Месяц плана').selectOption('12')
+
+  await expect(page.getByText('Годовой план на месяц')).toBeVisible()
+  await page.getByLabel('Количество Изюм').fill('110')
+  await expect(page.getByLabel('Причина Изюм')).toBeEnabled()
+  await page.getByRole('button', { name: 'Сохранить' }).click()
+  await expect(page.getByRole('alert')).toContainText('Укажите причину')
+
+  await page.getByLabel('Причина Изюм').fill('Клиент подтвердил')
+  await page.getByRole('button', { name: 'Сохранить' }).click()
+  await expect(page.getByText('План месяца сохранён')).toBeVisible()
+})
+
+test('план и факт: месяц раскрывается, выведенная позиция видна', async ({ page }) => {
+  await mockSession(page, MANAGER)
+  await page.route('**/api/v1/messages/count', (route) => route.fulfill({ json: { unread: 0 } }))
+
+  const month = (index: number) => ({
+    year: YEAR,
+    month: index + 1,
+    annual_quantity: '1000.000',
+    monthly_quantity: index < 5 ? '1100.000' : '1000.000',
+    fact_quantity: index < 4 ? '900.000' : '0.000',
+    fact_loaded: index < 4,
+    revised: index < 5,
+    monthly_state: index < 5 ? 'approved' : 'none',
+    month_closed: index < 3,
+    window_start: `${YEAR}-01-23`,
+    window_end: `${YEAR}-01-31`,
+    window_state: 'closed',
+  })
+  const months = Array.from({ length: 12 }, (_, index) => month(index))
+
+  await page.route(`**/api/v1/plan-fact/${YEAR}/4`, (route) =>
+    route.fulfill({
+      json: {
+        year: YEAR,
+        month: 4,
+        annual_quantity: '150.000',
+        monthly_quantity: '150.000',
+        fact_quantity: '130.000',
+        rows: [
+          {
+            client_id: 'client-1',
+            client_name: 'ООО Ромашка',
+            manager_id: 'sm-1',
+            manager_name: 'Иван Петров',
+            product_id: 'p-2',
+            product_name: 'Курага',
+            unit: 'кг',
+            annual_quantity: '50.000',
+            monthly_quantity: '0.000',
+            fact_quantity: '0.000',
+            plan_reason: 'Сеть вывела позицию из торговой матрицы',
+            fact_reason: null,
+            is_new: false,
+            removed: true,
+          },
+        ],
+      },
+    }),
+  )
+  await page.route('**/api/v1/plan-fact?year=*', (route) =>
+    route.fulfill({
+      json: {
+        year: YEAR,
+        annual_total: '12000.000',
+        monthly_total: '12500.000',
+        fact_total: '3600.000',
+        months,
+      },
+    }),
+  )
+
+  await page.goto('/#/plan-fact')
+  await expect(page.getByRole('heading', { name: 'План и факт' })).toBeVisible()
+  await page.getByRole('row', { name: /Апрель/ }).click()
+  await expect(page.getByText('выведена')).toBeVisible()
+  await expect(page.getByText('Сеть вывела позицию из торговой матрицы')).toBeVisible()
+})

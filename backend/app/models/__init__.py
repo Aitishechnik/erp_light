@@ -28,6 +28,14 @@ from app.models.domain import (
     Product,
     StockSnapshot,
 )
+from app.models.monthly_plans import (
+    MONTHLY_PLAN_EVENT_TITLES,
+    MONTHLY_PLAN_STATUS_TITLES,
+    MONTHLY_PLAN_STATUSES,
+    MonthlySalesPlan,
+    MonthlySalesPlanEvent,
+    MonthlySalesPlanItem,
+)
 from app.models.planning import (
     PURCHASE_PLAN_STATUS_TITLES,
     PURCHASE_PLAN_STATUSES,
@@ -93,6 +101,12 @@ __all__ = [
     "SALES_PLAN_APPROVAL_STATUS_TITLES",
     "SALES_PLAN_CORRECTION_STATUSES",
     "SALES_PLAN_CORRECTION_STATUS_TITLES",
+    "MONTHLY_PLAN_EVENT_TITLES",
+    "MONTHLY_PLAN_STATUSES",
+    "MONTHLY_PLAN_STATUS_TITLES",
+    "MonthlySalesPlan",
+    "MonthlySalesPlanEvent",
+    "MonthlySalesPlanItem",
     "SALES_PLAN_STATUSES",
     "SALES_PLAN_STATUS_TITLES",
     "SOURCES",
