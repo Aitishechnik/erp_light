@@ -194,8 +194,8 @@ export function MonthlyPlanTab({
   const monthlyTotal = Object.keys(drafts).reduce((sum, key) => sum + monthlyOf(drafts[key]), 0)
   const changedLines = Object.keys(drafts).filter((key) => isChanged(key)).length
   const missingReasons = Object.keys(drafts).filter((key) => {
-    if (!isChanged(key)) return false
-    return !(drafts[key]?.reason ?? '').trim()
+    const below = monthlyOf(drafts[key]) < annualOf(key)
+    return below && !(drafts[key]?.reason ?? '').trim()
   }).length
 
   const setDraft = (key: string, patch: Partial<Draft>) => {
@@ -230,10 +230,11 @@ export function MonthlyPlanTab({
         setError(`Количество «${draft.quantity}» — не число`)
         return
       }
-      const changed = Number(quantity) !== annualOf(key)
-      if (changed && !draft.reason.trim()) {
+      const quantityNumber = Number(quantity)
+      const changed = quantityNumber !== annualOf(key)
+      if (quantityNumber < annualOf(key) && !draft.reason.trim()) {
         setError(
-          `Укажите причину: «${clientName(clientId)}», ${productName(productId)} — цифра отличается от годового плана`,
+          `Укажите причину: «${clientName(clientId)}», ${productName(productId)} — цифра ниже годового плана`,
         )
         return
       }
@@ -241,7 +242,7 @@ export function MonthlyPlanTab({
         client_id: clientId,
         product_id: productId,
         quantity,
-        reason: changed ? draft.reason.trim() : null,
+        reason: changed && draft.reason.trim() ? draft.reason.trim() : null,
       })
     }
     setBusy(true)
@@ -336,7 +337,7 @@ export function MonthlyPlanTab({
               type="button"
               className="primary"
               disabled={busy || missingReasons > 0}
-              title={missingReasons > 0 ? 'Есть строки без причины' : undefined}
+              title={missingReasons > 0 ? 'Есть снижение ниже плана без причины' : undefined}
               onClick={() => void approve()}
             >
               Утвердить
@@ -382,7 +383,9 @@ export function MonthlyPlanTab({
                 {changedLines} из {Object.keys(drafts).length}
               </span>
               <span className={missingReasons > 0 ? 'kpi-sub delta-bad' : 'kpi-sub'}>
-                {missingReasons > 0 ? `${missingReasons} без причины` : 'у всех есть причина'}
+                {missingReasons > 0
+                  ? `${missingReasons} снижений без причины`
+                  : 'обязательные причины заполнены'}
               </span>
             </div>
           </div>
@@ -633,7 +636,7 @@ function MonthlyRow({
           aria-label={`Причина ${productName}`}
           value={draft?.reason ?? ''}
           disabled={!editable || !changed}
-          placeholder={changed ? 'Причина обязательна' : '—'}
+          placeholder={changed ? (monthly < annual ? 'Причина обязательна' : 'Необязательно') : '—'}
           onChange={(event) => onChange({ reason: event.target.value })}
         />
       </td>

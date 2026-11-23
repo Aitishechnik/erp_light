@@ -125,7 +125,7 @@ def test_window_is_23_to_last_day_of_previous_month() -> None:
     assert window_state(2026, 12, today=date(2026, 12, 1)) == "closed"
 
 
-def test_plan_copies_annual_and_change_requires_reason(
+def test_decrease_below_annual_requires_reason(
     client: TestClient,
     login,
     setup: dict[str, Any],
@@ -142,27 +142,71 @@ def test_plan_copies_annual_and_change_requires_reason(
     assert all(item["annual_quantity"] == item["quantity"] for item in plan["items"])
 
     items = _items(plan)
-    items[0]["quantity"] = "110.000"
-    items[0]["reason"] = None
+    target = next(
+        item
+        for item in items
+        if item["client_id"] == str(setup["first"].id)
+        and item["product_id"] == str(setup["product"].id)
+    )
+    target["quantity"] = "90.000"
+    target["reason"] = None
     denied = client.put("/api/v1/monthly-sales-plans/2026/12", json={"items": items})
     assert denied.status_code == 400
     assert "причину" in denied.json()["detail"]
+    assert "ниже годового плана" in denied.json()["detail"]
 
-    items[0]["reason"] = "Клиент подтвердил доп. объём"
+    target["reason"] = "Клиент сократил объём"
     saved = client.put("/api/v1/monthly-sales-plans/2026/12", json={"items": items})
     assert saved.status_code == 200, saved.text
     body = saved.json()
     assert body["changed_lines"] == 1
-    changed = next(item for item in body["items"] if item["quantity"] == "110.000")
-    assert changed["reason"] == "Клиент подтвердил доп. объём"
+    changed = next(item for item in body["items"] if item["quantity"] == "90.000")
+    assert changed["reason"] == "Клиент сократил объём"
 
     history = client.get("/api/v1/monthly-sales-plans/2026/12/history")
     assert history.status_code == 200, history.text
     events = history.json()
     assert len(events) == 1
     assert events[0]["kind"] == "edit"
-    assert events[0]["new_quantity"] == "110.000"
-    assert events[0]["reason"] == "Клиент подтвердил доп. объём"
+    assert events[0]["new_quantity"] == "90.000"
+    assert events[0]["reason"] == "Клиент сократил объём"
+
+
+def test_increase_above_annual_needs_no_reason(
+    client: TestClient,
+    login,
+    setup: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _freeze(monkeypatch, date(2026, 11, 25))
+    login("sales")
+    plan = _plan(client)
+    items = _items(plan)
+    target = next(
+        item
+        for item in items
+        if item["client_id"] == str(setup["first"].id)
+        and item["product_id"] == str(setup["product"].id)
+    )
+    target["quantity"] = "110.000"
+    target["reason"] = None
+    # Новая позиция: в годовом плане её нет, значит это повышение с нуля.
+    items.append(
+        {
+            "client_id": str(setup["second"].id),
+            "product_id": str(setup["product2"].id),
+            "quantity": "40.000",
+            "reason": None,
+        }
+    )
+    saved = client.put("/api/v1/monthly-sales-plans/2026/12", json={"items": items})
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    increased = next(item for item in body["items"] if item["quantity"] == "110.000")
+    assert increased["reason"] is None
+    fresh = next(item for item in body["items"] if item["is_new"] is True)
+    assert fresh["quantity"] == "40.000"
+    assert fresh["reason"] is None
 
 
 def test_removed_and_new_positions_show_in_plan_fact(

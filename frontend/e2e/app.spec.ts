@@ -2046,7 +2046,7 @@ test('месячный план: вкладка, причина обязател
   await page.getByLabel('Месяц плана').selectOption('12')
 
   await expect(page.getByText('Годовой план на месяц')).toBeVisible()
-  await page.getByLabel('Количество Изюм').fill('110')
+  await page.getByLabel('Количество Изюм').fill('90')
   await expect(page.getByLabel('Причина Изюм')).toBeEnabled()
   await page.getByRole('button', { name: 'Сохранить' }).click()
   await expect(page.getByRole('alert')).toContainText('Укажите причину')

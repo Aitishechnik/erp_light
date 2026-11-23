@@ -1,10 +1,10 @@
 """Помесячный план продаж: окно пересмотра, правка строк, утверждение.
 
 Окно — с 23-го числа предыдущего месяца по его последний день. В окне менеджер
-правит количество по своим клиентам и товарам; изменение цифры без причины не
-сохраняется. После окна план фиксируется: если его не утвердили вручную, он
-утверждается автоматически. Если месяц не трогали, помесячного плана нет —
-в сравнении он равен годовому.
+правит количество по своим клиентам и товарам. Снижение ниже годового плана
+требует причины, повышение — по желанию. После окна план фиксируется: если его
+не утвердили вручную, он утверждается автоматически. Если месяц не трогали,
+помесячного плана нет — в сравнении он равен годовому.
 """
 
 from __future__ import annotations
@@ -417,15 +417,14 @@ def update_items(
         annual_quantity = (
             previous.annual_quantity if previous is not None else annual.get(key, ZERO)
         )
-        reason: str | None = (item.reason or "").strip()
-        if item.quantity != annual_quantity and not reason:
+        reason: str | None = (item.reason or "").strip() or None
+        if item.quantity < annual_quantity and not reason:
             client = db.get(Counterparty, item.client_id)
             product = db.get(Product, item.product_id)
             client_name = client.name if client is not None else "клиент"
             product_name = product.name if product is not None else "позиция"
             raise MonthlyPlanError(
-                f"Укажите причину: «{client_name}», {product_name} — "
-                "цифра отличается от годового плана"
+                f"Укажите причину: «{client_name}», {product_name} — " "цифра ниже годового плана"
             )
         if item.quantity == annual_quantity:
             reason = None
@@ -501,8 +500,10 @@ def approve(
     if plan.status != "draft":
         raise MonthlyPlanError("План уже утверждён", status_code=409)
     for item in plan.items:
-        if item.quantity != item.annual_quantity and not (item.reason or "").strip():
-            raise MonthlyPlanError("В плане есть строка без причины — утвердить нельзя")
+        if item.quantity < item.annual_quantity and not (item.reason or "").strip():
+            raise MonthlyPlanError(
+                "В плане есть снижение ниже годового плана без причины — утвердить нельзя"
+            )
     plan.status = "approved"
     plan.approved_at = _now()
     plan.approved_by_id = user.id

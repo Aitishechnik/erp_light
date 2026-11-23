@@ -84,7 +84,7 @@ function putBodies(): string[] {
 }
 
 describe('MonthlyPlanTab', () => {
-  it('показывает годовой и месячный план и требует причину для изменённой строки', async () => {
+  it('показывает годовой и месячный план и требует причину при снижении', async () => {
     mockApi(routes())
     render(<MonthlyPlanTab user={SALES} year={2026} managers={[]} />)
     await userEvent.selectOptions(await screen.findByLabelText('Месяц плана'), '12')
@@ -94,7 +94,7 @@ describe('MonthlyPlanTab', () => {
 
     const input = screen.getByLabelText('Количество Изюм')
     await userEvent.clear(input)
-    await userEvent.type(input, '110')
+    await userEvent.type(input, '90')
 
     const reason = screen.getByLabelText('Причина Изюм')
     expect(reason).toBeEnabled()
@@ -102,6 +102,32 @@ describe('MonthlyPlanTab', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Укажите причину')
     expect(putBodies()).toHaveLength(0)
+  })
+
+  it('повышение выше плана сохраняется без причины', async () => {
+    mockApi(
+      routes({
+        'PUT /api/v1/monthly-sales-plans/2026/12': {
+          body: {
+            ...PLAN,
+            changed_lines: 1,
+            items: [{ ...PLAN.items[0], quantity: '110.000', reason: null }, PLAN.items[1]],
+          },
+        },
+      }),
+    )
+    render(<MonthlyPlanTab user={SALES} year={2026} managers={[]} />)
+    await userEvent.selectOptions(await screen.findByLabelText('Месяц плана'), '12')
+
+    const input = await screen.findByLabelText('Количество Изюм')
+    await userEvent.clear(input)
+    await userEvent.type(input, '110')
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }))
+
+    await waitFor(() => expect(putBodies()).toHaveLength(1))
+    const body = JSON.parse(putBodies()[0] ?? '{}') as { items: { reason: string | null }[] }
+    expect(body.items[0]?.reason).toBeNull()
+    expect(await screen.findByText('План месяца сохранён')).toBeInTheDocument()
   })
 
   it('сохраняет изменённую строку с причиной', async () => {
