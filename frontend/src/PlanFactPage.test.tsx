@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PlanFactDetail, PlanFactMonth, PlanFactSummary, SessionUser } from './api'
 import { mockApi } from './apiMock'
-import { PlanFactPage } from './PlanFactPage'
+import { PlanFactPage, tone } from './PlanFactPage'
 
 const SALES: SessionUser = {
   id: 'sm-1',
@@ -91,11 +91,37 @@ const DETAIL: PlanFactDetail = {
       is_new: true,
       removed: false,
     },
+    {
+      client_id: 'c-2',
+      client_name: 'ООО Поле',
+      manager_id: 'sm-1',
+      manager_name: 'Менеджер по продажам',
+      product_id: 'p-4',
+      product_name: 'Новинка',
+      unit: 'кг',
+      annual_quantity: '0.000',
+      monthly_quantity: '0.000',
+      fact_quantity: '20000.000',
+      plan_reason: null,
+      fact_reason: null,
+      is_new: false,
+      removed: false,
+    },
   ],
 }
 
 afterEach(() => {
   vi.unstubAllGlobals()
+})
+
+describe('tone', () => {
+  it('красит любое отклонение по знаку, даже когда плана нет', () => {
+    expect(tone(1)).toBe('delta-good')
+    expect(tone(20000)).toBe('delta-good')
+    expect(tone(-1)).toBe('delta-bad')
+    expect(tone(0)).toBe('')
+    expect(tone(null)).toBe('muted')
+  })
 })
 
 describe('PlanFactPage', () => {
@@ -106,8 +132,8 @@ describe('PlanFactPage', () => {
     })
     render(<PlanFactPage user={SALES} initialYear={2026} />)
 
-    expect(await screen.findByText(/12\s*000\s*кг/)).toBeInTheDocument()
-    expect(screen.getByText(/12\s*500\s*кг/)).toBeInTheDocument()
+    expect(await screen.findByText(/12\s*000(,\d+)?\s*кг/)).toBeInTheDocument()
+    expect(screen.getByText(/12\s*500(,\d+)?\s*кг/)).toBeInTheDocument()
 
     await userEvent.click(screen.getByText('Апрель'))
     await waitFor(() => expect(screen.getByText('Курага')).toBeInTheDocument())
@@ -116,6 +142,9 @@ describe('PlanFactPage', () => {
     expect(screen.getByText('новая')).toBeInTheDocument()
     expect(screen.getByText('Сеть вывела позицию из торговой матрицы')).toBeInTheDocument()
     expect(screen.getByText('Товар не пришёл вовремя')).toBeInTheDocument()
+
+    const abovePlan = screen.getByText('+20 000,00')
+    expect(abovePlan.className).toContain('delta-good')
   })
 
   it('месяц без пересмотра помечен как непересмотренный', async () => {

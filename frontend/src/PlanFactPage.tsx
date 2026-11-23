@@ -4,7 +4,6 @@ import {
   fetchPlanFact,
   fetchPlanFactMonth,
   fetchUsers,
-  formatQuantity,
   MONTH_SHORT,
   MONTH_TITLES,
   type PlanFactDetail,
@@ -14,6 +13,18 @@ import {
   type SessionUser,
 } from './api'
 import { PageHelp } from './PageHelp'
+
+const QTY_FORMAT = new Intl.NumberFormat('ru-RU', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+const INT_FORMAT = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
+
+function formatQty(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === '') return '—'
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? QTY_FORMAT.format(parsed) : String(value)
+}
 
 const BAR_ANNUAL = 'var(--accent-soft)'
 const BAR_MONTHLY = 'var(--accent)'
@@ -35,15 +46,21 @@ function percent(value: number | null): string {
   return `${value.toFixed(1).replace('.', ',')} %`
 }
 
-function tone(value: number | null, delta: number | null): string {
-  if (value === null || delta === null) return 'muted'
-  if (value >= 100) return 'delta-good'
-  if (value >= 95) return ''
-  return 'delta-bad'
+/** Цвет отклонения: зелёный — факт выше плана, красный — ниже. Без плана — по знаку дельты. */
+export function tone(delta: number | null): string {
+  if (delta === null) return 'muted'
+  if (delta > 0) return 'delta-good'
+  if (delta < 0) return 'delta-bad'
+  return ''
+}
+
+function percentTone(value: number | null, delta: number | null): string {
+  if (value === null) return 'muted'
+  return tone(delta)
 }
 
 function signed(value: number): string {
-  const formatted = formatQuantity(String(Math.abs(value)))
+  const formatted = formatQty(String(Math.abs(value)))
   return `${value > 0 ? '+' : value < 0 ? '−' : ''}${formatted}`
 }
 
@@ -64,7 +81,7 @@ function MonthStatus({ month }: { month: PlanFactMonth }) {
 }
 
 function Reasons({ row }: { row: PlanFactRow }) {
-  if (!row.plan_reason && !row.fact_reason) return <span className="muted">—</span>
+  if (!row.plan_reason && !row.fact_reason) return null
   return (
     <div className="reason-stack">
       {row.plan_reason ? (
@@ -108,7 +125,7 @@ function Chart({ months }: { months: PlanFactMonth[] }) {
           <g key={part}>
             <line x1={left} x2={width - right} y1={y(value)} y2={y(value)} stroke={GRID} />
             <text x={left - 9} y={y(value) + 3.5} textAnchor="end" fontSize="10" fill={MUTED}>
-              {formatQuantity(String(Math.round(value)))}
+              {INT_FORMAT.format(Math.round(value))}
             </text>
           </g>
         )
@@ -249,9 +266,9 @@ function DetailPanel({
         <tfoot>
           <tr>
             <td>Итого</td>
-            <td className="num">{formatQuantity(detail.annual_quantity)}</td>
-            <td className="num">{formatQuantity(detail.monthly_quantity)}</td>
-            <td className="num">{formatQuantity(detail.fact_quantity)}</td>
+            <td className="num">{formatQty(detail.annual_quantity)}</td>
+            <td className="num">{formatQty(detail.monthly_quantity)}</td>
+            <td className="num">{formatQty(detail.fact_quantity)}</td>
             <td className="num">
               {percent(share(number(detail.fact_quantity), number(detail.monthly_quantity)))}
             </td>
@@ -295,18 +312,19 @@ function ClientGroup({
           {rows[0]?.client_name}
           <span className="hint"> · {rows.length} позиций</span>
         </td>
-        <td className="num">{formatQuantity(String(annual))}</td>
-        <td className="num">{formatQuantity(String(monthly))}</td>
-        <td className="num">{formatQuantity(String(fact))}</td>
-        <td className={`num ${tone(value, delta)}`}>{percent(value)}</td>
-        <td className={`num ${tone(value, delta)}`}>{signed(delta)}</td>
+        <td className="num">{formatQty(String(annual))}</td>
+        <td className="num">{formatQty(String(monthly))}</td>
+        <td className="num">{formatQty(String(fact))}</td>
+        <td className={`num ${percentTone(value, delta)}`}>{percent(value)}</td>
+        <td className={`num ${tone(delta)}`}>{signed(delta)}</td>
         <td>
-          <span className="hint">
-            {planReasons > 0 ? `план: ${planReasons}` : ''}
-            {planReasons > 0 && factReasons > 0 ? ' · ' : ''}
-            {factReasons > 0 ? `факт: ${factReasons}` : ''}
-            {planReasons === 0 && factReasons === 0 ? '—' : ''}
-          </span>
+          {planReasons > 0 || factReasons > 0 ? (
+            <span className="plan-fact-reason-count">
+              {planReasons > 0 ? `план: ${planReasons}` : ''}
+              {planReasons > 0 && factReasons > 0 ? ' · ' : ''}
+              {factReasons > 0 ? `факт: ${factReasons}` : ''}
+            </span>
+          ) : null}
         </td>
       </tr>
       {expanded
@@ -326,12 +344,12 @@ function ClientGroup({
                 <td className="num">
                   {row.is_new && number(row.annual_quantity) === 0
                     ? '—'
-                    : formatQuantity(row.annual_quantity)}
+                    : formatQty(row.annual_quantity)}
                 </td>
-                <td className="num">{formatQuantity(row.monthly_quantity)}</td>
-                <td className="num">{formatQuantity(row.fact_quantity)}</td>
-                <td className={`num ${tone(rowValue, rowDelta)}`}>{percent(rowValue)}</td>
-                <td className={`num ${tone(rowValue, rowDelta)}`}>
+                <td className="num">{formatQty(row.monthly_quantity)}</td>
+                <td className="num">{formatQty(row.fact_quantity)}</td>
+                <td className={`num ${percentTone(rowValue, rowDelta)}`}>{percent(rowValue)}</td>
+                <td className={`num ${tone(rowDelta)}`}>
                   {rowDelta === 0 ? '0' : signed(rowDelta)}
                 </td>
                 <td>
@@ -461,17 +479,17 @@ export function PlanFactPage({ user, initialYear }: { user: SessionUser; initial
           <div className="kpis kpis-3 plan-fact-kpis">
             <div className="kpi">
               <span className="kpi-label">Годовой план</span>
-              <span className="kpi-value">{formatQuantity(String(annualTotal))} кг</span>
+              <span className="kpi-value">{formatQty(String(annualTotal))} кг</span>
               <span className="kpi-sub">12 месяцев · утверждённые планы</span>
             </div>
             <div className="kpi">
               <span className="kpi-label">Месячный план</span>
-              <span className="kpi-value">{formatQuantity(String(monthlyTotal))} кг</span>
+              <span className="kpi-value">{formatQty(String(monthlyTotal))} кг</span>
               <span className="kpi-sub">{approvedMonths} из 12 месяцев утверждены</span>
             </div>
             <div className="kpi kpi-primary">
               <span className="kpi-label">Факт с начала года</span>
-              <span className="kpi-value">{formatQuantity(String(factTotal))} кг</span>
+              <span className="kpi-value">{formatQty(String(factTotal))} кг</span>
               <span className="kpi-sub">
                 {percent(share(ytdFact, ytdMonthly))} месячного ·{' '}
                 {percent(share(factTotal, annualTotal))} года
@@ -538,10 +556,10 @@ export function PlanFactPage({ user, initialYear }: { user: SessionUser; initial
               <tfoot>
                 <tr>
                   <td>Итого</td>
-                  <td className="num">{formatQuantity(String(annualTotal))}</td>
-                  <td className="num">{formatQuantity(String(monthlyTotal))}</td>
+                  <td className="num">{formatQty(String(annualTotal))}</td>
+                  <td className="num">{formatQty(String(monthlyTotal))}</td>
                   <td className="num">{signed(monthlyTotal - annualTotal)}</td>
-                  <td className="num">{formatQuantity(String(factTotal))}</td>
+                  <td className="num">{formatQty(String(factTotal))}</td>
                   <td className="num">{percent(share(ytdFact, ytdMonthly))}</td>
                   <td className="num">{signed(ytdFact - ytdMonthly)}</td>
                   <td>
@@ -553,7 +571,8 @@ export function PlanFactPage({ user, initialYear }: { user: SessionUser; initial
           </div>
           <p className="hint">
             Месяц без пересмотра равен годовому плану. Причины показываются в двух видах: почему
-            изменили план и почему факт отличается от плана.
+            изменили план и почему факт отличается от плана. Цвет: зелёный — факт не ниже плана,
+            красный — ниже; «—» — плана нет или факта ещё нет.
           </p>
         </>
       ) : null}
@@ -589,12 +608,14 @@ function MonthRow({
           <span className="caret">{isOpen ? '▾' : '▸'}</span>
           {MONTH_TITLES[row.month - 1]}
         </td>
-        <td className="num">{formatQuantity(row.annual_quantity)}</td>
-        <td className="num">{formatQuantity(row.monthly_quantity)}</td>
+        <td className="num">{formatQty(row.annual_quantity)}</td>
+        <td className="num">{formatQty(row.monthly_quantity)}</td>
         <td className="num">{signed(monthly - annual)}</td>
-        <td className="num">{fact === null ? '—' : formatQuantity(String(fact))}</td>
-        <td className={`num ${tone(value, delta)}`}>{fact === null ? '—' : percent(value)}</td>
-        <td className={`num ${tone(value, delta)}`}>{fact === null ? '—' : signed(delta ?? 0)}</td>
+        <td className="num">{fact === null ? '—' : formatQty(String(fact))}</td>
+        <td className={`num ${percentTone(value, delta)}`}>
+          {fact === null ? '—' : percent(value)}
+        </td>
+        <td className={`num ${tone(delta)}`}>{fact === null ? '—' : signed(delta ?? 0)}</td>
         <td>
           <MonthStatus month={row} />
         </td>
