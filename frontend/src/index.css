@@ -6351,6 +6351,10 @@ input.monthly-qty {
   gap: 6px;
 }
 
+button.mini.danger {
+  color: var(--bad);
+}
+
 .checkbox-field {
   flex-direction: row;
   align-items: center;

@@ -92,6 +92,7 @@ CATALOG: dict[str, EventSpec] = {
     "user.created": EventSpec("Заведён сотрудник", "critical", "user"),
     "user.updated": EventSpec("Изменён сотрудник", "critical", "user"),
     "user.password_reset": EventSpec("Сброшен пароль сотрудника", "critical", "user"),
+    "user.deleted": EventSpec("Сотрудник удалён", "critical", "user"),
     "access.changed": EventSpec("Изменены права уровня доступа", "critical", "access"),
     "task.created": EventSpec("Поставлена задача", "info", "task"),
     "task.updated": EventSpec("Изменена задача", "info", "task"),

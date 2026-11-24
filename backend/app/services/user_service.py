@@ -1,8 +1,12 @@
-"""Сотрудники: заведение, правка уровня и блокировки, сброс пароля.
+"""Сотрудники: заведение, правка, блокировка, сброс пароля и удаление.
 
 Всё это делает администратор. Его собственная учётная запись через эти функции
 не редактируется: роль и активность админа меняются только установочной командой,
 иначе можно остаться без единственного администратора.
+
+Удалить можно только сотрудника без истории: если он что-то делал или на нём
+висят планы и задачи, удаление оборвало бы журнал и документы. Такого сотрудника
+блокируют — вход закрывается, история остаётся.
 """
 
 from __future__ import annotations
@@ -11,8 +15,10 @@ import re
 import uuid
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.models.audit import AuditEvent
 from app.models.auth import (
     ROLE_ADMIN,
     ROLE_TITLES,
@@ -188,3 +194,50 @@ def reset_password(db: Session, admin: User, user_id: uuid.UUID, password: str) 
     )
     db.commit()
     return user
+
+
+def delete_user(db: Session, admin: User, user_id: uuid.UUID) -> None:
+    """Удалить сотрудника без истории. С историей — отказ и совет заблокировать."""
+    user = db.get(User, user_id)
+    if user is None:
+        raise UserAdminError("Сотрудник не найден", status_code=404)
+    if user.role == ROLE_ADMIN or user.id == admin.id:
+        raise UserAdminError(
+            "Администратора удалить нельзя: он один и заводится установочной командой",
+            status_code=403,
+        )
+
+    actions = int(
+        db.execute(
+            select(func.count()).select_from(AuditEvent).where(AuditEvent.actor_id == user.id)
+        ).scalar_one()
+    )
+    if actions:
+        raise UserAdminError(
+            "У сотрудника есть история действий — удаление оборвало бы журнал. "
+            "Заблокируйте его: вход закроется, история сохранится.",
+            status_code=409,
+        )
+
+    login = user.login
+    full_name = user.full_name
+    db.delete(user)
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise UserAdminError(
+            "На сотруднике есть планы, задачи или другие документы — удалить нельзя. "
+            "Заблокируйте его: вход закроется, история сохранится.",
+            status_code=409,
+        ) from exc
+
+    audit_service.record(
+        db,
+        actor=admin,
+        action="user.deleted",
+        summary=f"Удалён сотрудник {full_name}",
+        entity_label=full_name,
+        payload={"login": login},
+    )
+    db.commit()

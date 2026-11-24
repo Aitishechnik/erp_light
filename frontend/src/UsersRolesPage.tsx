@@ -5,6 +5,7 @@ import {
   type AdminUser,
   type BlockRights,
   createAdminUser,
+  deleteAdminUser,
   errorMessage,
   fetchAccess,
   fetchAdminUsers,
@@ -242,6 +243,22 @@ function StaffTab({
     }
   }
 
+  const remove = async (row: AdminUser) => {
+    if (!window.confirm(`Удалить сотрудника «${row.full_name}»? Это необратимо.`)) return
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      await deleteAdminUser(row.id)
+      setNotice('Сотрудник удалён')
+      await reload()
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const submitPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!passwordFor) return
@@ -304,6 +321,16 @@ function StaffTab({
                   <button type="button" className="mini" onClick={() => setPasswordFor(row)}>
                     Пароль
                   </button>
+                  {row.is_admin ? null : (
+                    <button
+                      type="button"
+                      className="mini danger"
+                      disabled={busy}
+                      onClick={() => void remove(row)}
+                    >
+                      Удалить
+                    </button>
+                  )}
                   {row.id === meId && !row.is_admin ? <span className="hint">это вы</span> : null}
                 </td>
               </tr>

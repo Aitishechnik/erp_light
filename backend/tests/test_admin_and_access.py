@@ -1,5 +1,7 @@
 """Администратор, сотрудники и конструктор прав."""
 
+from datetime import date, timedelta
+
 from fastapi.testclient import TestClient
 
 from app.services.auth import hash_password, verify_password
@@ -215,3 +217,84 @@ def test_password_is_stored_as_hash() -> None:
     assert "3f3H!df9" not in stored
     assert verify_password("3f3H!df9", stored)
     assert not verify_password("другой", stored)
+
+
+def test_admin_deletes_employee_without_history(client: TestClient, login, logout) -> None:
+    login("admin")
+    created = _create(client, login="temp_user", full_name="Временный Сотрудник")
+    response = client.delete(f"/api/v1/admin/users/{created['id']}")
+    assert response.status_code == 204, response.text
+
+    logins = [row["login"] for row in client.get("/api/v1/admin/users").json()]
+    assert "temp_user" not in logins
+    actions = [row["action"] for row in client.get("/api/v1/admin/audit").json()]
+    assert "user.deleted" in actions
+
+    logout()
+    denied = client.post("/api/v1/auth/login", json={"login": "temp_user", "password": "3f3H!df9"})
+    assert denied.status_code == 401
+
+
+def test_employee_with_history_is_not_deleted(client: TestClient, login, logout) -> None:
+    login("admin")
+    created = _create(client, login="busy_user", full_name="Сотрудник с историей")
+
+    logout()
+    login("busy_user", "3f3H!df9")
+    product = client.post(
+        "/api/v1/products",
+        json={"code": "ТОВ-DEL", "name": "Товар с историей", "kind": "material", "unit": "кг"},
+    )
+    assert product.status_code == 201, product.text
+
+    login("admin")
+    response = client.delete(f"/api/v1/admin/users/{created['id']}")
+    assert response.status_code == 409
+    assert "история" in response.json()["detail"]
+    # Сотрудник на месте: блокировка вместо удаления.
+    logins = [row["login"] for row in client.get("/api/v1/admin/users").json()]
+    assert "busy_user" in logins
+
+
+def test_admin_cannot_be_deleted(client: TestClient, login) -> None:
+    login("admin")
+    me = client.get("/api/v1/auth/me").json()
+    assert client.delete(f"/api/v1/admin/users/{me['id']}").status_code == 403
+
+
+def test_only_admin_deletes_employees(client: TestClient, login) -> None:
+    login("admin")
+    created = _create(client, login="target_user", full_name="Цель")
+    login("commercial")
+    assert client.delete(f"/api/v1/admin/users/{created['id']}").status_code == 403
+
+
+def test_employee_with_documents_is_not_deleted(client: TestClient, login) -> None:
+    """Задачу на сотрудника нельзя оборвать удалением — только блокировкой."""
+    login("admin")
+    created = _create(
+        client, login="temp_manager", full_name="Временный Менеджер", role="sales_manager"
+    )
+
+    login("commercial")
+    assignees = client.get("/api/v1/tasks/assignees").json()
+    person = next(row for row in assignees if row["id"] == created["id"])
+    today = date.today()
+    task = client.post(
+        "/api/v1/tasks",
+        json={
+            "title": "Проверить склад",
+            "priority": "green",
+            "start_date": today.isoformat(),
+            "due_date": (today + timedelta(days=3)).isoformat(),
+            "assignee_id": person["id"],
+        },
+    )
+    assert task.status_code == 201, task.text
+
+    login("admin")
+    response = client.delete(f"/api/v1/admin/users/{created['id']}")
+    assert response.status_code == 409
+    assert "документы" in response.json()["detail"]
+    logins = [row["login"] for row in client.get("/api/v1/admin/users").json()]
+    assert "temp_manager" in logins

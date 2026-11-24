@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AccessPayload, AdminUser } from './api'
 import { mockApi } from './apiMock'
 import { UsersRolesPage } from './UsersRolesPage'
@@ -58,11 +58,12 @@ const SALES: AdminUser = {
   permissions: null,
 }
 
-function routes(): Record<string, { status?: number; body: unknown }> {
+function routes(): Record<string, { status?: number; body?: unknown }> {
   return {
     'GET /api/v1/access': { body: ACCESS },
     'GET /api/v1/admin/users': { body: [ADMIN, SALES] },
     'POST /api/v1/admin/users': { status: 201, body: SALES },
+    'DELETE /api/v1/admin/users/u1': { status: 204 },
     'PUT /api/v1/access/sales_manager': { body: ACCESS.levels[0] },
     'PUT /api/v1/access/commercial_director': { body: ACCESS.levels[1] },
   }
@@ -104,6 +105,30 @@ describe('UsersRolesPage', () => {
       expect(body.login).toBe('new_user')
       expect(body.role).toBe('sales_manager')
     })
+  })
+
+  it('удаляет сотрудника после подтверждения', async () => {
+    const user = userEvent.setup()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mockApi(routes())
+    render(<UsersRolesPage user={{ id: 'admin-1' }} />)
+
+    const row = (await screen.findByText('Валерий Сергеевич')).closest('tr')
+    if (!row) throw new Error('строка сотрудника не найдена')
+    await user.click(within(row).getByRole('button', { name: 'Удалить' }))
+
+    await waitFor(() => {
+      const mock = fetch as unknown as {
+        mock: { calls: [RequestInfo | URL, { method?: string }?][] }
+      }
+      const called = mock.mock.calls.some(
+        ([input, init]) =>
+          String(input).includes('/api/v1/admin/users/u1') &&
+          (init?.method ?? 'GET').toUpperCase() === 'DELETE',
+      )
+      expect(called).toBe(true)
+    })
+    confirm.mockRestore()
   })
 
   it('собирает права уровня по блокам и сохраняет их', async () => {

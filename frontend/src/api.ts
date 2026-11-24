@@ -1856,6 +1856,10 @@ export function updateAdminUser(
   })
 }
 
+export function deleteAdminUser(id: string): Promise<void> {
+  return request<void>(`/api/v1/admin/users/${id}`, { method: 'DELETE' })
+}
+
 export function resetAdminPassword(id: string, password: string): Promise<AdminUser> {
   return request<AdminUser>(`/api/v1/admin/users/${id}/password`, {
     method: 'POST',

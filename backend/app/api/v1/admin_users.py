@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
 
 from app.api.deps import AdminUser, DbSession
 from app.schemas.auth import UserOut, user_out
@@ -71,3 +71,17 @@ def reset_password(
     except UserAdminError as exc:
         raise _fail(exc) from exc
     return user_out(updated)
+
+
+@router.delete(
+    "/admin/users/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+def delete_user(user_id: uuid.UUID, user: AdminUser, db: DbSession) -> Response:
+    """Удалить сотрудника без истории; с историей — 409 и совет заблокировать."""
+    try:
+        user_service.delete_user(db, user, user_id)
+    except UserAdminError as exc:
+        raise _fail(exc) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
