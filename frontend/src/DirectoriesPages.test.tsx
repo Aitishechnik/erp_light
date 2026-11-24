@@ -6,6 +6,7 @@ import { mockApi } from './apiMock'
 import { CounterpartiesPage } from './CounterpartiesPage'
 import { ImportsPage } from './ImportsPage'
 import { NomenclaturePage } from './NomenclaturePage'
+import { PERMISSIONS } from './testPermissions'
 
 const COUNTERPARTIES: Counterparty[] = [
   {
@@ -66,6 +67,7 @@ const ADMIN: SessionUser = {
   full_name: 'Ольга Директорова',
   role: 'executive_director',
   role_title: 'Исполнительный директор',
+  permissions: PERMISSIONS['executive_director'],
 }
 
 const KINDS: ImportKind[] = [
@@ -392,6 +394,7 @@ const SALES: SessionUser = {
   full_name: 'Иван Петров',
   role: 'sales_manager',
   role_title: 'Менеджер по продажам',
+  permissions: PERMISSIONS['sales_manager'],
 }
 
 const IMPORTER: SessionUser = {
@@ -400,6 +403,7 @@ const IMPORTER: SessionUser = {
   full_name: 'Шахидул Ислам',
   role: 'import_manager',
   role_title: 'Менеджер по закупкам (импорт)',
+  permissions: PERMISSIONS['import_manager'],
 }
 
 describe('ImportsPage', () => {

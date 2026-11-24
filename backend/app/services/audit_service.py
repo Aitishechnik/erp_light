@@ -22,7 +22,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.audit import AuditEvent, AuditEventRead
-from app.models.auth import ROLE_EXECUTIVE_DIRECTOR, ROLE_TITLES, User
+from app.models.auth import ROLE_ADMIN, ROLE_EXECUTIVE_DIRECTOR, ROLE_TITLES, User
+from app.permissions import can, scope_of
 from app.schemas.audit import AuditEventOut, MessagesOut
 
 # Сколько строк отдаём по умолчанию и максимум за раз.
@@ -88,6 +89,10 @@ CATALOG: dict[str, EventSpec] = {
     "counterparty.updated": EventSpec("Изменён контрагент", "critical", "counterparty"),
     "country.updated": EventSpec("Изменена страна и срок доставки", "critical", "country"),
     "auth.login_failed": EventSpec("Неудачная попытка входа", "critical", "user"),
+    "user.created": EventSpec("Заведён сотрудник", "critical", "user"),
+    "user.updated": EventSpec("Изменён сотрудник", "critical", "user"),
+    "user.password_reset": EventSpec("Сброшен пароль сотрудника", "critical", "user"),
+    "access.changed": EventSpec("Изменены права уровня доступа", "critical", "access"),
     "task.created": EventSpec("Поставлена задача", "info", "task"),
     "task.updated": EventSpec("Изменена задача", "info", "task"),
     "task.status_changed": EventSpec("Сменён статус задачи", "info", "task"),
@@ -151,6 +156,11 @@ def record(
         if audience is not None
         else (list(MESSAGE_AUDIENCE) if spec.level == "critical" else [])
     )
+    # Действия администратора живут в отдельном журнале и по умолчанию служебных
+    # сообщений не порождают. Явный адресат (например, исполнитель задачи) остаётся:
+    # уведомление — часть бизнес-действия, а не запись журнала.
+    if actor is not None and actor.role == ROLE_ADMIN and audience is None:
+        targets = []
     is_message = bool(targets)
     event = AuditEvent(
         actor_id=actor.id if actor else None,
@@ -224,6 +234,11 @@ def _limit(limit: int | None) -> int:
     return max(1, min(limit or DEFAULT_LIMIT, MAX_LIMIT))
 
 
+def _not_admin() -> ColumnElement[bool]:
+    """Условие «это действие не администратора» — для обычного журнала."""
+    return or_(AuditEvent.actor_role.is_(None), AuditEvent.actor_role != ROLE_ADMIN)
+
+
 def messages(
     db: Session,
     user: User,
@@ -283,6 +298,7 @@ def cleanup_suggestion(
             select(func.count())
             .select_from(AuditEvent)
             .where(AuditEvent.created_at >= start, AuditEvent.created_at < end)
+            .where(_not_admin())
         ).scalar_one()
     )
     if count == 0:
@@ -292,7 +308,7 @@ def cleanup_suggestion(
 
 def maybe_offer_cleanup(db: Session, user: User, *, today: date | None = None) -> None:
     """Раз в месяц, начиная с марта, предлагать директору очистить журнал за прошлый год."""
-    if user.role != ROLE_EXECUTIVE_DIRECTOR:
+    if not can(user, "journal", "cleanup"):
         return
     current = today or date.today()
     suggestion = cleanup_suggestion(db, user, today=current)
@@ -325,23 +341,24 @@ def maybe_offer_cleanup(db: Session, user: User, *, today: date | None = None) -
 
 
 def cleanup_journal(db: Session, user: User, year: int) -> int:
-    """Удалить записи журнала за календарный год. Только исполнительный директор."""
-    if user.role != ROLE_EXECUTIVE_DIRECTOR:
-        raise AuditError("Очистить журнал может только исполнительный директор")
+    """Удалить записи обычного журнала за год. Действия админа не трогаем."""
+    if not can(user, "journal", "cleanup"):
+        raise AuditError("Очистить журнал может только тот, кому это разрешено")
     if year >= date.today().year:
         raise AuditError("Чистить можно только прошлые годы", status_code=400)
     start, end = _year_bounds(year)
-    deleted = int(
-        db.execute(
-            select(func.count())
-            .select_from(AuditEvent)
-            .where(AuditEvent.created_at >= start, AuditEvent.created_at < end)
-        ).scalar_one()
+    scope = (
+        select(AuditEvent.id)
+        .where(AuditEvent.created_at >= start, AuditEvent.created_at < end)
+        .where(_not_admin())
     )
+    deleted = int(db.execute(select(func.count()).select_from(scope.subquery())).scalar_one())
     if deleted == 0:
         raise AuditError(f"За {year} год записей нет", status_code=409)
     db.execute(
-        delete(AuditEvent).where(AuditEvent.created_at >= start, AuditEvent.created_at < end)
+        delete(AuditEvent).where(
+            AuditEvent.created_at >= start, AuditEvent.created_at < end, _not_admin()
+        )
     )
     record(
         db,
@@ -450,8 +467,11 @@ def journal(
     должны оставаться доступными здесь: «своё» — это и действие, и адресат.
     """
     limit = _limit(limit)
-    statement = select(AuditEvent).order_by(AuditEvent.seq.desc()).limit(limit)
-    if user.role != ROLE_EXECUTIVE_DIRECTOR:
+    if not can(user, "journal", "view"):
+        raise AuditError("Журнал действий вам недоступен")
+    statement = select(AuditEvent).where(_not_admin()).order_by(AuditEvent.seq.desc()).limit(limit)
+    own = scope_of(user, "journal") == "own" and user.role != ROLE_ADMIN
+    if own:
         statement = statement.where(
             or_(
                 AuditEvent.actor_id == user.id,
@@ -467,7 +487,7 @@ def journal(
     if before is not None:
         statement = statement.where(AuditEvent.created_at < before)
     rows = db.execute(statement).scalars().all()
-    if user.role != ROLE_EXECUTIVE_DIRECTOR:
+    if own:
         return [_to_out(event, True) for event in rows]
     reads = set(
         db.execute(
@@ -480,3 +500,28 @@ def journal(
         .all()
     )
     return [_to_out(event, event.id in reads) for event in rows]
+
+
+def admin_journal(
+    db: Session,
+    user: User,
+    *,
+    action: str | None = None,
+    limit: int | None = None,
+    before: datetime | None = None,
+) -> list[AuditEventOut]:
+    """Отдельный журнал администратора: только его действия, только для него."""
+    if user.role != ROLE_ADMIN:
+        raise AuditError("Журнал администратора доступен только администратору")
+    statement = (
+        select(AuditEvent)
+        .where(AuditEvent.actor_role == ROLE_ADMIN)
+        .order_by(AuditEvent.seq.desc())
+        .limit(_limit(limit))
+    )
+    if action:
+        statement = statement.where(AuditEvent.action == action)
+    if before is not None:
+        statement = statement.where(AuditEvent.created_at < before)
+    rows = db.execute(statement).scalars().all()
+    return [_to_out(event, True) for event in rows]

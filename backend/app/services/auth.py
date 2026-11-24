@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.auth import (
+    ROLE_ADMIN,
     ROLE_COMMERCIAL_DIRECTOR,
     ROLE_EXECUTIVE_DIRECTOR,
     ROLE_IMPORT_MANAGER,
@@ -155,3 +156,30 @@ def seed_demo_users(db: Session, password: str) -> list[User]:
         created.append(user)
     db.commit()
     return created
+
+
+ADMIN_LOGIN = "admin"
+ADMIN_FULL_NAME = "Администратор"
+
+
+def seed_admin(db: Session, password: str) -> User:
+    """Единственный администратор. Заводится командой, из интерфейса не создаётся.
+
+    Если админ уже есть, пароль обновляется (это же команда восстановления доступа),
+    а второй администратор не появляется ни при каких условиях.
+    """
+    admin = db.execute(select(User).where(User.role == ROLE_ADMIN)).scalars().first()
+    if admin is None:
+        admin = User(
+            login=ADMIN_LOGIN,
+            full_name=ADMIN_FULL_NAME,
+            role=ROLE_ADMIN,
+            password_hash=hash_password(password),
+            is_active=True,
+        )
+        db.add(admin)
+    else:
+        admin.password_hash = hash_password(password)
+        admin.is_active = True
+    db.commit()
+    return admin

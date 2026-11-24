@@ -1,4 +1,5 @@
 import { expect, type Page, test } from '@playwright/test'
+import { PERMISSIONS } from '../src/testPermissions'
 
 const STOCK = [
   {
@@ -35,6 +36,7 @@ const MANAGER = {
   full_name: 'Иван Петров',
   role: 'sales_manager',
   role_title: 'Менеджер по продажам',
+  permissions: PERMISSIONS.sales_manager,
 }
 
 const IMPORTER = {
@@ -43,6 +45,7 @@ const IMPORTER = {
   full_name: 'Шахидул Ислам',
   role: 'import_manager',
   role_title: 'Менеджер по закупкам (импорт)',
+  permissions: PERMISSIONS.import_manager,
 }
 
 const CLIENT = {
@@ -63,6 +66,7 @@ const PURCHASE_DIRECTOR = {
   full_name: 'Пётр Закупщиков',
   role: 'purchase_director',
   role_title: 'Директор по закупкам',
+  permissions: PERMISSIONS.purchase_director,
 }
 
 const RAW_PRODUCTS = [
@@ -193,6 +197,7 @@ const COMMERCIAL = {
   full_name: 'Коммерческий директор',
   role: 'commercial_director',
   role_title: 'Коммерческий директор',
+  permissions: PERMISSIONS.commercial_director,
 }
 
 const CORRECTION = {
@@ -1536,6 +1541,7 @@ const EXECUTIVE = {
   full_name: 'Ольга Директорова',
   role: 'executive_director',
   role_title: 'Исполнительный директор',
+  permissions: PERMISSIONS.executive_director,
 }
 
 const AUDIT_EVENT = {
@@ -1671,6 +1677,7 @@ const SALES_USER = {
   full_name: 'Иван Петров',
   role: 'sales_manager',
   role_title: 'Менеджер по продажам',
+  permissions: PERMISSIONS.sales_manager,
 }
 
 const COMMERCIAL_USER = {
@@ -1679,6 +1686,7 @@ const COMMERCIAL_USER = {
   full_name: 'Ольга Коммерческая',
   role: 'commercial_director',
   role_title: 'Коммерческий директор',
+  permissions: PERMISSIONS.commercial_director,
 }
 
 type TaskReportMock = {

@@ -6322,3 +6322,109 @@ input.monthly-qty {
   color: var(--muted);
   font-weight: 650;
 }
+
+/* --- Пользователи и роли: сотрудники и конструктор прав --- */
+.modal {
+  width: min(34rem, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  margin: 0;
+  padding: 24px;
+  display: grid;
+  gap: 14px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 60px rgba(16, 24, 40, 0.25);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.checkbox-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.access-layout {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  margin-top: 12px;
+}
+
+.access-levels {
+  display: grid;
+  gap: 6px;
+  position: sticky;
+  top: 12px;
+}
+
+.access-levels button {
+  text-align: left;
+}
+
+.access-blocks {
+  display: grid;
+  gap: 4px;
+}
+
+.access-group {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.access-block {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.access-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.access-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.access-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .access-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .access-levels {
+    position: static;
+    display: flex;
+    flex-wrap: wrap;
+  }
+}

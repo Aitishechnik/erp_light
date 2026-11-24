@@ -21,13 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.auth import (
-    ROLE_EXECUTIVE_DIRECTOR,
-    ROLE_IMPORT_MANAGER,
-    ROLE_PURCHASE_DIRECTOR,
-    User,
-    is_admin,
-)
+from app.models.auth import User
 from app.models.countries import Country
 from app.models.domain import Batch, BatchItem, Product
 from app.models.planning import (
@@ -39,6 +33,7 @@ from app.models.planning import (
     SalesPlanApproval,
 )
 from app.models.sales import MonthResult, SalesFact
+from app.permissions import can
 from app.schemas.planning import (
     PurchasePlanChangeOut,
     PurchasePlanCreate,
@@ -57,9 +52,6 @@ from app.services import audit_service, purchase_signal_service
 from app.services import purchase_need as need
 from app.services.plan_freeze import editable_months
 from app.services.purchase_need import NeedChange, NeedPosition
-
-EDITORS = (ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER, ROLE_EXECUTIVE_DIRECTOR)
-VIEWERS = (ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER, ROLE_EXECUTIVE_DIRECTOR)
 
 
 class PlanError(Exception):
@@ -116,18 +108,18 @@ def _lock(db: Session, plan_id: uuid.UUID) -> None:
 
 
 def _check_view(user: User) -> None:
-    if user.role not in VIEWERS:
+    if not can(user, "purchase_plan", "view"):
         raise PlanError("План закупок сырья вам не виден", status_code=403)
 
 
 def _check_editor(user: User) -> None:
-    if user.role not in EDITORS:
-        raise PlanError("План закупок сырья ведут закупщики", status_code=403)
+    if not can(user, "purchase_plan", "edit"):
+        raise PlanError("Вести план закупок сырья вам недоступно", status_code=403)
 
 
 def _check_executive(user: User) -> None:
-    if user.role != ROLE_EXECUTIVE_DIRECTOR:
-        raise PlanError("Утверждает план закупок только исполнительный директор", status_code=403)
+    if not can(user, "purchase_plan", "approve"):
+        raise PlanError("Утверждать план закупок вам недоступно", status_code=403)
 
 
 def _check_product(db: Session, product_id: uuid.UUID) -> Product:
@@ -1180,8 +1172,8 @@ def request_revision(db: Session, user: User, plan_id: uuid.UUID, reason: str) -
 
 
 def delete_plan(db: Session, user: User, plan_id: uuid.UUID) -> None:
-    if user.role != ROLE_PURCHASE_DIRECTOR and not is_admin(user):
-        raise PlanError("Удалить план закупок может только директор по закупкам", status_code=403)
+    if not can(user, "purchase_plan", "delete"):
+        raise PlanError("Удалять план закупок вам недоступно", status_code=403)
     _lock(db, plan_id)
     plan = _require(db, plan_id)
     if plan.status != "draft":

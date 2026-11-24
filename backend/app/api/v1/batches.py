@@ -12,9 +12,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import select
 
-from app.api.deps import CurrentUser, DbSession, require_roles
+from app.api.deps import DbSession, require_perm
 from app.api.v1.imports import session_out
-from app.models.auth import ROLE_IMPORT_MANAGER, ROLE_PURCHASE_DIRECTOR, User
+from app.models.auth import User
 from app.models.domain import Batch, StockSnapshot
 from app.models.rates import CurrencyRate
 from app.schemas.domain import BatchCreate, BatchCustomsIn, BatchOut
@@ -39,10 +39,14 @@ from app.services.import_service import ImportDataError
 
 router = APIRouter(tags=["batches"])
 
+Viewer = Annotated[User, Depends(require_perm("receipts", "view"))]
+
 # Заполнять и править карточку поступления могут закупки; смотрят все вошедшие.
-Writer = Annotated[User, Depends(require_roles(ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER))]
+Writer = Annotated[User, Depends(require_perm("receipts", "edit"))]
 # Отмена растаможки — только директор по закупкам.
-Director = Annotated[User, Depends(require_roles(ROLE_PURCHASE_DIRECTOR))]
+Director = Annotated[User, Depends(require_perm("receipts", "customs"))]
+# Удаление поступления — отдельное право: его можно снять, не запрещая правку.
+Deleter = Annotated[User, Depends(require_perm("receipts", "delete"))]
 
 
 def _out(
@@ -79,7 +83,7 @@ def _require_items(payload: BatchCreate, batch: Batch | None = None) -> None:
 
 @router.get("/batches", response_model=list[BatchOut])
 def list_batches(
-    user: CurrentUser,
+    user: Viewer,
     db: DbSession,
     date_from: Annotated[date | None, Query(alias="from", description="Начало периода")] = None,
     date_to: Annotated[date | None, Query(alias="to", description="Конец периода")] = None,
@@ -96,7 +100,7 @@ def list_batches(
 
 
 @router.get("/batches/{batch_id}", response_model=BatchOut)
-def get_batch(batch_id: uuid.UUID, user: CurrentUser, db: DbSession) -> BatchOut:
+def get_batch(batch_id: uuid.UUID, user: Viewer, db: DbSession) -> BatchOut:
     batch = load_batch(db, batch_id)
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Поступление не найдено")
@@ -148,7 +152,7 @@ def put_batch(batch_id: uuid.UUID, payload: BatchCreate, user: Writer, db: DbSes
 @router.delete(
     "/batches/{batch_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response
 )
-def remove_batch(batch_id: uuid.UUID, user: Writer, db: DbSession) -> Response:
+def remove_batch(batch_id: uuid.UUID, user: Deleter, db: DbSession) -> Response:
     batch = load_batch(db, batch_id)
     if not delete_batch(db, batch_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Поступление не найдено")

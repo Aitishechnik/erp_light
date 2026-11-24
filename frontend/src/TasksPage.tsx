@@ -3,6 +3,7 @@ import {
   addTaskDependency,
   addTaskReport,
   addTaskStep,
+  can,
   changeTaskStatus,
   createTask,
   deleteTask,
@@ -13,7 +14,6 @@ import {
   fetchTask,
   fetchTaskAssignees,
   fetchTasks,
-  type Role,
   rescheduleTask,
   type SessionUser,
   type Task,
@@ -38,7 +38,6 @@ const LABEL_WIDTH = 372
 const DAY_WIDTH = 26
 
 /** Кто ставит задачи: коммерческий и исполнительный директора. */
-const CREATOR_ROLES: Role[] = ['commercial_director', 'executive_director']
 
 const PRIORITIES: { value: TaskPriority; title: string }[] = [
   { value: 'green', title: 'Низкий' },
@@ -108,7 +107,7 @@ export function TasksPage({ user, focus }: { user: SessionUser; focus: string[] 
   const centered = useRef(false)
   const [scrollLeft, setScrollLeft] = useState(0)
 
-  const canCreate = CREATOR_ROLES.includes(user.role)
+  const canCreate = can(user, 'tasks', 'create')
 
   const loadTasks = useCallback(async () => {
     try {

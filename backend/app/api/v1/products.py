@@ -7,17 +7,18 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.api.deps import CurrentUser, DbSession, require_roles
+from app.api.deps import DbSession, require_perm
 from app.models.auth import User
 from app.models.domain import PRODUCT_KINDS, Product
 from app.schemas.domain import ProductIn, ProductOut, ProductUpdate
 from app.services import audit_service
 from app.services import directory_service as service
-from app.services.directory_service import DIRECTORY_WRITE_ROLES, DirectoryError
+from app.services.directory_service import DirectoryError
 
 router = APIRouter(tags=["products"])
 
-Writer = Annotated[User, Depends(require_roles(*DIRECTORY_WRITE_ROLES))]
+Writer = Annotated[User, Depends(require_perm("directories", "edit"))]
+Viewer = Annotated[User, Depends(require_perm("directories", "view"))]
 
 
 def _fail(exc: DirectoryError) -> HTTPException:
@@ -38,7 +39,7 @@ def _parse_kinds(raw: str) -> list[str]:
 
 @router.get("/products", response_model=list[ProductOut])
 def list_products(
-    user: CurrentUser,
+    user: Viewer,
     db: DbSession,
     kind: str | None = Query(default=None, description="material | raw | finished"),
     kinds: str | None = Query(
@@ -56,7 +57,7 @@ def list_products(
 
 
 @router.get("/products/{product_id}", response_model=ProductOut)
-def get_product(product_id: uuid.UUID, user: CurrentUser, db: DbSession) -> Product:
+def get_product(product_id: uuid.UUID, user: Viewer, db: DbSession) -> Product:
     """Одна позиция: по ней таблица показывает объект из сообщения."""
     try:
         return service.get_product(db, product_id)

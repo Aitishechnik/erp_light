@@ -1,7 +1,10 @@
 """Модели домена. Импортируются здесь, чтобы alembic и create_all их видели."""
 
+from app.models.access import RolePermission
 from app.models.audit import AUDIT_LEVELS, AuditEvent, AuditEventRead
 from app.models.auth import (
+    ALL_ROLES,
+    ROLE_ADMIN,
     ROLE_COMMERCIAL_DIRECTOR,
     ROLE_EXECUTIVE_DIRECTOR,
     ROLE_IMPORT_MANAGER,
@@ -90,6 +93,8 @@ __all__ = [
     "PURCHASE_PLAN_STATUSES",
     "PURCHASE_PLAN_STATUS_TITLES",
     "ROLES",
+    "ALL_ROLES",
+    "ROLE_ADMIN",
     "ROLE_COMMERCIAL_DIRECTOR",
     "ROLE_EXECUTIVE_DIRECTOR",
     "ROLE_IMPORT_MANAGER",
@@ -130,6 +135,7 @@ __all__ = [
     "ImportSession",
     "Product",
     "ProductAlias",
+    "RolePermission",
     "PurchasePlan",
     "PurchasePlanItem",
     "PurchasePlanSourceEvent",

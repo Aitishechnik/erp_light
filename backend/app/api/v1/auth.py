@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
+from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, DbSession
 from app.config import get_settings
-from app.schemas.auth import LoginIn, UserOut, user_out
+from app.models.auth import User
+from app.permissions import Rights
+from app.schemas.auth import BlockRightsOut, LoginIn, UserOut, user_out
+from app.services import access_service
 from app.services.auth import (
     SESSION_COOKIE,
     authenticate,
@@ -15,6 +19,18 @@ from app.services.auth import (
 )
 
 router = APIRouter(tags=["auth"])
+
+
+def _out(db: Session, user: User) -> UserOut:
+    """Пользователь вместе с правами: по ним интерфейс строит меню и кнопки."""
+    profile = access_service.profile(db, user)
+    return user_out(
+        user,
+        permissions={
+            block: BlockRightsOut(actions=sorted(rights.actions), scope=rights.scope)
+            for block, rights in profile.items()
+        },
+    )
 
 
 @router.post("/auth/login", response_model=UserOut)
@@ -35,7 +51,7 @@ def login(payload: LoginIn, response: Response, db: DbSession) -> UserOut:
         samesite="lax",
         path="/",
     )
-    return user_out(user)
+    return _out(db, user)
 
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
@@ -49,6 +65,13 @@ def logout(request: Request, response: Response, db: DbSession) -> Response:
 
 
 @router.get("/auth/me", response_model=UserOut)
-def me(user: CurrentUser) -> UserOut:
-    """Кто сейчас вошёл."""
-    return user_out(user)
+def me(user: CurrentUser, db: DbSession) -> UserOut:
+    """Кто сейчас вошёл, и что ему разрешено."""
+    profile: dict[str, Rights] = getattr(user, "access_profile", {})
+    return user_out(
+        user,
+        permissions={
+            block: BlockRightsOut(actions=sorted(rights.actions), scope=rights.scope)
+            for block, rights in profile.items()
+        },
+    )

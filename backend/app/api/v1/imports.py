@@ -4,16 +4,19 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 
-from app.api.deps import CurrentUser, DbSession
-from app.models.auth import is_admin
+from app.api.deps import CurrentUser, DbSession, require_perm
+from app.models.auth import User
 from app.models.domain import ImportSession
+from app.permissions import can
 from app.schemas.imports import ImportKindOut, ImportSessionOut
 from app.services import import_service as service
 from app.services.import_service import KINDS, ImportDataError
 
 router = APIRouter(tags=["imports"])
+
+Viewer = Annotated[User, Depends(require_perm("imports", "view"))]
 
 
 def session_out(row: ImportSession) -> ImportSessionOut:
@@ -34,7 +37,7 @@ def session_out(row: ImportSession) -> ImportSessionOut:
 
 
 @router.get("/imports/kinds", response_model=list[ImportKindOut])
-def list_kinds(user: CurrentUser) -> list[ImportKindOut]:
+def list_kinds(user: Viewer) -> list[ImportKindOut]:
     """Типы данных, которые можно загружать. Роли — чтобы экран показал доступное.
 
     Типы с ``listed=False`` (позиции партии) грузятся из карточки поступления:
@@ -56,7 +59,7 @@ def list_kinds(user: CurrentUser) -> list[ImportKindOut]:
 
 @router.get("/imports", response_model=list[ImportSessionOut])
 def list_imports(
-    user: CurrentUser,
+    user: Viewer,
     db: DbSession,
     limit: int = Query(default=20, ge=1, le=200),
 ) -> list[ImportSessionOut]:
@@ -75,14 +78,13 @@ def upload(
 ) -> ImportSessionOut:
     """Загрузить файл выгрузки. Повторная загрузка не создаёт дублей.
 
-    Права зависят от типа: справочники грузят продажи/коммерция/закупки, импортные
-    поступления — только закупки. Исполнительный директор как администратор грузит
-    любой тип.
+    Права на каждый тип загрузки настраивает админ в конструкторе; администратор
+    может всё.
     """
     spec = KINDS.get(kind)
     if spec is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Неизвестный тип загрузки: {kind}")
-    if user.role not in spec.roles and not is_admin(user):
+    if not can(user, "imports", kind):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Недостаточно прав для этого действия")
     content = file.file.read()
     try:

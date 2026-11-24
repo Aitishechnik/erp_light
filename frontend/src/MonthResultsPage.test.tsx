@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { MonthHistoryItem, MonthResult, MonthRow, Product, SessionUser } from './api'
 import { mockApi } from './apiMock'
 import { MonthResultsPage } from './MonthResultsPage'
+import { PERMISSIONS } from './testPermissions'
 
 const COMMERCIAL: SessionUser = {
   id: 'u1',
@@ -11,14 +12,21 @@ const COMMERCIAL: SessionUser = {
   full_name: 'Коммерческий директор (демо)',
   role: 'commercial_director',
   role_title: 'Коммерческий директор',
+  permissions: PERMISSIONS['commercial_director'],
 }
 
-const PURCHASE: SessionUser = { ...COMMERCIAL, id: 'u2', role: 'purchase_director' }
+const PURCHASE: SessionUser = {
+  ...COMMERCIAL,
+  id: 'u2',
+  role: 'purchase_director',
+  permissions: PERMISSIONS['purchase_director'],
+}
 const ADMIN: SessionUser = {
   ...COMMERCIAL,
   id: 'u3',
   role: 'executive_director',
   role_title: 'Исполнительный директор',
+  permissions: PERMISSIONS['executive_director'],
 }
 
 const PRODUCTS: Product[] = [
@@ -701,6 +709,7 @@ const SALES_MANAGER: SessionUser = {
   id: 'u4',
   role: 'sales_manager',
   role_title: 'Менеджер по продажам',
+  permissions: PERMISSIONS['sales_manager'],
 }
 
 const HISTORY: MonthHistoryItem[] = [

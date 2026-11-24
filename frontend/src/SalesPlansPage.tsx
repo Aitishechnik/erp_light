@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   approveSalesPlanCorrection,
   type Counterparty,
+  can,
   createSalesPlan,
   createSalesPlanCorrection,
   deleteSalesPlan,
@@ -27,6 +28,7 @@ import {
   salesPlanAction,
   saveSalesPlanCorrectionItems,
   saveSalesPlanItems,
+  scopeOf,
   submitSalesPlanCorrection,
 } from './api'
 import { MonthlyPlanTab } from './MonthlyPlanTab'
@@ -250,8 +252,8 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
   const [error, setError] = useState<string | null>(null)
   const [mode, setMode] = useState<'year' | 'month'>('year')
 
-  const isCommercialDirector = user.role === 'commercial_director'
-  const isExecutive = user.role === 'executive_director'
+  const isCommercialDirector =
+    can(user, 'sales_plans', 'edit') && scopeOf(user, 'sales_plans') === 'all'
   const hasAdmin = isAdmin(user)
   const yearPlans = plans.filter((plan) => plan.year === year)
   const plan = yearPlans.find((row) => row.id === selectedId) ?? null
@@ -300,7 +302,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
   }, [plan])
 
   useEffect(() => {
-    if (!plan || !(isOwner || isCommercialDirector || isExecutive)) {
+    if (!plan || !can(user, 'corrections', 'view')) {
       setCorrections([])
       setCorrection(null)
       setCorrectionDrafts({})
@@ -327,7 +329,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
         setCorrectionDrafts({})
         setCorrectionClientId('')
       })
-  }, [plan, isOwner, isCommercialDirector, isExecutive])
+  }, [plan, user])
 
   const run = async (action: () => Promise<unknown>, _message?: string) => {
     setBusy(true)
@@ -412,18 +414,27 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
   const planClients = Object.keys(drafts)
   const mayManage = isCommercialDirector || hasAdmin
   const canEdit =
+    can(user, 'sales_plans', 'edit') &&
     plan !== null &&
     plan.status !== 'approved' &&
     (mayManage || (isOwner && ['draft', 'filling'].includes(plan.status)))
   const canSubmit =
-    plan !== null && (isOwner || hasAdmin) && ['draft', 'filling'].includes(plan.status)
-  const canApprove = plan !== null && mayManage && plan.status === 'on_review'
+    can(user, 'sales_plans', 'submit') &&
+    plan !== null &&
+    (scopeOf(user, 'sales_plans') === 'all' || isOwner) &&
+    ['draft', 'filling'].includes(plan.status)
+  const canApprove =
+    can(user, 'sales_plans', 'approve') && plan !== null && plan.status === 'on_review'
   const canDelete =
-    plan !== null && ['draft', 'filling'].includes(plan.status) && (mayManage || isOwner)
+    can(user, 'sales_plans', 'delete') &&
+    plan !== null &&
+    ['draft', 'filling'].includes(plan.status) &&
+    (mayManage || isOwner)
 
   const openCorrection =
     corrections.find((row) => row.status === 'draft' || row.status === 'on_review') ?? null
-  const canProposeCorrection = isOwner || mayManage || isExecutive
+  const canProposeCorrection =
+    can(user, 'corrections', 'propose') && (scopeOf(user, 'corrections') === 'all' || isOwner)
   const canCreateCorrection =
     plan !== null && canProposeCorrection && plan.status === 'approved' && openCorrection === null
   const correctionEditable =

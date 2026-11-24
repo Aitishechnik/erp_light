@@ -14,12 +14,13 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.auth import ROLE_SALES_MANAGER, User
+from app.models.auth import User
 from app.models.counterparties import Counterparty
 from app.models.domain import Product
 from app.models.monthly_plans import MonthlySalesPlan
 from app.models.planning import SalesPlan
 from app.models.sales import REASON_TITLES, DeviationReason, MonthResult, SalesFact
+from app.permissions import scope_of
 from app.schemas.plan_fact import (
     PlanFactDetailOut,
     PlanFactMonthOut,
@@ -52,7 +53,7 @@ class _Month:
 
 
 def _resolve_manager(user: User, manager_id: uuid.UUID | None) -> uuid.UUID | None:
-    if user.role == ROLE_SALES_MANAGER:
+    if scope_of(user, "plan_fact") == "own":
         return user.id
     return manager_id
 

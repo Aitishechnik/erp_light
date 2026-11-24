@@ -7,27 +7,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import DbSession, require_roles
-from app.models.auth import (
-    ROLE_COMMERCIAL_DIRECTOR,
-    ROLE_EXECUTIVE_DIRECTOR,
-    ROLE_PURCHASE_DIRECTOR,
-    ROLE_SALES_MANAGER,
-    User,
-)
+from app.api.deps import DbSession, require_perm
+from app.models.auth import User
 from app.schemas.plan_fact import PlanFactDetailOut, PlanFactSummaryOut
 from app.services import plan_fact_service as service
 
 router = APIRouter(tags=["plan-fact"])
 
-VIEW_ROLES = (
-    ROLE_SALES_MANAGER,
-    ROLE_COMMERCIAL_DIRECTOR,
-    ROLE_EXECUTIVE_DIRECTOR,
-    ROLE_PURCHASE_DIRECTOR,
-)
-
-Viewer = Annotated[User, Depends(require_roles(*VIEW_ROLES))]
+Viewer = Annotated[User, Depends(require_perm("plan_fact", "view"))]
 
 
 @router.get("/plan-fact", response_model=PlanFactSummaryOut)

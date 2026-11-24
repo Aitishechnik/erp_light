@@ -9,14 +9,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser, DbSession, require_roles
-from app.models.auth import (
-    ROLE_COMMERCIAL_DIRECTOR,
-    ROLE_EXECUTIVE_DIRECTOR,
-    ROLE_PURCHASE_DIRECTOR,
-    ROLE_SALES_MANAGER,
-    User,
-)
+from app.api.deps import CurrentUser, DbSession, require_perm
+from app.models.auth import User
 from app.models.sales import DECISION_TITLES, REASON_TITLES, MonthResult, MonthResultSnapshot
 from app.schemas.sales_results import (
     DecisionIn,
@@ -44,14 +38,7 @@ from app.services.sales_import_service import match_unmatched
 
 router = APIRouter(tags=["month-results"])
 
-VIEW_ROLES = (
-    ROLE_SALES_MANAGER,
-    ROLE_COMMERCIAL_DIRECTOR,
-    ROLE_EXECUTIVE_DIRECTOR,
-    ROLE_PURCHASE_DIRECTOR,
-)
-
-Viewer = Annotated[User, Depends(require_roles(*VIEW_ROLES))]
+Viewer = Annotated[User, Depends(require_perm("month_results", "view"))]
 
 QUANTITY_STEP = Decimal("0.001")
 MONEY_STEP = Decimal("0.01")
@@ -65,13 +52,9 @@ def _money(value: Decimal) -> Decimal:
     return value.quantize(MONEY_STEP)
 
 
-Matcher = Annotated[User, Depends(require_roles(*service.MATCH_ROLES))]
+Matcher = Annotated[User, Depends(require_perm("month_results", "match"))]
 
-# История снимков: её видит руководство. Менеджеру не показываем — в снимке строки
-# всех клиентов, а не только его.
-HISTORY_ROLES = (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR, ROLE_PURCHASE_DIRECTOR)
-
-HistoryViewer = Annotated[User, Depends(require_roles(*HISTORY_ROLES))]
+HistoryViewer = Annotated[User, Depends(require_perm("month_results", "history"))]
 
 
 def _reason_out(row: service.MonthRow) -> ReasonOut | None:
@@ -190,16 +173,12 @@ def _summary(db: Session, user: User, year: int, month: int) -> MonthResultOut:
 
 @router.get("/month-results", response_model=MonthResultOut)
 def month_result(
-    user: CurrentUser,
+    user: Viewer,
     db: DbSession,
     year: int = Query(ge=2020, le=2100),
     month: int = Query(ge=1, le=12),
 ) -> MonthResultOut:
     """План продаж против факта за месяц. Менеджер видит только свои клиенты."""
-    if user.role not in VIEW_ROLES:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Итоги месяца вам недоступны"
-        )
     return _summary(db, user, year, month)
 
 

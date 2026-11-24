@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AnnualSalesPlanPage } from './AnnualSalesPlanPage'
 import type { AnnualSalesPlan, SessionUser } from './api'
 import { mockApi } from './apiMock'
+import { PERMISSIONS } from './testPermissions'
 
 const YEAR = new Date().getFullYear()
 
@@ -13,6 +14,7 @@ const COMMERCIAL: SessionUser = {
   full_name: 'Коммерческий директор',
   role: 'commercial_director',
   role_title: 'Коммерческий директор',
+  permissions: PERMISSIONS['commercial_director'],
 }
 
 const EXECUTIVE: SessionUser = {
@@ -21,6 +23,7 @@ const EXECUTIVE: SessionUser = {
   full_name: 'Ольга Директорова',
   role: 'executive_director',
   role_title: 'Исполнительный директор',
+  permissions: PERMISSIONS['executive_director'],
 }
 
 const SALES: SessionUser = {
@@ -29,6 +32,7 @@ const SALES: SessionUser = {
   full_name: 'Иван Петров',
   role: 'sales_manager',
   role_title: 'Менеджер по продажам',
+  permissions: PERMISSIONS['sales_manager'],
 }
 
 function annual(overrides: Partial<AnnualSalesPlan> = {}): AnnualSalesPlan {

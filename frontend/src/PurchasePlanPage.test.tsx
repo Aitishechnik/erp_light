@@ -12,6 +12,7 @@ import type {
 } from './api'
 import { mockApi } from './apiMock'
 import { PurchasePlanPage } from './PurchasePlanPage'
+import { PERMISSIONS } from './testPermissions'
 
 const YEAR = new Date().getFullYear()
 
@@ -21,6 +22,7 @@ const DIRECTOR: SessionUser = {
   full_name: 'Пётр Закупщиков',
   role: 'purchase_director',
   role_title: 'Директор по закупкам',
+  permissions: PERMISSIONS['purchase_director'],
 }
 
 const EXECUTIVE: SessionUser = {
@@ -29,6 +31,7 @@ const EXECUTIVE: SessionUser = {
   full_name: 'Ольга Директорова',
   role: 'executive_director',
   role_title: 'Исполнительный директор',
+  permissions: PERMISSIONS['executive_director'],
 }
 
 const PRODUCTS: Product[] = [

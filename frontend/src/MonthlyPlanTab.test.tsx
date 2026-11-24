@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { MonthlyPlan, SessionUser } from './api'
 import { mockApi } from './apiMock'
 import { MonthlyPlanTab } from './MonthlyPlanTab'
+import { PERMISSIONS } from './testPermissions'
 
 const SALES: SessionUser = {
   id: 'sm-1',
@@ -11,6 +12,7 @@ const SALES: SessionUser = {
   full_name: 'Менеджер по продажам',
   role: 'sales_manager',
   role_title: 'Менеджер по продажам',
+  permissions: PERMISSIONS['sales_manager'],
 }
 
 const PLAN: MonthlyPlan = {

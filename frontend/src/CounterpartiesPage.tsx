@@ -2,13 +2,13 @@ import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react
 import {
   type Counterparty,
   type CounterpartyRole,
+  can,
   counterpartyRoles,
   createCounterparty,
   errorMessage,
   fetchCounterparties,
   fetchCounterparty,
   fetchManagers,
-  isAdmin,
   type SessionUser,
   updateCounterparty,
 } from './api'
@@ -34,13 +34,12 @@ const ROLE_FILTERS: { value: '' | CounterpartyRole; title: string }[] = [
 ]
 
 /** Кто может менять справочник: те же роли, что и на бэкенде, плюс администратор. */
-const WRITE_ROLES: string[] = ['sales_manager', 'commercial_director', 'purchase_director']
 
 /** По умолчанию — по наименованию, как в справочнике 1С. */
 const DEFAULT_SORT: SortState = { column: 'name', direction: 'asc' }
 
 export function CounterpartiesPage({ user, focusId }: { user?: SessionUser; focusId?: string }) {
-  const mayEdit = !user || isAdmin(user) || WRITE_ROLES.includes(user.role)
+  const mayEdit = !user || can(user, 'directories', 'edit')
   const [rows, setRows] = useState<Counterparty[]>([])
   const [managers, setManagers] = useState<SessionUser[]>([])
   const [role, setRole] = useState<'' | CounterpartyRole>('')

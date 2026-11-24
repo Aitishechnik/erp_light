@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Country, SessionUser } from './api'
 import { mockApi } from './apiMock'
 import { CountriesPage } from './CountriesPage'
+import { PERMISSIONS } from './testPermissions'
 
 const DIRECTOR: SessionUser = {
   id: 'pd-1',
@@ -11,6 +12,7 @@ const DIRECTOR: SessionUser = {
   full_name: 'Пётр Закупщиков',
   role: 'purchase_director',
   role_title: 'Директор по закупкам',
+  permissions: PERMISSIONS['purchase_director'],
 }
 
 const IMPORTER: SessionUser = {
@@ -19,6 +21,7 @@ const IMPORTER: SessionUser = {
   full_name: 'Шахидул Ислам',
   role: 'import_manager',
   role_title: 'Менеджер по закупкам (импорт)',
+  permissions: PERMISSIONS['import_manager'],
 }
 
 const ADMIN: SessionUser = {
@@ -27,6 +30,7 @@ const ADMIN: SessionUser = {
   full_name: 'Ольга Директорова',
   role: 'executive_director',
   role_title: 'Исполнительный директор',
+  permissions: PERMISSIONS['executive_director'],
 }
 
 const COUNTRIES: Country[] = [

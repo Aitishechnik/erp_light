@@ -1,10 +1,10 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   type Country,
+  can,
   createCountry,
   errorMessage,
   fetchCountries,
-  isAdmin,
   type SessionUser,
   updateCountry,
 } from './api'
@@ -34,7 +34,7 @@ export function CountriesPage({ user, focusId }: { user: SessionUser; focusId?: 
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const canEdit = user.role === 'purchase_director' || isAdmin(user)
+  const canEdit = can(user, 'countries', 'edit')
 
   const reload = useCallback(async () => {
     try {

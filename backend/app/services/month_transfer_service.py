@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 from app.models.auth import User
 from app.models.planning import SalesPlan, SalesPlanCorrection, SalesPlanCorrectionItem
 from app.models.sales import DECISION_TITLES
+from app.permissions import can
 from app.schemas.planning import SalesPlanCorrectionCreate
 from app.services import audit_service, month_close_service, month_result_service
 from app.services import sales_plan_correction_service as correction_service
@@ -114,7 +115,7 @@ def _month_label(month: int) -> str:
 
 def transfer_drafts(db: Session, user: User, year: int, month: int) -> TransferResult:
     """Создать черновики корректировок по недобору закрытого месяца."""
-    if user.role not in month_close_service.CLOSE_ROLES:
+    if not can(user, "month_results", "close"):
         raise TransferError(
             "Черновики переноса создаёт коммерческий или исполнительный директор",
             status_code=403,

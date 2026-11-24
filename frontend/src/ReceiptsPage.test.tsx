@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Batch, Counterparty, Product, SessionUser } from './api'
 import { mockApi } from './apiMock'
 import { ReceiptsPage } from './ReceiptsPage'
+import { PERMISSIONS } from './testPermissions'
 
 const SUPPLIERS: Counterparty[] = [
   {
@@ -937,6 +938,7 @@ const IMPORT_USER: SessionUser = {
   full_name: 'Импортёр',
   role: 'import_manager',
   role_title: 'Менеджер по закупкам (импорт)',
+  permissions: PERMISSIONS.import_manager,
 }
 
 function draftBatch(overrides: Partial<Batch> = {}): Batch {
@@ -1071,7 +1073,11 @@ describe('ReceiptsPage — позиции из файла «Партия»', () 
 
   it('администратор правит поступление наравне с закупщиками', async () => {
     const user = userEvent.setup()
-    const admin: SessionUser = { ...IMPORT_USER, role: 'executive_director' }
+    const admin: SessionUser = {
+      ...IMPORT_USER,
+      role: 'executive_director',
+      permissions: PERMISSIONS.executive_director,
+    }
     mockApi(routes())
     render(<ReceiptsPage user={admin} />)
 
@@ -1085,7 +1091,11 @@ describe('ReceiptsPage — позиции из файла «Партия»', () 
 
   it('менеджер по продажам видит поступление только для чтения', async () => {
     const user = userEvent.setup()
-    const sales: SessionUser = { ...IMPORT_USER, role: 'sales_manager' }
+    const sales: SessionUser = {
+      ...IMPORT_USER,
+      role: 'sales_manager',
+      permissions: PERMISSIONS.sales_manager,
+    }
     mockApi(routes())
     render(<ReceiptsPage user={sales} />)
 
@@ -1154,6 +1164,7 @@ const DIRECTOR_USER: SessionUser = {
   full_name: 'Директор по закупкам',
   role: 'purchase_director',
   role_title: 'Директор по закупкам',
+  permissions: PERMISSIONS.purchase_director,
 }
 
 /** Тело запроса по фрагменту URL: мок пишет все вызовы fetch. */

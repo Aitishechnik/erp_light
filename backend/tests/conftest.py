@@ -18,7 +18,7 @@ from app.main import create_app
 from app.models.counterparties import Counterparty
 from app.models.countries import Country
 from app.models.domain import Product
-from app.services.auth import seed_demo_users
+from app.services.auth import seed_admin, seed_demo_users
 from tests.helpers import put_batch
 
 # Пароль демо-пользователей в тестах; роли — по логину (sales, commercial, ...).
@@ -62,6 +62,7 @@ def users(engine: Engine) -> None:
     factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     with factory() as session:
         seed_demo_users(session, DEMO_PASSWORD)
+        seed_admin(session, DEMO_PASSWORD)
 
 
 def _build_client(engine: Engine) -> TestClient:

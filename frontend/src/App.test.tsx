@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import type { SessionUser, StockRow } from './api'
 import { mockApi } from './apiMock'
+import { PERMISSIONS } from './testPermissions'
 
 const MANAGER: SessionUser = {
   id: 'sm-1',
@@ -11,6 +12,7 @@ const MANAGER: SessionUser = {
   full_name: 'Иван Петров',
   role: 'sales_manager',
   role_title: 'Менеджер по продажам',
+  permissions: PERMISSIONS['sales_manager'],
 }
 
 const PURCHASE_DIRECTOR: SessionUser = {
@@ -19,6 +21,7 @@ const PURCHASE_DIRECTOR: SessionUser = {
   full_name: 'Пётр Закупщиков',
   role: 'purchase_director',
   role_title: 'Директор по закупкам',
+  permissions: PERMISSIONS['purchase_director'],
 }
 
 const STOCK: StockRow[] = [

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PlanFactDetail, PlanFactMonth, PlanFactSummary, SessionUser } from './api'
 import { mockApi } from './apiMock'
 import { PlanFactPage, tone } from './PlanFactPage'
+import { PERMISSIONS } from './testPermissions'
 
 const SALES: SessionUser = {
   id: 'sm-1',
@@ -11,6 +12,7 @@ const SALES: SessionUser = {
   full_name: 'Менеджер по продажам',
   role: 'sales_manager',
   role_title: 'Менеджер по продажам',
+  permissions: PERMISSIONS['sales_manager'],
 }
 
 const MONTHS: PlanFactMonth[] = Array.from({ length: 12 }, (_, index) => ({

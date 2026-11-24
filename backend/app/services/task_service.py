@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.config import ROOT_DIR
 from app.models.auth import (
+    ROLE_ADMIN,
     ROLE_COMMERCIAL_DIRECTOR,
     ROLE_EXECUTIVE_DIRECTOR,
     ROLE_SALES_ASSISTANT,
@@ -49,6 +50,7 @@ from app.models.tasks import (
     TaskReportFile,
     TaskStep,
 )
+from app.permissions import can, scope_of
 from app.schemas.tasks import (
     TaskActionsOut,
     TaskAssigneeOut,
@@ -69,12 +71,6 @@ from app.schemas.tasks import (
     TaskUpdate,
 )
 from app.services import audit_service
-
-# Кто ставит задачи: коммерческий отдел во главе с исполнительным директором.
-TASK_CREATOR_ROLES = (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR)
-
-# Кто видит все задачи отдела: коммерческий и исполнительный директора.
-TASK_OVERSEER_ROLES = (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR)
 
 # Кому можно ставить задачу — зависит от того, кто ставит.
 ASSIGNABLE_BY: dict[str, tuple[str, ...]] = {
@@ -108,7 +104,8 @@ def _now() -> datetime:
 
 
 def _is_overseer(user: User) -> bool:
-    return user.role in TASK_OVERSEER_ROLES
+    """Видит все задачи: право «смотреть» с охватом «все»."""
+    return can(user, "tasks", "view") and scope_of(user, "tasks") == "all"
 
 
 def _is_participant(user: User, task: Task) -> bool:
@@ -116,7 +113,7 @@ def _is_participant(user: User, task: Task) -> bool:
 
 
 def _can_view(user: User, task: Task) -> bool:
-    return _is_overseer(user) or _is_participant(user, task)
+    return _is_overseer(user) or (can(user, "tasks", "view") and _is_participant(user, task))
 
 
 def _require_view(user: User, task: Task) -> None:
@@ -125,16 +122,14 @@ def _require_view(user: User, task: Task) -> None:
 
 
 def _require_manage(user: User, task: Task) -> None:
-    """Менять задачу может постановщик и исполнительный директор."""
-    if user.id != task.created_by_id and user.role != ROLE_EXECUTIVE_DIRECTOR:
-        raise TaskError(
-            "Менять задачу может постановщик или исполнительный директор", status_code=403
-        )
+    """Менять задачу может постановщик или тот, кому разрешено управление."""
+    if user.id != task.created_by_id and not can(user, "tasks", "manage"):
+        raise TaskError("Менять задачу может постановщик или директор", status_code=403)
 
 
 def _require_creator(user: User) -> None:
-    if user.role not in TASK_CREATOR_ROLES:
-        raise TaskError("Задачи ставит коммерческий или исполнительный директор", status_code=403)
+    if not can(user, "tasks", "create"):
+        raise TaskError("Ставить задачи вам недоступно", status_code=403)
 
 
 def _check_dates(start: date, due: date, *, what: str = "Сроки задачи") -> None:
@@ -221,6 +216,8 @@ def _assignee(db: Session, assignee_id: uuid.UUID | None, author: User) -> User:
     if person is None or not person.is_active:
         raise TaskError("Исполнитель не найден или отключён", status_code=422)
     allowed = ASSIGNABLE_BY.get(author.role, ())
+    if author.role == ROLE_ADMIN:
+        return person
     if person.role not in allowed:
         titles = ", ".join(ROLE_TITLES.get(role, role) for role in allowed)
         raise TaskError(f"Эту задачу может исполнять: {titles}", status_code=422)
@@ -559,7 +556,7 @@ def _to_out(task: Task) -> TaskOut:
 
 def _actions(user: User, task: Task) -> TaskActionsOut:
     """Что можно делать с задачей — по этому экран рисует кнопки."""
-    manage = user.id == task.created_by_id or user.role == ROLE_EXECUTIVE_DIRECTOR
+    manage = user.id == task.created_by_id or can(user, "tasks", "manage")
     closed = task.status in CLOSED_TASK_STATUSES
     return TaskActionsOut(
         can_edit=manage and not closed,
@@ -694,10 +691,11 @@ def get_task(db: Session, user: User, task_id: uuid.UUID) -> TaskDetailOut:
 def list_assignees(db: Session, user: User) -> list[TaskAssigneeOut]:
     """Кого можно назначить: список зависит от роли постановщика."""
     _require_creator(user)
-    roles = ASSIGNABLE_BY.get(user.role, ())
-    users = db.execute(
-        select(User).where(User.is_active.is_(True), User.role.in_(roles)).order_by(User.full_name)
-    )
+    statement = select(User).where(User.is_active.is_(True))
+    if user.role != ROLE_ADMIN:
+        roles = ASSIGNABLE_BY.get(user.role, ())
+        statement = statement.where(User.role.in_(roles))
+    users = db.execute(statement.order_by(User.full_name))
     return [
         TaskAssigneeOut(
             id=person.id,
@@ -846,10 +844,7 @@ def change_status(
         raise TaskError("Неизвестное действие со статусом", status_code=422)
     if action in ("reopen", "cancel"):
         _require_manage(user, task)
-    elif (
-        user.id not in (task.assignee_id, task.created_by_id)
-        and user.role != ROLE_EXECUTIVE_DIRECTOR
-    ):
+    elif user.id not in (task.assignee_id, task.created_by_id) and not can(user, "tasks", "manage"):
         raise TaskError("Действие доступно участникам задачи", status_code=403)
     allowed_from = _STATUS_FLOW[action]
     if task.status not in allowed_from:
@@ -1281,10 +1276,7 @@ def upload_report_file(
     """Прикрепить файл к отчёту: проверяем права, размер, тип и количество."""
     task = _load(db, task_id)
     _require_view(user, task)
-    if (
-        user.id not in (task.assignee_id, task.created_by_id)
-        and user.role != ROLE_EXECUTIVE_DIRECTOR
-    ):
+    if user.id not in (task.assignee_id, task.created_by_id) and not can(user, "tasks", "manage"):
         raise TaskError("Приложить файл может исполнитель или постановщик", status_code=403)
     locked_id = db.execute(
         select(TaskReport.id).where(TaskReport.id == report_id).with_for_update()
@@ -1360,7 +1352,7 @@ def delete_report_file(db: Session, user: User, task_id: uuid.UUID, file_id: uui
         raise TaskError("Файл не найден", status_code=404)
     report = db.get(TaskReport, file.report_id)
     allowed = (
-        user.role == ROLE_EXECUTIVE_DIRECTOR
+        can(user, "tasks", "manage")
         or user.id == file.uploaded_by_id
         or (report is not None and report.author_id == user.id)
     )

@@ -2,10 +2,10 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   type AnnualSalesPlan,
   annualSalesPlanAction,
+  can,
   errorMessage,
   fetchAnnualSalesPlan,
   formatQuantity,
-  isAdmin,
   MONTH_TITLES,
   rejectAnnualSalesPlan,
   reopenAnnualSalesPlan,
@@ -23,9 +23,8 @@ export function AnnualSalesPlanPage({ user, focus }: { user: SessionUser; focus?
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
 
-  const isCommercial = user.role === 'commercial_director'
-  const isExecutive = user.role === 'executive_director'
-  const hasAdmin = isAdmin(user)
+  const maySubmit = can(user, 'annual_plan', 'submit')
+  const mayApprove = can(user, 'annual_plan', 'approve')
 
   const reload = useCallback(async () => {
     try {
@@ -70,11 +69,9 @@ export function AnnualSalesPlanPage({ user, focus }: { user: SessionUser; focus?
   }
 
   const canSubmit =
-    (isCommercial || hasAdmin) &&
-    annual.all_approved &&
-    (annual.status === 'draft' || annual.status === 'revision')
-  const canApprove = isExecutive && annual.status === 'on_review'
-  const canReopen = isExecutive && annual.status === 'approved'
+    maySubmit && annual.all_approved && (annual.status === 'draft' || annual.status === 'revision')
+  const canApprove = mayApprove && annual.status === 'on_review'
+  const canReopen = mayApprove && annual.status === 'approved'
   const items = managerFilter
     ? annual.items.filter((row) => row.manager_id === managerFilter)
     : annual.items
@@ -223,9 +220,7 @@ export function AnnualSalesPlanPage({ user, focus }: { user: SessionUser; focus?
             Вернуть в работу
           </button>
         ) : null}
-        {!isCommercial && !isExecutive ? (
-          <span className="status-chip">Только просмотр</span>
-        ) : null}
+        {!maySubmit && !mayApprove ? <span className="status-chip">Только просмотр</span> : null}
       </div>
 
       <table data-testid="annual-managers">

@@ -11,6 +11,7 @@ import {
   type PlanFactRow,
   type PlanFactSummary,
   type SessionUser,
+  scopeOf,
 } from './api'
 import { PageHelp } from './PageHelp'
 
@@ -364,7 +365,7 @@ function ClientGroup({
 }
 
 export function PlanFactPage({ user, initialYear }: { user: SessionUser; initialYear?: number }) {
-  const isManager = user.role === 'sales_manager'
+  const isManager = scopeOf(user, 'plan_fact') === 'own'
   const thisYear = new Date().getFullYear()
   const [year, setYear] = useState(initialYear ?? thisYear)
   const [managerId, setManagerId] = useState('')

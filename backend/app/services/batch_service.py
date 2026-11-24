@@ -228,7 +228,13 @@ def serialize_batch(
         finance = finance_for_batch(batch, expense_rates=expense_rate_map)
 
     items: list[BatchItemOut] = []
-    for item, cost in zip(batch.items, finance.items, strict=True):
+    # Порядок строк задаём сами: связь без order_by возвращает их как придётся,
+    # а карточка не должна переставлять строки между запросами.
+    pairs = sorted(
+        zip(batch.items, finance.items, strict=True),
+        key=lambda pair: (pair[0].product.code, str(pair[0].id)),
+    )
+    for item, cost in pairs:
         snapshot = snaps.get(item.id)
         on_hand = snapshot.quantity if snapshot is not None else item.quantity
         items.append(

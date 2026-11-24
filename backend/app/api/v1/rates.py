@@ -8,21 +8,22 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.api.deps import CurrentUser, DbSession, require_roles
-from app.models.auth import ROLE_IMPORT_MANAGER, ROLE_PURCHASE_DIRECTOR, User
+from app.api.deps import DbSession, require_perm
+from app.models.auth import User
 from app.schemas.rates import RateOut
 from app.services import currency_service
 from app.services.currency_service import RateError
 
 router = APIRouter(tags=["rates"])
 
-Refresher = Annotated[User, Depends(require_roles(ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER))]
+Refresher = Annotated[User, Depends(require_perm("rates", "refresh"))]
+Viewer = Annotated[User, Depends(require_perm("rates", "view"))]
 
 
 @router.get("/rates/{code}", response_model=RateOut)
 def get_rate(
     code: str,
-    user: CurrentUser,
+    user: Viewer,
     db: DbSession,
     day: Annotated[date | None, Query(alias="date", description="Дата курса")] = None,
 ) -> RateOut:

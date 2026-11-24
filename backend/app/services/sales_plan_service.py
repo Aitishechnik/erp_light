@@ -1,9 +1,8 @@
-"""Годовой план продаж: создание, заполнение, согласование.
+"""План продаж: создание, заполнение, согласование.
 
 Цепочка статусов: черновик → заполняется → на проверке → утверждён.
-Права: менеджер по продажам ведёт свой план, коммерческий директор создаёт план
-на любого менеджера и утверждает/отклоняет, исполнительный директор видит всё,
-закупки (директор по закупкам и импорт) видят все планы только на чтение.
+Что можно — решает матрица прав: блок «Планирование продаж» и охват
+«только свои» / «все». Кто именно считается менеджером плана — правило домена.
 """
 
 from __future__ import annotations
@@ -14,21 +13,14 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.auth import (
-    ROLE_COMMERCIAL_DIRECTOR,
-    ROLE_EXECUTIVE_DIRECTOR,
-    ROLE_IMPORT_MANAGER,
-    ROLE_PURCHASE_DIRECTOR,
-    ROLE_SALES_MANAGER,
-    User,
-    is_admin,
-)
+from app.models.auth import ROLE_SALES_MANAGER, User
 from app.models.counterparties import Counterparty
 from app.models.planning import (
     SALES_PLAN_STATUS_TITLES,
     SalesPlan,
     SalesPlanItem,
 )
+from app.permissions import can, scope_of
 from app.schemas.planning import SalesPlanCreate, SalesPlanItemIn, SalesPlanItemOut, SalesPlanOut
 from app.services import audit_service
 from app.services.plan_freeze import check_months_editable, editable_months
@@ -67,27 +59,16 @@ def _require(db: Session, plan_id: uuid.UUID) -> SalesPlan:
     return plan
 
 
-def _is_overseer(user: User) -> bool:
-    return user.role in (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR)
-
-
-def _is_purchase_viewer(user: User) -> bool:
-    """Закупки смотрят планы продаж, но не правят их."""
-    return user.role in (ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER)
-
-
 def _check_view(user: User, plan: SalesPlan) -> None:
-    if _is_overseer(user) or _is_purchase_viewer(user):
-        return
-    if user.role == ROLE_SALES_MANAGER and plan.manager_id == user.id:
-        return
-    raise PlanError("Этот план вам не виден", status_code=403)
+    if not can(user, "sales_plans", "view"):
+        raise PlanError("Планы продаж вам не видны", status_code=403)
+    if scope_of(user, "sales_plans") == "own" and plan.manager_id != user.id:
+        raise PlanError("Этот план вам не виден", status_code=403)
 
 
-def _check_commercial_director(user: User) -> None:
-    """Действия коммерческого директора; администратор может всё то же самое."""
-    if user.role != ROLE_COMMERCIAL_DIRECTOR and not is_admin(user):
-        raise PlanError("Действие доступно коммерческому директору", status_code=403)
+def _check_approve(user: User) -> None:
+    if not can(user, "sales_plans", "approve"):
+        raise PlanError("Утверждать план продаж вам недоступно", status_code=403)
 
 
 def _check_clients(db: Session, client_ids: set[uuid.UUID]) -> None:
@@ -147,10 +128,10 @@ def list_plans(db: Session, user: User, *, year: int | None = None) -> list[Sale
         .options(selectinload(SalesPlan.items).selectinload(SalesPlanItem.client))
         .order_by(SalesPlan.year.desc(), SalesPlan.created_at)
     )
-    if user.role == ROLE_SALES_MANAGER:
-        statement = statement.where(SalesPlan.manager_id == user.id)
-    elif not (_is_overseer(user) or _is_purchase_viewer(user)):
+    if not can(user, "sales_plans", "view"):
         raise PlanError("Планы продаж вам не видны", status_code=403)
+    if scope_of(user, "sales_plans") == "own":
+        statement = statement.where(SalesPlan.manager_id == user.id)
     if year is not None:
         statement = statement.where(SalesPlan.year == year)
     return [_serialize(plan) for plan in db.execute(statement).scalars().all()]
@@ -163,17 +144,15 @@ def get_plan(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
 
 
 def create_plan(db: Session, user: User, payload: SalesPlanCreate) -> SalesPlanOut:
-    """Менеджер создаёт свой план; коммерческий директор или админ — на любого."""
-    if user.role == ROLE_SALES_MANAGER:
+    """Охват «свои» заводит план на себя, «все» — на выбранного менеджера."""
+    if not can(user, "sales_plans", "edit"):
+        raise PlanError("Создавать план продаж вам недоступно", status_code=403)
+    if scope_of(user, "sales_plans") == "own":
         manager_id = user.id
-    elif user.role == ROLE_COMMERCIAL_DIRECTOR or is_admin(user):
+    else:
         if payload.manager_id is None:
             raise PlanError("Укажите менеджера, на которого создаётся план")
         manager_id = payload.manager_id
-    else:
-        raise PlanError(
-            "Создавать план продаж может менеджер или коммерческий директор", status_code=403
-        )
 
     manager = db.get(User, manager_id)
     if manager is None or not manager.is_active:
@@ -210,12 +189,13 @@ def update_items(
     plan = _require(db, plan_id)
     _check_view(user, plan)
 
-    is_owner = user.role == ROLE_SALES_MANAGER and plan.manager_id == user.id
-    if is_owner:
+    if not can(user, "sales_plans", "edit"):
+        raise PlanError("Правка плана вам недоступна", status_code=403)
+    if scope_of(user, "sales_plans") == "own":
+        if plan.manager_id != user.id:
+            raise PlanError("Правка плана вам недоступна", status_code=403)
         if plan.status not in EDITABLE_BY_OWNER:
             raise PlanError("План на проверке или утверждён — правки недоступны", status_code=409)
-    elif user.role != ROLE_COMMERCIAL_DIRECTOR and not is_admin(user):
-        raise PlanError("Правка плана вам недоступна", status_code=403)
 
     check_months_editable(plan.year, {item.month for item in items})
 
@@ -266,8 +246,9 @@ def update_items(
 
 
 def send_to_fill(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
-    """Коммерческий директор отдаёт план менеджеру на заполнение."""
-    _check_commercial_director(user)
+    """Отдать черновик менеджеру на заполнение."""
+    if not can(user, "sales_plans", "dispatch"):
+        raise PlanError("Отдавать план на заполнение вам недоступно", status_code=403)
     plan = _require(db, plan_id)
     if plan.status != "draft":
         raise PlanError("На заполнение отправляется только черновик", status_code=409)
@@ -279,8 +260,9 @@ def send_to_fill(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
 def submit(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
     """Менеджер отправляет свой план на проверку; администратор — любой."""
     plan = _require(db, plan_id)
-    is_owner = user.role == ROLE_SALES_MANAGER and plan.manager_id == user.id
-    if not (is_owner or is_admin(user)):
+    if not can(user, "sales_plans", "submit"):
+        raise PlanError("Отправлять план на проверку вам недоступно", status_code=403)
+    if scope_of(user, "sales_plans") == "own" and plan.manager_id != user.id:
         raise PlanError("Отправить план может только его менеджер", status_code=403)
     if plan.status not in EDITABLE_BY_OWNER:
         raise PlanError("План уже на проверке или утверждён", status_code=409)
@@ -292,8 +274,8 @@ def submit(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
 
 
 def approve(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
-    """Коммерческий директор утверждает план."""
-    _check_commercial_director(user)
+    """Утвердить план на проверке."""
+    _check_approve(user)
     plan = _require(db, plan_id)
     if plan.status != "on_review":
         raise PlanError("Утвердить можно только план на проверке", status_code=409)
@@ -313,8 +295,8 @@ def approve(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
 
 
 def reject(db: Session, user: User, plan_id: uuid.UUID, reason: str) -> SalesPlanOut:
-    """Коммерческий директор возвращает план на доработку."""
-    _check_commercial_director(user)
+    """Вернуть план на доработку."""
+    _check_approve(user)
     plan = _require(db, plan_id)
     if plan.status != "on_review":
         raise PlanError("Отклонить можно только план на проверке", status_code=409)
@@ -329,8 +311,9 @@ def reject(db: Session, user: User, plan_id: uuid.UUID, reason: str) -> SalesPla
 def delete_plan(db: Session, user: User, plan_id: uuid.UUID) -> None:
     """Удаление черновика: коммерческий директор, администратор или владелец."""
     plan = _require(db, plan_id)
-    is_owner = user.role == ROLE_SALES_MANAGER and plan.manager_id == user.id
-    if not (is_owner or user.role == ROLE_COMMERCIAL_DIRECTOR or is_admin(user)):
+    if not can(user, "sales_plans", "delete"):
+        raise PlanError("Удалить план вам недоступно", status_code=403)
+    if scope_of(user, "sales_plans") == "own" and plan.manager_id != user.id:
         raise PlanError("Удалить план вам недоступно", status_code=403)
     if plan.status not in EDITABLE_BY_OWNER:
         raise PlanError("Удалить можно только черновик или план на заполнении", status_code=409)

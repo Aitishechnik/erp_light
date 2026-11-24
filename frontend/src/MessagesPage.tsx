@@ -7,6 +7,7 @@ import {
   fetchJournal,
   fetchMessages,
   markAllMessagesRead,
+  scopeOf,
 } from './api'
 import { PageHelp } from './PageHelp'
 
@@ -140,8 +141,8 @@ export function MessagesPage({ user }: Props) {
         <h1>Служебные сообщения</h1>
         <PageHelp>
           Журнал фиксирует действия, которые меняют планы, справочники и поступления.
-          {user.role === 'executive_director'
-            ? ' Исполнительный директор видит действия всех сотрудников.'
+          {scopeOf(user, 'journal') === 'all'
+            ? ' Вы видите действия всех сотрудников.'
             : ' Здесь ваши действия и сообщения, адресованные вам.'}{' '}
           Непрочитанные — в колокольчике, прочитанные остаются здесь.
         </PageHelp>

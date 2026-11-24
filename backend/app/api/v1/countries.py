@@ -11,8 +11,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.api.deps import CurrentUser, DbSession, require_roles
-from app.models.auth import ROLE_PURCHASE_DIRECTOR, User
+from app.api.deps import DbSession, require_perm
+from app.models.auth import User
 from app.models.countries import Country
 from app.schemas.countries import CountryIn, CountryOut, CountryUpdate
 from app.services import audit_service
@@ -21,7 +21,8 @@ from app.services.directory_service import DirectoryError
 
 router = APIRouter(tags=["countries"])
 
-Writer = Annotated[User, Depends(require_roles(ROLE_PURCHASE_DIRECTOR))]
+Writer = Annotated[User, Depends(require_perm("countries", "edit"))]
+Viewer = Annotated[User, Depends(require_perm("countries", "view"))]
 
 
 def _fail(exc: DirectoryError) -> HTTPException:
@@ -30,7 +31,7 @@ def _fail(exc: DirectoryError) -> HTTPException:
 
 @router.get("/countries", response_model=list[CountryOut])
 def list_countries(
-    user: CurrentUser,
+    user: Viewer,
     db: DbSession,
     include_inactive: bool = Query(default=False, description="Показать и отключённые"),
 ) -> list[CountryOut]:

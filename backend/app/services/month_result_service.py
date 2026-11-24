@@ -20,12 +20,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.auth import (
-    ROLE_COMMERCIAL_DIRECTOR,
-    ROLE_EXECUTIVE_DIRECTOR,
-    ROLE_SALES_MANAGER,
-    User,
-)
+from app.models.auth import User
 from app.models.counterparties import Counterparty
 from app.models.domain import Product
 from app.models.monthly_plans import MonthlySalesPlan
@@ -37,12 +32,12 @@ from app.models.sales import (
     SalesFact,
     SalesFactUnmatched,
 )
+from app.permissions import can, scope_of
 
 ZERO = Decimal("0")
 
 # Кто видит очередь сопоставления. Очередь — рабочий инструмент тех, кто сопоставляет;
 # остальным она показывает чужие клиенты, количество и суммы.
-MATCH_ROLES = (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR)
 
 
 @dataclass(frozen=True)
@@ -267,7 +262,7 @@ def month_summary(db: Session, user: User, year: int, month: int) -> MonthSummar
             )
         )
 
-    if user.role == ROLE_SALES_MANAGER:
+    if scope_of(user, "month_results") == "own":
         rows = [row for row in rows if row.manager_id == user.id]
 
     rows.sort(key=lambda row: (row.manager_name or "", row.client_name, row.product_name))
@@ -276,7 +271,7 @@ def month_summary(db: Session, user: User, year: int, month: int) -> MonthSummar
         month=month,
         plan_approved=_plan_approved(db, year),
         rows=rows,
-        unmatched=month_unmatched(db, year, month) if user.role in MATCH_ROLES else [],
+        unmatched=month_unmatched(db, year, month) if can(user, "month_results", "match") else [],
     )
 
 
@@ -327,7 +322,6 @@ class ReasonError(Exception):
 
 # Кто ставит причины: менеджер по своим строкам, коммерческий директор
 # и администратор (исполнительный директор) — по всем.
-REASON_ROLES = (ROLE_SALES_MANAGER, ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR)
 MAX_COMMENT = 500
 
 
@@ -367,8 +361,8 @@ def set_reason(
     comment: str | None,
 ) -> DeviationReason:
     """Поставить или изменить причину отклонения по строке месяца."""
-    if user.role not in REASON_ROLES:
-        raise ReasonError("Причину ставит менеджер или коммерческий директор", status_code=403)
+    if not can(user, "month_results", "reasons"):
+        raise ReasonError("Ставить причины вам недоступно", status_code=403)
     if _month_closed(db, year, month):
         raise ReasonError("Месяц закрыт — причину менять нельзя", status_code=409)
     if reason not in REASON_CODES:
@@ -418,8 +412,8 @@ def clear_reason(
     db: Session, user: User, year: int, month: int, client_id: uuid.UUID, product_id: uuid.UUID
 ) -> None:
     """Снять причину: строка снова попадёт в «без причины»."""
-    if user.role not in REASON_ROLES:
-        raise ReasonError("Причину снимает менеджер или коммерческий директор", status_code=403)
+    if not can(user, "month_results", "reasons"):
+        raise ReasonError("Снимать причины вам недоступно", status_code=403)
     if _month_closed(db, year, month):
         raise ReasonError("Месяц закрыт — причину менять нельзя", status_code=409)
     _find_row(db, user, year, month, client_id, product_id)

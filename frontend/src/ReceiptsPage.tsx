@@ -4,6 +4,7 @@ import {
   type Batch,
   type BatchIn,
   type Counterparty,
+  can,
   cancelCustoms,
   deleteBatch,
   type ExpenseCurrency,
@@ -15,19 +16,16 @@ import {
   fetchPurchasePlans,
   fetchRate,
   formatMoney,
-  isAdmin,
   type PaymentCategory,
   PLANNING_PRODUCT_KINDS,
   type Product,
   type PurchasePlan,
-  type Role,
   type SessionUser,
   updateBatch,
   uploadBatchItems,
 } from './api'
 
 /** Позиции из файла «Партия» грузят те же роли, что правят поступления. */
-const ITEM_IMPORT_ROLES: Role[] = ['purchase_director', 'import_manager']
 
 /** Подпись валюты партии: для рубля — знак, для остальных — код. */
 function currencyLabel(currency: string): string {
@@ -672,10 +670,10 @@ export function ReceiptsPage({ user, focus }: { user?: SessionUser; focus?: stri
   // префикс другой — иначе React получает два элемента с одинаковым ключом.
   const keyCounter = useRef(1)
   const nextKey = (prefix: string) => `${prefix}new${keyCounter.current++}`
-  const mayEdit = !user || isAdmin(user) || ITEM_IMPORT_ROLES.includes(user.role)
+  const mayEdit = !user || can(user, 'receipts', 'edit')
   // Позиции из 1С и строку плана грузят те же роли, что правят карточку.
   // Отмена растаможки — директору по закупкам и администратору (контракт, §4).
-  const mayCancelCustoms = !user || isAdmin(user) || user.role === 'purchase_director'
+  const mayCancelCustoms = !user || can(user, 'receipts', 'customs')
 
   const reload = useCallback(async () => {
     const first = `${month}-01`

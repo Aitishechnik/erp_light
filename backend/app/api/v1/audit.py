@@ -8,7 +8,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import AdminUser, CurrentUser, DbSession
 from app.schemas.audit import (
     AuditEventOut,
     CleanupIn,
@@ -94,4 +94,19 @@ def journal(
             before=before,
         )
     except audit_service.AuditError as exc:  # pragma: no cover - защита на будущее
+        raise HTTPException(exc.status_code, exc.message) from exc
+
+
+@router.get("/admin/audit", response_model=list[AuditEventOut])
+def admin_journal(
+    user: AdminUser,
+    db: DbSession,
+    action: Annotated[str | None, Query(description="Код события")] = None,
+    limit: int = Query(default=50, ge=1, le=100),
+    before: Annotated[datetime | None, Query(description="Курсор: старше этой даты")] = None,
+) -> list[AuditEventOut]:
+    """Отдельный журнал администратора: только его действия, и только для него."""
+    try:
+        return audit_service.admin_journal(db, user, action=action, limit=limit, before=before)
+    except audit_service.AuditError as exc:
         raise HTTPException(exc.status_code, exc.message) from exc

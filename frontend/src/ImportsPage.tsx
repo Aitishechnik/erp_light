@@ -1,11 +1,11 @@
 import { type ChangeEvent, Fragment, useCallback, useEffect, useState } from 'react'
 import {
+  can,
   errorMessage,
   fetchImportKinds,
   fetchImports,
   type ImportKind,
   type ImportSession,
-  isAdmin,
   type SessionUser,
   uploadImport,
 } from './api'
@@ -96,7 +96,7 @@ export function ImportsPage({ user }: { user?: SessionUser }) {
 
       <div className="import-cards">
         {kinds
-          .filter((kind) => !user || isAdmin(user) || kind.roles.includes(user.role))
+          .filter((kind) => !user || can(user, 'imports', kind.kind))
           .map((kind) => {
             const result = results[kind.kind]
             return (

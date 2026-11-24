@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionUser, Task, TaskDetail } from './api'
 import { mockApi } from './apiMock'
 import { TasksPage } from './TasksPage'
+import { PERMISSIONS } from './testPermissions'
 
 const MANAGER: SessionUser = {
   id: 'sm-1',
@@ -11,6 +12,7 @@ const MANAGER: SessionUser = {
   full_name: 'Иван Петров',
   role: 'sales_manager',
   role_title: 'Менеджер по продажам',
+  permissions: PERMISSIONS['sales_manager'],
 }
 
 const TASK: Task = {
@@ -173,6 +175,7 @@ const COMMERCIAL: SessionUser = {
   full_name: 'Коммерческий директор',
   role: 'commercial_director',
   role_title: 'Коммерческий директор',
+  permissions: PERMISSIONS['commercial_director'],
 }
 
 describe('TasksPage — права отдела', () => {

@@ -1,12 +1,10 @@
 """Корректировка утверждённого плана менеджера.
 
 Утверждённый план напрямую не правится. Корректировка — полная редактируемая копия
-строк плана на редактируемые месяцы: можно менять объёмы, добавлять и удалять
-клиентов, товары и позиции. Черновик правит владелец плана, коммерческий директор
-или исполнительный директор; отправляет его на утверждение один из них, а
-утверждает коммерческий директор. Применение заменяет строки плана на редактируемых
-месяцах и снимает утверждение годового плана отдела — его повторно утверждает
-генеральный директор.
+строк плана на редактируемые месяцы. Кто предлагает и кто утверждает — решает
+блок «Корректировки плана продаж»: право и охват «только свои» / «все».
+Применение заменяет строки плана на редактируемых месяцах и снимает утверждение
+годового плана отдела.
 """
 
 from __future__ import annotations
@@ -18,12 +16,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.auth import (
-    ROLE_COMMERCIAL_DIRECTOR,
-    ROLE_EXECUTIVE_DIRECTOR,
-    ROLE_SALES_MANAGER,
-    User,
-)
+from app.models.auth import User
 from app.models.counterparties import Counterparty
 from app.models.domain import Product
 from app.models.planning import (
@@ -34,6 +27,7 @@ from app.models.planning import (
     SalesPlanCorrectionItem,
     SalesPlanItem,
 )
+from app.permissions import can, scope_of
 from app.schemas.planning import (
     SalesPlanCorrectionCreate,
     SalesPlanCorrectionItemIn,
@@ -106,32 +100,23 @@ def _require_correction(db: Session, correction_id: uuid.UUID) -> SalesPlanCorre
 
 
 def _check_can_propose(user: User, plan: SalesPlan) -> None:
-    """Корректировку предлагает владелец, коммерческий или исполнительный директор."""
-    if user.role in (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR):
-        return
-    if user.role == ROLE_SALES_MANAGER and plan.manager_id == user.id:
-        return
-    raise CorrectionError(
-        "Создать корректировку может владелец плана, коммерческий или " "исполнительный директор",
-        status_code=403,
-    )
+    """Корректировку предлагает тот, кому разрешён блок и чей это план."""
+    if not can(user, "corrections", "propose"):
+        raise CorrectionError("Предлагать корректировку вам недоступно", status_code=403)
+    if scope_of(user, "corrections") == "own" and plan.manager_id != user.id:
+        raise CorrectionError("Это план другого менеджера", status_code=403)
 
 
 def _check_commercial(user: User) -> None:
-    """Утверждает и отклоняет корректировку коммерческий или исполнительный директор."""
-    if user.role not in (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR):
-        raise CorrectionError(
-            "Утверждает корректировку коммерческий или исполнительный директор",
-            status_code=403,
-        )
+    if not can(user, "corrections", "approve"):
+        raise CorrectionError("Утверждать корректировку вам недоступно", status_code=403)
 
 
 def _check_view(user: User, plan: SalesPlan) -> None:
-    if user.role in (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR):
-        return
-    if user.role == ROLE_SALES_MANAGER and plan.manager_id == user.id:
-        return
-    raise CorrectionError("Корректировка вам не видна", status_code=403)
+    if not can(user, "corrections", "view"):
+        raise CorrectionError("Корректировка вам не видна", status_code=403)
+    if scope_of(user, "corrections") == "own" and plan.manager_id != user.id:
+        raise CorrectionError("Корректировка вам не видна", status_code=403)
 
 
 def _plan_hash(plan: SalesPlan) -> str:

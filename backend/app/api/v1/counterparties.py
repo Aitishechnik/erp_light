@@ -7,17 +7,18 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.api.deps import CurrentUser, DbSession, require_roles
+from app.api.deps import DbSession, require_perm
 from app.models.auth import User
 from app.models.counterparties import Counterparty
 from app.schemas.counterparties import CounterpartyIn, CounterpartyOut, CounterpartyUpdate
 from app.services import audit_service
 from app.services import directory_service as service
-from app.services.directory_service import DIRECTORY_WRITE_ROLES, DirectoryError
+from app.services.directory_service import DirectoryError
 
 router = APIRouter(tags=["counterparties"])
 
-Writer = Annotated[User, Depends(require_roles(*DIRECTORY_WRITE_ROLES))]
+Writer = Annotated[User, Depends(require_perm("directories", "edit"))]
+Viewer = Annotated[User, Depends(require_perm("directories", "view"))]
 
 # Фильтр «роль контрагента» → колонка-признак.
 # Что именно поменяли — по-русски, а не именами полей.
@@ -53,7 +54,7 @@ def _out(row: Counterparty) -> CounterpartyOut:
 
 @router.get("/counterparties", response_model=list[CounterpartyOut])
 def list_counterparties(
-    user: CurrentUser,
+    user: Viewer,
     db: DbSession,
     role: str | None = Query(
         default=None, description="customer | local_supplier | import_supplier"
@@ -76,9 +77,7 @@ def list_counterparties(
 
 
 @router.get("/counterparties/{counterparty_id}", response_model=CounterpartyOut)
-def get_counterparty(
-    counterparty_id: uuid.UUID, user: CurrentUser, db: DbSession
-) -> CounterpartyOut:
+def get_counterparty(counterparty_id: uuid.UUID, user: Viewer, db: DbSession) -> CounterpartyOut:
     """Один контрагент: по нему таблица показывает объект из сообщения."""
     try:
         return _out(service.get_counterparty(db, counterparty_id))

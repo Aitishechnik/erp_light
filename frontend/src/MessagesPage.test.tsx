@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AuditEvent, SessionUser } from './api'
 import { mockApi } from './apiMock'
 import { MessagesPage } from './MessagesPage'
+import { PERMISSIONS } from './testPermissions'
 
 const PURCHASE: SessionUser = {
   id: 'pd-1',
@@ -11,6 +12,7 @@ const PURCHASE: SessionUser = {
   full_name: 'Пётр Закупщиков',
   role: 'purchase_director',
   role_title: 'Директор по закупкам',
+  permissions: PERMISSIONS['purchase_director'],
 }
 
 const EXECUTIVE: SessionUser = {
@@ -19,6 +21,7 @@ const EXECUTIVE: SessionUser = {
   full_name: 'Ольга Директорова',
   role: 'executive_director',
   role_title: 'Исполнительный директор',
+  permissions: PERMISSIONS['executive_director'],
 }
 
 function event(overrides: Partial<AuditEvent> = {}): AuditEvent {

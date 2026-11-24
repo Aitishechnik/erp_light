@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Counterparty, SalesPlan, SalesPlanCorrection, SessionUser } from './api'
 import { mockApi } from './apiMock'
 import { SalesPlansPage } from './SalesPlansPage'
+import { PERMISSIONS } from './testPermissions'
 
 const YEAR = new Date().getFullYear()
 
@@ -13,6 +14,7 @@ const COMMERCIAL: SessionUser = {
   full_name: 'Коммерческий директор',
   role: 'commercial_director',
   role_title: 'Коммерческий директор',
+  permissions: PERMISSIONS['commercial_director'],
 }
 
 const MANAGER: SessionUser = {
@@ -21,6 +23,7 @@ const MANAGER: SessionUser = {
   full_name: 'Иван Петров',
   role: 'sales_manager',
   role_title: 'Менеджер по продажам',
+  permissions: PERMISSIONS['sales_manager'],
 }
 
 const EXECUTIVE: SessionUser = {
@@ -29,6 +32,7 @@ const EXECUTIVE: SessionUser = {
   full_name: 'Исполнительный директор',
   role: 'executive_director',
   role_title: 'Исполнительный директор',
+  permissions: PERMISSIONS['executive_director'],
 }
 
 const PURCHASE: SessionUser = {
@@ -37,6 +41,7 @@ const PURCHASE: SessionUser = {
   full_name: 'Пётр Закупщиков',
   role: 'purchase_director',
   role_title: 'Директор по закупкам',
+  permissions: PERMISSIONS['purchase_director'],
 }
 
 const CLIENTS: Counterparty[] = [

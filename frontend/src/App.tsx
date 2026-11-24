@@ -1,13 +1,7 @@
 import { useEffect, useState } from 'react'
+import { AdminLogPage } from './AdminLogPage'
 import { AnnualSalesPlanPage } from './AnnualSalesPlanPage'
-import {
-  ANNUAL_SALES_PLAN_ROLES,
-  logout as apiLogout,
-  fetchMe,
-  type Role,
-  SALES_PLAN_ROLES,
-  type SessionUser,
-} from './api'
+import { logout as apiLogout, can, fetchMe, isAdmin, type SessionUser } from './api'
 import { CounterpartiesPage } from './CounterpartiesPage'
 import { CountriesPage } from './CountriesPage'
 import { ImportsPage } from './ImportsPage'
@@ -41,6 +35,7 @@ import {
   saveSidebarCollapsed,
   type Theme,
 } from './theme'
+import { UsersRolesPage } from './UsersRolesPage'
 
 type SectionId =
   | 'sales'
@@ -61,13 +56,17 @@ type SectionId =
   | 'imports'
   | 'messages'
   | 'users'
+  | 'adminlog'
   | 'settings'
 
 type Section = {
   id: SectionId
   title: string
   ready: boolean
-  roles?: Role[]
+  /** Какое право открывает раздел; без права раздел видят все вошедшие. */
+  perm?: { block: string; action: string }
+  /** Раздел только для единственного администратора. */
+  adminOnly?: boolean
 }
 
 type Group = {
@@ -78,33 +77,30 @@ type Group = {
   direct?: boolean
 }
 
-const PURCHASE_ROLES: Role[] = ['purchase_director', 'import_manager', 'executive_director']
-
-/** Задачи видит коммерческий отдел: продажи, ассистент и оба директора. */
-const TASK_ROLES: Role[] = [
-  'sales_manager',
-  'sales_assistant',
-  'commercial_director',
-  'executive_director',
-]
-
-/** Итоги месяца: продажи против плана. Импорт и закупки смотрят, продажи и директора — все. */
-const MONTH_ROLES: Role[] = [
-  'sales_manager',
-  'commercial_director',
-  'executive_director',
-  'purchase_director',
-]
-
 /** Основные категории меню; внутри — разделы, которые раскрываются по стрелке. */
 const GROUPS: Group[] = [
   {
     id: 'planning',
     title: 'Планирование',
     sections: [
-      { id: 'sales', title: 'Планирование продаж', ready: true, roles: SALES_PLAN_ROLES },
-      { id: 'annual', title: 'Годовой план отдела', ready: true, roles: ANNUAL_SALES_PLAN_ROLES },
-      { id: 'purchase', title: 'План закупок сырья', ready: true, roles: PURCHASE_ROLES },
+      {
+        id: 'sales',
+        title: 'Планирование продаж',
+        ready: true,
+        perm: { block: 'sales_plans', action: 'view' },
+      },
+      {
+        id: 'annual',
+        title: 'Годовой план отдела',
+        ready: true,
+        perm: { block: 'annual_plan', action: 'view' },
+      },
+      {
+        id: 'purchase',
+        title: 'План закупок сырья',
+        ready: true,
+        perm: { block: 'purchase_plan', action: 'view' },
+      },
       { id: 'pricing', title: 'Матрица цен', ready: false },
     ],
   },
@@ -112,7 +108,12 @@ const GROUPS: Group[] = [
     id: 'purchases',
     title: 'Закупки',
     sections: [
-      { id: 'receipts', title: 'Поступления', ready: true },
+      {
+        id: 'receipts',
+        title: 'Поступления',
+        ready: true,
+        perm: { block: 'receipts', action: 'view' },
+      },
       { id: 'suppliers', title: 'Поставщики', ready: false },
     ],
   },
@@ -120,19 +121,49 @@ const GROUPS: Group[] = [
     id: 'catalogs',
     title: 'Справочники',
     sections: [
-      { id: 'nomenclature', title: 'Номенклатура', ready: true },
-      { id: 'counterparties', title: 'Контрагенты', ready: true },
+      {
+        id: 'nomenclature',
+        title: 'Номенклатура',
+        ready: true,
+        perm: { block: 'directories', action: 'view' },
+      },
+      {
+        id: 'counterparties',
+        title: 'Контрагенты',
+        ready: true,
+        perm: { block: 'directories', action: 'view' },
+      },
       { id: 'currencies', title: 'Валюты', ready: false },
-      { id: 'countries', title: 'Страны', ready: true },
+      {
+        id: 'countries',
+        title: 'Страны',
+        ready: true,
+        perm: { block: 'countries', action: 'view' },
+      },
     ],
   },
   {
     id: 'reports',
     title: 'Отчёты',
     sections: [
-      { id: 'stock', title: 'Остатки по партиям', ready: true },
-      { id: 'month', title: 'Итоги месяца', ready: true, roles: MONTH_ROLES },
-      { id: 'planfact', title: 'План и факт', ready: true, roles: MONTH_ROLES },
+      {
+        id: 'stock',
+        title: 'Остатки по партиям',
+        ready: true,
+        perm: { block: 'stock', action: 'view' },
+      },
+      {
+        id: 'month',
+        title: 'Итоги месяца',
+        ready: true,
+        perm: { block: 'month_results', action: 'view' },
+      },
+      {
+        id: 'planfact',
+        title: 'План и факт',
+        ready: true,
+        perm: { block: 'plan_fact', action: 'view' },
+      },
       { id: 'finance', title: 'PnL / Cashflow', ready: false },
     ],
   },
@@ -140,15 +171,23 @@ const GROUPS: Group[] = [
     id: 'tasks',
     title: 'Задачи',
     direct: true,
-    sections: [{ id: 'tasks', title: 'Таск-трекер', ready: true, roles: TASK_ROLES }],
+    sections: [
+      { id: 'tasks', title: 'Таск-трекер', ready: true, perm: { block: 'tasks', action: 'view' } },
+    ],
   },
   {
     id: 'admin',
     title: 'Администрирование',
     sections: [
-      { id: 'imports', title: 'Загрузка данных', ready: true },
+      {
+        id: 'imports',
+        title: 'Загрузка данных',
+        ready: true,
+        perm: { block: 'imports', action: 'view' },
+      },
       { id: 'messages', title: 'Служебные сообщения', ready: true },
-      { id: 'users', title: 'Пользователи и роли', ready: false },
+      { id: 'users', title: 'Пользователи и роли', ready: true, adminOnly: true },
+      { id: 'adminlog', title: 'Действия администратора', ready: true, adminOnly: true },
       { id: 'settings', title: 'Настройки приложения', ready: false },
     ],
   },
@@ -186,6 +225,7 @@ const SECTION_TO_PATH: Record<string, string> = {
   finance: 'finance',
   tasks: 'tasks',
   users: 'users',
+  adminlog: 'admin-log',
   settings: 'settings',
 }
 
@@ -273,8 +313,10 @@ export function App() {
 
   const groups = GROUPS.map((group) => ({
     ...group,
-    sections: group.sections.filter(
-      (section) => !section.roles || section.roles.includes(user.role),
+    sections: group.sections.filter((section) =>
+      section.adminOnly
+        ? isAdmin(user)
+        : !section.perm || can(user, section.perm.block, section.perm.action),
     ),
   })).filter((group) => group.sections.length > 0)
 
@@ -460,6 +502,8 @@ export function App() {
           ) : null}
           {current.id === 'imports' && current.ready ? <ImportsPage user={user} /> : null}
           {current.id === 'messages' && current.ready ? <MessagesPage user={user} /> : null}
+          {current.id === 'users' && current.ready ? <UsersRolesPage user={user} /> : null}
+          {current.id === 'adminlog' && current.ready ? <AdminLogPage /> : null}
           {current.id === 'tasks' && current.ready ? <TasksPage user={user} focus={focus} /> : null}
           {!current.ready ? (
             <section>

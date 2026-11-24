@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  can,
   clearMonthReason,
   closeMonth,
   createTransferDrafts,
@@ -48,11 +49,9 @@ const GROUP_TITLES: Record<MonthRow['group'], string> = {
   short: 'не продано',
 }
 
-const MATCH_ROLES = ['commercial_director', 'executive_director']
 /** Кто ставит причины: менеджер по своим строкам, коммерческий директор и админ — по всем. */
-const REASON_ROLES = ['sales_manager', 'commercial_director', 'executive_director']
+
 /** Кто закрывает месяц и принимает решение. */
-const CLOSE_ROLES = ['commercial_director', 'executive_director']
 
 /** Следующий месяц от показанного — вариант переноса по умолчанию. */
 function shiftMonth(year: number, month: number, delta: number): { year: number; month: number } {
@@ -251,11 +250,11 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
     setNotice(null)
   }
 
-  const mayMatch = MATCH_ROLES.includes(user.role)
-  const mayReason = REASON_ROLES.includes(user.role)
-  const mayClose = CLOSE_ROLES.includes(user.role)
-  const mayUpload = CLOSE_ROLES.includes(user.role)
-  const mayHistory = CLOSE_ROLES.includes(user.role) || user.role === 'purchase_director'
+  const mayMatch = can(user, 'month_results', 'match')
+  const mayReason = can(user, 'month_results', 'reasons')
+  const mayClose = can(user, 'month_results', 'close')
+  const mayUpload = can(user, 'imports', 'sales')
+  const mayHistory = can(user, 'month_results', 'history')
 
   const load = useCallback(async () => {
     setState({ status: 'loading' })

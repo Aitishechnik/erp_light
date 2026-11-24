@@ -14,14 +14,17 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
 
-# Пять ролей erp_lite.
+# Шесть бизнес-ролей erp_lite и отдельная роль администратора.
 ROLE_SALES_MANAGER = "sales_manager"
 ROLE_SALES_ASSISTANT = "sales_assistant"
 ROLE_COMMERCIAL_DIRECTOR = "commercial_director"
 ROLE_PURCHASE_DIRECTOR = "purchase_director"
 ROLE_IMPORT_MANAGER = "import_manager"
 ROLE_EXECUTIVE_DIRECTOR = "executive_director"
+ROLE_ADMIN = "admin"
 
+# Уровни, которые админ раздаёт сотрудникам. Админа здесь нет: он один, заводится
+# установочной командой и из интерфейса не редактируется.
 ROLES = (
     ROLE_SALES_MANAGER,
     ROLE_SALES_ASSISTANT,
@@ -31,6 +34,8 @@ ROLES = (
     ROLE_EXECUTIVE_DIRECTOR,
 )
 
+ALL_ROLES = (*ROLES, ROLE_ADMIN)
+
 ROLE_TITLES = {
     ROLE_SALES_MANAGER: "Менеджер по продажам",
     ROLE_SALES_ASSISTANT: "Ассистент отдела продаж",
@@ -38,12 +43,11 @@ ROLE_TITLES = {
     ROLE_PURCHASE_DIRECTOR: "Директор по закупкам",
     ROLE_IMPORT_MANAGER: "Менеджер по закупкам (импорт)",
     ROLE_EXECUTIVE_DIRECTOR: "Исполнительный директор",
+    ROLE_ADMIN: "Администратор",
 }
 
-# Исполнительный директор выполняет функции администратора: грузит любые выгрузки
-# 1С и правит любые данные. Отдельной роли «администратор» намеренно нет — ролей
-# по-прежнему шесть.
-ADMIN_ROLES = (ROLE_EXECUTIVE_DIRECTOR,)
+# Администратор — единственная учётная запись с полным доступом ко всем данным.
+ADMIN_ROLES = (ROLE_ADMIN,)
 
 
 class User(Base):

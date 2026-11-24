@@ -16,15 +16,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.auth import (
-    ROLE_COMMERCIAL_DIRECTOR,
-    ROLE_EXECUTIVE_DIRECTOR,
-    ROLE_IMPORT_MANAGER,
-    ROLE_PURCHASE_DIRECTOR,
-    ROLE_SALES_MANAGER,
-    User,
-    is_admin,
-)
+from app.models.auth import User
 from app.models.counterparties import Counterparty
 from app.models.domain import Product
 from app.models.monthly_plans import (
@@ -35,6 +27,7 @@ from app.models.monthly_plans import (
     MonthlySalesPlanItem,
 )
 from app.models.planning import SalesPlan
+from app.permissions import can, scope_of
 from app.schemas.monthly_plans import (
     MonthlyPlanEventOut,
     MonthlyPlanItemIn,
@@ -44,13 +37,6 @@ from app.schemas.monthly_plans import (
 
 ZERO = Decimal("0")
 MAX_QUANTITY = Decimal("999999999999.999")
-
-VIEW_ROLES = (
-    ROLE_COMMERCIAL_DIRECTOR,
-    ROLE_EXECUTIVE_DIRECTOR,
-    ROLE_PURCHASE_DIRECTOR,
-    ROLE_IMPORT_MANAGER,
-)
 
 
 class MonthlyPlanError(Exception):
@@ -88,41 +74,31 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _is_overseer(user: User) -> bool:
-    return user.role in (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR)
-
-
-def _is_purchase_viewer(user: User) -> bool:
-    return user.role in (ROLE_PURCHASE_DIRECTOR, ROLE_IMPORT_MANAGER)
-
-
 def _resolve_manager(user: User, manager_id: uuid.UUID | None) -> uuid.UUID:
     if manager_id is not None:
         return manager_id
-    if user.role == ROLE_SALES_MANAGER:
+    if scope_of(user, "monthly_plan") == "own":
         return user.id
     raise MonthlyPlanError("Укажите менеджера", status_code=400)
 
 
 def _check_view(user: User, manager_id: uuid.UUID) -> None:
-    if _is_overseer(user) or _is_purchase_viewer(user) or is_admin(user):
-        return
-    if user.role == ROLE_SALES_MANAGER and manager_id == user.id:
-        return
-    raise MonthlyPlanError("Этот план вам не виден", status_code=403)
+    if not can(user, "monthly_plan", "view"):
+        raise MonthlyPlanError("Помесячный план вам не виден", status_code=403)
+    if scope_of(user, "monthly_plan") == "own" and manager_id != user.id:
+        raise MonthlyPlanError("Этот план вам не виден", status_code=403)
 
 
 def _check_editor(user: User, manager_id: uuid.UUID) -> None:
-    if user.role == ROLE_COMMERCIAL_DIRECTOR or is_admin(user):
-        return
-    if user.role == ROLE_SALES_MANAGER and manager_id == user.id:
-        return
-    raise MonthlyPlanError("Правка плана вам недоступна", status_code=403)
+    if not can(user, "monthly_plan", "edit"):
+        raise MonthlyPlanError("Правка плана вам недоступна", status_code=403)
+    if scope_of(user, "monthly_plan") == "own" and manager_id != user.id:
+        raise MonthlyPlanError("Правка плана вам недоступна", status_code=403)
 
 
 def _check_commercial(user: User) -> None:
-    if user.role != ROLE_COMMERCIAL_DIRECTOR and not is_admin(user):
-        raise MonthlyPlanError("Утверждает план коммерческий директор", status_code=403)
+    if not can(user, "monthly_plan", "approve"):
+        raise MonthlyPlanError("Утверждать помесячный план вам недоступно", status_code=403)
 
 
 def _load(db: Session, year: int, month: int, manager_id: uuid.UUID) -> MonthlySalesPlan | None:
@@ -292,18 +268,11 @@ def _serialize(db: Session, plan: MonthlySalesPlan, user: User) -> MonthlyPlanOu
     items = sorted(plan.items, key=lambda row: (row.client.name, row.product.name))
     changed = sum(1 for item in items if item.quantity != item.annual_quantity)
     state = window_state(plan.year, plan.month)
-    can_edit = (
-        plan.status == "draft"
-        and state == "open"
-        and (
-            user.role == ROLE_COMMERCIAL_DIRECTOR
-            or is_admin(user)
-            or (user.role == ROLE_SALES_MANAGER and plan.manager_id == user.id)
-        )
+    may_edit = can(user, "monthly_plan", "edit") and (
+        scope_of(user, "monthly_plan") == "all" or plan.manager_id == user.id
     )
-    can_approve = plan.status == "draft" and (
-        user.role == ROLE_COMMERCIAL_DIRECTOR or is_admin(user)
-    )
+    can_edit = plan.status == "draft" and state == "open" and may_edit
+    can_approve = plan.status == "draft" and can(user, "monthly_plan", "approve")
     start, end = window_bounds(plan.year, plan.month)
     return MonthlyPlanOut(
         year=plan.year,

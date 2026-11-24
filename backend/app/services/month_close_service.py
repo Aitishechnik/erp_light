@@ -20,7 +20,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.auth import ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR, User
+from app.models.auth import User
 from app.models.domain import ImportSession
 from app.models.sales import (
     DECISION_CODES,
@@ -30,9 +30,8 @@ from app.models.sales import (
     MonthResultSnapshot,
     SalesFact,
 )
+from app.permissions import can
 from app.services import audit_service, month_result_service, purchase_signal_service
-
-CLOSE_ROLES = (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR)
 
 
 class MonthCloseError(Exception):
@@ -97,11 +96,8 @@ def history(db: Session, year: int, month: int) -> list[MonthResultSnapshot]:
 
 
 def _require_role(user: User) -> None:
-    if user.role not in CLOSE_ROLES:
-        raise MonthCloseError(
-            "Закрывает месяц и принимает решение коммерческий или исполнительный директор",
-            status_code=403,
-        )
+    if not can(user, "month_results", "close"):
+        raise MonthCloseError("Закрывать месяц вам недоступно", status_code=403)
 
 
 def _snapshot(summary: month_result_service.MonthSummary, result: MonthResult) -> dict[str, Any]:

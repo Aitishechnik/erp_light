@@ -18,6 +18,7 @@ import {
   type Product,
   type SessionUser,
   saveMonthlyPlan,
+  scopeOf,
 } from './api'
 
 type Draft = { quantity: string; reason: string }
@@ -67,7 +68,7 @@ export function MonthlyPlanTab({
   year: number
   managers: SessionUser[]
 }) {
-  const isManager = user.role === 'sales_manager'
+  const isManager = scopeOf(user, 'monthly_plan') === 'own'
   const [managerId, setManagerId] = useState(isManager ? user.id : '')
   const [managerList, setManagerList] = useState<SessionUser[]>(managers)
   const [month, setMonth] = useState(1)

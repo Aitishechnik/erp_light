@@ -1,8 +1,8 @@
-"""Годовой план отдела продаж: финальное утверждение генеральным директором.
+"""Годовой план отдела продаж: финальное согласование.
 
-Документ собирается из утверждённых планов всех активных менеджеров. Коммерческий
-директор отправляет его на утверждение, генеральный директор утверждает или
-возвращает. Любое изменение плана менеджера снимает утверждение (`revision`).
+Документ собирается из утверждённых планов всех активных менеджеров. Кто
+отправляет и кто согласует — решает блок прав «Годовой план отдела». Любое
+изменение плана менеджера снимает утверждение (`revision`).
 """
 
 from __future__ import annotations
@@ -13,14 +13,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.auth import (
-    ROLE_COMMERCIAL_DIRECTOR,
-    ROLE_EXECUTIVE_DIRECTOR,
-    ROLE_PURCHASE_DIRECTOR,
-    ROLE_SALES_MANAGER,
-    User,
-    is_admin,
-)
+from app.models.auth import ROLE_SALES_MANAGER, User
 from app.models.planning import (
     SALES_PLAN_APPROVAL_STATUS_TITLES,
     SALES_PLAN_STATUS_TITLES,
@@ -28,19 +21,13 @@ from app.models.planning import (
     SalesPlanApproval,
     SalesPlanItem,
 )
+from app.permissions import can
 from app.schemas.planning import (
     AnnualSalesPlanItemOut,
     AnnualSalesPlanManagerOut,
     AnnualSalesPlanOut,
 )
 from app.services import audit_service
-
-VIEWERS = (
-    ROLE_SALES_MANAGER,
-    ROLE_COMMERCIAL_DIRECTOR,
-    ROLE_EXECUTIVE_DIRECTOR,
-    ROLE_PURCHASE_DIRECTOR,
-)
 
 
 class AnnualPlanError(Exception):
@@ -157,7 +144,7 @@ def _annual_items(plans: dict[object, SalesPlan]) -> list[AnnualSalesPlanItemOut
 
 
 def get_annual(db: Session, user: User, year: int) -> AnnualSalesPlanOut:
-    if user.role not in VIEWERS:
+    if not can(user, "annual_plan", "view"):
         raise AnnualPlanError("Годовой план отдела вам не виден", status_code=403)
 
     managers = _active_managers(db)
@@ -230,9 +217,9 @@ def _require(db: Session, year: int) -> SalesPlanApproval:
 
 
 def submit(db: Session, user: User, year: int) -> AnnualSalesPlanOut:
-    if user.role != ROLE_COMMERCIAL_DIRECTOR and not is_admin(user):
+    if not can(user, "annual_plan", "submit"):
         raise AnnualPlanError(
-            "Отправляет годовой план только коммерческий директор", status_code=403
+            "Отправлять годовой план на согласование вам недоступно", status_code=403
         )
 
     managers = _active_managers(db)
@@ -272,10 +259,8 @@ def submit(db: Session, user: User, year: int) -> AnnualSalesPlanOut:
 
 
 def approve(db: Session, user: User, year: int) -> AnnualSalesPlanOut:
-    if user.role != ROLE_EXECUTIVE_DIRECTOR:
-        raise AnnualPlanError(
-            "Финально согласует годовой план только генеральный директор", status_code=403
-        )
+    if not can(user, "annual_plan", "approve"):
+        raise AnnualPlanError("Согласовывать годовой план вам недоступно", status_code=403)
     approval = _require(db, year)
     if approval.status != "on_review":
         raise AnnualPlanError(
@@ -315,10 +300,8 @@ def approve(db: Session, user: User, year: int) -> AnnualSalesPlanOut:
 
 
 def reject(db: Session, user: User, year: int, reason: str) -> AnnualSalesPlanOut:
-    if user.role != ROLE_EXECUTIVE_DIRECTOR:
-        raise AnnualPlanError(
-            "Возвращает годовой план только генеральный директор", status_code=403
-        )
+    if not can(user, "annual_plan", "approve"):
+        raise AnnualPlanError("Возвращать годовой план вам недоступно", status_code=403)
     approval = _require(db, year)
     if approval.status != "on_review":
         raise AnnualPlanError(
@@ -336,10 +319,8 @@ def reject(db: Session, user: User, year: int, reason: str) -> AnnualSalesPlanOu
 
 def reopen(db: Session, user: User, year: int, reason: str) -> AnnualSalesPlanOut:
     """Вернуть утверждённый годовой план в работу."""
-    if user.role != ROLE_EXECUTIVE_DIRECTOR:
-        raise AnnualPlanError(
-            "Возвращает годовой план только генеральный директор", status_code=403
-        )
+    if not can(user, "annual_plan", "approve"):
+        raise AnnualPlanError("Возвращать годовой план вам недоступно", status_code=403)
     approval = _require(db, year)
     if approval.status != "approved":
         raise AnnualPlanError(

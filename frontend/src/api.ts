@@ -21,6 +21,10 @@ export type Role =
   | 'purchase_director'
   | 'import_manager'
   | 'executive_director'
+  | 'admin'
+
+/** Права на блок: что можно и в каком охвате. */
+export type BlockRights = { actions: string[]; scope: 'own' | 'all' }
 
 export type SessionUser = {
   id: string
@@ -28,14 +32,31 @@ export type SessionUser = {
   full_name: string
   role: Role
   role_title: string
+  is_admin?: boolean
+  is_active?: boolean
+  created_at?: string | null
+  permissions?: Record<string, BlockRights> | null
 }
 
-/** Исполнительный директор выполняет функции администратора. */
-export const ADMIN_ROLES: Role[] = ['executive_director']
+/** Администратор — единственная отдельная роль с полным доступом. */
+export const ADMIN_ROLES: Role[] = ['admin']
 
-/** Администратор: грузит любые выгрузки 1С и правит любые данные. */
 export function isAdmin(user?: SessionUser | null): boolean {
-  return user != null && ADMIN_ROLES.includes(user.role)
+  return user != null && (user.is_admin === true || ADMIN_ROLES.includes(user.role))
+}
+
+/** Разрешено ли действие в блоке — по правам, пришедшим с сервера. */
+export function can(user: SessionUser | null | undefined, block: string, action: string): boolean {
+  if (!user) return false
+  if (isAdmin(user)) return true
+  return user.permissions?.[block]?.actions.includes(action) ?? false
+}
+
+/** Охват блока: «только свои» или «все». */
+export function scopeOf(user: SessionUser | null | undefined, block: string): 'own' | 'all' {
+  if (!user) return 'own'
+  if (isAdmin(user)) return 'all'
+  return user.permissions?.[block]?.scope ?? 'own'
 }
 
 export type Product = {
@@ -765,15 +786,6 @@ export function counterpartyRoles(row: {
   return roles
 }
 
-/** Роли, которым виден раздел планирования продаж (закупки — только просмотр). */
-export const SALES_PLAN_ROLES: Role[] = [
-  'sales_manager',
-  'commercial_director',
-  'executive_director',
-  'purchase_director',
-  'import_manager',
-]
-
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const isFormData = init?.body instanceof FormData
   const response = await fetch(url, {
@@ -1032,14 +1044,6 @@ export function rejectSalesPlan(planId: string, reason: string): Promise<SalesPl
 export function deleteSalesPlan(planId: string): Promise<void> {
   return request<void>(`/api/v1/sales-plans/${planId}`, { method: 'DELETE' })
 }
-
-/** Роли, которым виден годовой план отдела продаж. */
-export const ANNUAL_SALES_PLAN_ROLES: Role[] = [
-  'sales_manager',
-  'commercial_director',
-  'executive_director',
-  'purchase_director',
-]
 
 export function fetchAnnualSalesPlan(year: number): Promise<AnnualSalesPlan> {
   return request<AnnualSalesPlan>(`/api/v1/annual-sales-plans?year=${year}`)
@@ -1786,4 +1790,86 @@ export function deleteTaskReportFile(
 /** Прямая ссылка на файл отчёта: cookie сессии браузер отправит сам. */
 export function taskFileUrl(taskId: string, reportId: string, fileId: string): string {
   return `/api/v1/tasks/${taskId}/reports/${reportId}/files/${fileId}`
+}
+
+// --- Администратор: сотрудники, права уровней и его отдельный журнал ---
+
+export type AccessAction = { key: string; title: string }
+
+export type AccessBlock = {
+  key: string
+  title: string
+  group: string
+  scoped: boolean
+  actions: AccessAction[]
+}
+
+export type AccessLevel = {
+  key: string
+  title: string
+  description: string
+  rights: Record<string, BlockRights>
+}
+
+export type AccessPayload = { levels: AccessLevel[]; blocks: AccessBlock[] }
+
+export type AdminUser = SessionUser & { is_active: boolean; created_at: string | null }
+
+/** Блоки, действия и текущие права уровней — для конструктора. */
+export function fetchAccess(): Promise<AccessPayload> {
+  return request<AccessPayload>('/api/v1/access')
+}
+
+export function saveAccess(
+  level: string,
+  rights: Record<string, BlockRights>,
+): Promise<AccessLevel> {
+  return request<AccessLevel>(`/api/v1/access/${level}`, {
+    method: 'PUT',
+    body: JSON.stringify({ rights }),
+  })
+}
+
+export function fetchAdminUsers(): Promise<AdminUser[]> {
+  return request<AdminUser[]>('/api/v1/admin/users')
+}
+
+export function createAdminUser(payload: {
+  login: string
+  full_name: string
+  password: string
+  role: Role
+}): Promise<AdminUser> {
+  return request<AdminUser>('/api/v1/admin/users', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateAdminUser(
+  id: string,
+  payload: { full_name?: string; role?: Role; is_active?: boolean },
+): Promise<AdminUser> {
+  return request<AdminUser>(`/api/v1/admin/users/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function resetAdminPassword(id: string, password: string): Promise<AdminUser> {
+  return request<AdminUser>(`/api/v1/admin/users/${id}/password`, {
+    method: 'POST',
+    body: JSON.stringify({ password }),
+  })
+}
+
+export function fetchAdminJournal(params?: {
+  limit?: number
+  action?: string
+}): Promise<AuditEvent[]> {
+  const query = new URLSearchParams()
+  if (params?.limit) query.set('limit', String(params.limit))
+  if (params?.action) query.set('action', params.action)
+  const suffix = query.toString() ? `?${query.toString()}` : ''
+  return request<AuditEvent[]>(`/api/v1/admin/audit${suffix}`)
 }

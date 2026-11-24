@@ -6,12 +6,8 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
-from app.models.auth import (
-    ROLE_COMMERCIAL_DIRECTOR,
-    ROLE_EXECUTIVE_DIRECTOR,
-    ROLE_SALES_MANAGER,
-    User,
-)
+from app.models.auth import ROLE_SALES_MANAGER, User
+from app.permissions import can
 from app.schemas.auth import UserOut, user_out
 
 router = APIRouter(tags=["users"])
@@ -23,8 +19,8 @@ def list_users(
     db: DbSession,
     role: str | None = Query(default=None, description="Фильтр по роли"),
 ) -> list[UserOut]:
-    """Список пользователей: доступен коммерческому и исполнительному директору."""
-    if user.role not in (ROLE_COMMERCIAL_DIRECTOR, ROLE_EXECUTIVE_DIRECTOR):
+    """Список пользователей: кому разрешено право «Список сотрудников»."""
+    if not can(user, "users", "view"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Справочник сотрудников вам недоступен"
         )
