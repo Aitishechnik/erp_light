@@ -57,9 +57,18 @@ def get_plan(plan_id: uuid.UUID, user: CurrentUser, db: DbSession) -> SalesPlanO
 def update_items(
     plan_id: uuid.UUID, payload: SalesPlanItemsIn, user: CurrentUser, db: DbSession
 ) -> SalesPlanOut:
-    """Полная замена строк плана по редактируемым месяцам."""
+    """Полная замена строк плана и состава черновика."""
     try:
-        return service.update_items(db, user, plan_id, payload.items)
+        return service.update_items(
+            db,
+            user,
+            plan_id,
+            payload.items,
+            clients=[row.client_id for row in payload.clients]
+            if payload.clients is not None
+            else None,
+            rows=payload.rows,
+        )
     except PlanError as exc:
         raise _fail(exc) from exc
     except ValueError as exc:

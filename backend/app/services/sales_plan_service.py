@@ -15,13 +15,22 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.auth import User
 from app.models.counterparties import Counterparty
+from app.models.domain import Product
 from app.models.planning import (
     SALES_PLAN_STATUS_TITLES,
     SalesPlan,
     SalesPlanItem,
 )
 from app.permissions import can, manages_all, scope_for
-from app.schemas.planning import SalesPlanCreate, SalesPlanItemIn, SalesPlanItemOut, SalesPlanOut
+from app.schemas.planning import (
+    SalesPlanCreate,
+    SalesPlanDraftClientOut,
+    SalesPlanDraftRowIn,
+    SalesPlanDraftRowOut,
+    SalesPlanItemIn,
+    SalesPlanItemOut,
+    SalesPlanOut,
+)
 from app.services import audit_service
 from app.services.plan_freeze import check_months_editable, editable_months
 from app.services.sales_plan_approval_service import invalidate as invalidate_annual
@@ -85,7 +94,43 @@ def _check_clients(db: Session, client_ids: set[uuid.UUID]) -> None:
             )
 
 
-def _serialize(plan: SalesPlan) -> SalesPlanOut:
+def _uuid(value: object) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _draft_pairs(plan: SalesPlan) -> set[tuple[uuid.UUID, uuid.UUID]]:
+    """Позиции черновика: сохранённый состав плюс все строки плана."""
+    pairs = {(item.client_id, item.product_id) for item in plan.items}
+    for row in plan.draft_rows or []:
+        client_id = _uuid(row.get("client_id"))
+        product_id = _uuid(row.get("product_id"))
+        if client_id is not None and product_id is not None:
+            pairs.add((client_id, product_id))
+    return pairs
+
+
+def _draft_client_ids(plan: SalesPlan) -> set[uuid.UUID]:
+    """Клиенты черновика, в том числе добавленные без единой позиции."""
+    ids = {client_id for client_id, _product_id in _draft_pairs(plan)}
+    for row in plan.draft_clients or []:
+        client_id = _uuid(row.get("client_id"))
+        if client_id is not None:
+            ids.add(client_id)
+    return ids
+
+
+def _check_products(db: Session, product_ids: set[uuid.UUID]) -> None:
+    if not product_ids:
+        return
+    found = set(db.execute(select(Product.id).where(Product.id.in_(product_ids))).scalars().all())
+    if product_ids - found:
+        raise PlanError("Позиция номенклатуры не найдена", status_code=404)
+
+
+def _serialize(db: Session, plan: SalesPlan) -> SalesPlanOut:
     items = [
         SalesPlanItemOut(
             id=item.id,
@@ -104,6 +149,53 @@ def _serialize(plan: SalesPlan) -> SalesPlanOut:
             plan.items, key=lambda row: (row.client.name, row.product.name, row.month)
         )
     ]
+
+    client_ids = _draft_client_ids(plan)
+    pairs = _draft_pairs(plan)
+    product_ids = {product_id for _client_id, product_id in pairs}
+    clients = (
+        {
+            row.id: row
+            for row in db.execute(select(Counterparty).where(Counterparty.id.in_(client_ids)))
+            .scalars()
+            .all()
+        }
+        if client_ids
+        else {}
+    )
+    products = (
+        {
+            row.id: row
+            for row in db.execute(select(Product).where(Product.id.in_(product_ids)))
+            .scalars()
+            .all()
+        }
+        if product_ids
+        else {}
+    )
+    draft_clients = sorted(
+        (
+            SalesPlanDraftClientOut(client_id=client_id, client_name=client.name)
+            for client_id, client in clients.items()
+        ),
+        key=lambda row: row.client_name,
+    )
+    draft_rows = sorted(
+        (
+            SalesPlanDraftRowOut(
+                client_id=client_id,
+                client_name=clients[client_id].name,
+                product_id=product_id,
+                product_code=products[product_id].code,
+                product_name=products[product_id].name,
+                unit=products[product_id].unit,
+            )
+            for client_id, product_id in pairs
+            if client_id in clients and product_id in products
+        ),
+        key=lambda row: (row.client_name, row.product_name),
+    )
+
     return SalesPlanOut(
         id=plan.id,
         year=plan.year,
@@ -117,6 +209,8 @@ def _serialize(plan: SalesPlan) -> SalesPlanOut:
         updated_at=plan.updated_at,
         editable_months=editable_months(plan.year),
         items=items,
+        draft_clients=draft_clients,
+        draft_rows=draft_rows,
     )
 
 
@@ -134,13 +228,13 @@ def list_plans(db: Session, user: User, *, year: int | None = None) -> list[Sale
         statement = statement.where(SalesPlan.manager_id == user.id)
     if year is not None:
         statement = statement.where(SalesPlan.year == year)
-    return [_serialize(plan) for plan in db.execute(statement).scalars().all()]
+    return [_serialize(db, plan) for plan in db.execute(statement).scalars().all()]
 
 
 def get_plan(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
     plan = _require(db, plan_id)
     _check_view(user, plan)
-    return _serialize(plan)
+    return _serialize(db, plan)
 
 
 def create_plan(db: Session, user: User, payload: SalesPlanCreate) -> SalesPlanOut:
@@ -176,15 +270,24 @@ def create_plan(db: Session, user: User, payload: SalesPlanCreate) -> SalesPlanO
             f"План на {payload.year} год для этого менеджера уже есть", status_code=409
         ) from exc
     created = _require(db, plan.id)
-    return _serialize(created)
+    return _serialize(db, created)
 
 
 def update_items(
-    db: Session, user: User, plan_id: uuid.UUID, items: list[SalesPlanItemIn]
+    db: Session,
+    user: User,
+    plan_id: uuid.UUID,
+    items: list[SalesPlanItemIn],
+    *,
+    clients: list[uuid.UUID] | None = None,
+    rows: list[SalesPlanDraftRowIn] | None = None,
 ) -> SalesPlanOut:
-    """Полная замена строк по редактируемым месяцам.
+    """Полная замена строк по редактируемым месяцам и состава черновика.
 
     Замороженные месяцы менять нельзя — запрос с ними отклоняется целиком.
+    ``clients``/``rows`` присылают новые формы: клиенты и позиции сохраняются
+    даже без количеств. Если их нет (старый клиент), состав не перезаписываем,
+    а пустой запрос не может стереть уже заполненный черновик.
     """
     plan = _require(db, plan_id)
     _check_view(user, plan)
@@ -206,9 +309,63 @@ def update_items(
             raise PlanError("В плане две строки на одного клиента, товар и месяц")
         seen.add(key)
 
-    _check_clients(db, {item.client_id for item in items})
-
     allowed = set(editable_months(plan.year))
+    editable_existing = [row for row in plan.items if row.month in allowed]
+    explicit_draft = clients is not None or rows is not None
+    if not explicit_draft and not items and editable_existing:
+        # Старый клиент без состава черновика: раньше такой запрос удалял все
+        # строки. Лучше отказать, чем молча обнулить план.
+        raise PlanError(
+            "Пустой запрос не может обнулить заполненный план — обновите страницу и повторите",
+            status_code=409,
+        )
+
+    draft_rows = [(row.client_id, row.product_id) for row in rows or []]
+    if len(set(draft_rows)) != len(draft_rows):
+        raise PlanError("В черновике две одинаковые позиции")
+    draft_pairs = set(draft_rows)
+    draft_clients = set(clients or []) | {client_id for client_id, _ in draft_pairs}
+    draft_clients |= {item.client_id for item in items}
+    draft_pairs |= {(item.client_id, item.product_id) for item in items}
+    # Замороженные строки не редактируются, но их клиенты и позиции остаются
+    # в составе черновика — иначе после сохранения они бы «пропали» из формы.
+    for existing in plan.items:
+        if existing.month not in allowed:
+            draft_clients.add(existing.client_id)
+            draft_pairs.add((existing.client_id, existing.product_id))
+
+    _check_clients(db, draft_clients)
+    _check_products(
+        db, {product_id for _client_id, product_id in draft_pairs} | {i.product_id for i in items}
+    )
+
+    if explicit_draft:
+        plan.draft_clients = [
+            {"client_id": str(client_id)} for client_id in sorted(draft_clients, key=str)
+        ]
+        plan.draft_rows = [
+            {"client_id": str(client_id), "product_id": str(product_id)}
+            for client_id, product_id in sorted(
+                draft_pairs, key=lambda pair: (str(pair[0]), str(pair[1]))
+            )
+        ]
+    else:
+        # Старый клиент: состав сохраняем, но при первом сохранении заводим его
+        # из уже существующих строк, чтобы черновик был восстановим.
+        if plan.draft_clients is None:
+            plan.draft_clients = [
+                {"client_id": str(client_id)}
+                for client_id in sorted(_draft_client_ids(plan) | draft_clients, key=str)
+            ]
+        if plan.draft_rows is None:
+            all_pairs = _draft_pairs(plan) | draft_pairs
+            plan.draft_rows = [
+                {"client_id": str(client_id), "product_id": str(product_id)}
+                for client_id, product_id in sorted(
+                    all_pairs, key=lambda pair: (str(pair[0]), str(pair[1]))
+                )
+            ]
+
     for existing in list(plan.items):
         if existing.month in allowed:
             db.delete(existing)
@@ -242,7 +399,7 @@ def update_items(
     db.commit()
     if was_approved:
         invalidate_annual(db, plan.year, f"изменён план менеджера {plan.manager.full_name}")
-    return _serialize(_require(db, plan_id))
+    return _serialize(db, _require(db, plan_id))
 
 
 def send_to_fill(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
@@ -254,7 +411,7 @@ def send_to_fill(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
         raise PlanError("На заполнение отправляется только черновик", status_code=409)
     plan.status = "filling"
     db.commit()
-    return _serialize(_require(db, plan_id))
+    return _serialize(db, _require(db, plan_id))
 
 
 def submit(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
@@ -270,7 +427,7 @@ def submit(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
         raise PlanError("Нельзя отправить пустой план: заполните хотя бы одну строку")
     plan.status = "on_review"
     db.commit()
-    return _serialize(_require(db, plan_id))
+    return _serialize(db, _require(db, plan_id))
 
 
 def approve(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
@@ -291,7 +448,7 @@ def approve(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
     )
     db.commit()
     invalidate_annual(db, plan.year, f"утверждён план менеджера {plan.manager.full_name}")
-    return _serialize(_require(db, plan_id))
+    return _serialize(db, _require(db, plan_id))
 
 
 def reject(db: Session, user: User, plan_id: uuid.UUID, reason: str) -> SalesPlanOut:
@@ -305,7 +462,7 @@ def reject(db: Session, user: User, plan_id: uuid.UUID, reason: str) -> SalesPla
         suffix = f"Возврат на доработку: {reason}"
         plan.notes = f"{plan.notes}\n{suffix}" if plan.notes else suffix
     db.commit()
-    return _serialize(_require(db, plan_id))
+    return _serialize(db, _require(db, plan_id))
 
 
 def delete_plan(db: Session, user: User, plan_id: uuid.UUID) -> None:

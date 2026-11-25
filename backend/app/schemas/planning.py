@@ -28,12 +28,39 @@ class SalesPlanCreate(BaseModel):
     notes: str | None = None
 
 
+class SalesPlanDraftClientIn(BaseModel):
+    client_id: uuid.UUID
+
+
+class SalesPlanDraftRowIn(BaseModel):
+    client_id: uuid.UUID
+    product_id: uuid.UUID
+
+
 class SalesPlanItemsIn(BaseModel):
     items: list[SalesPlanItemIn] = []
+    # Состав черновика присылают новые формы: клиенты и позиции, даже если
+    # количества ещё не заполнены. ``None`` — старый клиент, состав не трогаем.
+    clients: list[SalesPlanDraftClientIn] | None = None
+    rows: list[SalesPlanDraftRowIn] | None = None
 
 
 class SalesPlanRejectIn(BaseModel):
     reason: str = Field(default="", max_length=500)
+
+
+class SalesPlanDraftClientOut(BaseModel):
+    client_id: uuid.UUID
+    client_name: str
+
+
+class SalesPlanDraftRowOut(BaseModel):
+    client_id: uuid.UUID
+    client_name: str
+    product_id: uuid.UUID
+    product_code: str
+    product_name: str
+    unit: str
 
 
 class SalesPlanItemOut(BaseModel):
@@ -63,6 +90,8 @@ class SalesPlanOut(BaseModel):
     updated_at: datetime
     editable_months: list[int] = Field(description="Месяцы, которые сейчас можно менять")
     items: list[SalesPlanItemOut]
+    draft_clients: list[SalesPlanDraftClientOut] = Field(default_factory=list)
+    draft_rows: list[SalesPlanDraftRowOut] = Field(default_factory=list)
 
 
 # --- План закупок сырья ---------------------------------------------------

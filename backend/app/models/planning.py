@@ -61,6 +61,11 @@ class SalesPlan(Base):
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft", index=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Состав черновика: клиенты и позиции, добавленные в план даже без количеств.
+    # Хранится отдельно от строк плана, чтобы пустые строки не попадали в
+    # утверждённые объёмы и при этом не терялись при уходе со страницы.
+    draft_clients: Mapped[list[dict[str, str]] | None] = mapped_column(JSON, nullable=True)
+    draft_rows: Mapped[list[dict[str, str]] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

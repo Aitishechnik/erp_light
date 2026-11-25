@@ -355,3 +355,81 @@ def test_admin_manages_any_sales_plan(
     approved = client.post(f"/api/v1/sales-plans/{plan['id']}/approve")
     assert approved.status_code == 200, approved.text
     assert approved.json()["status"] == "approved"
+
+
+def test_draft_rows_without_quantities_are_saved(
+    client: TestClient, login, products: list[Product], clients: list[Counterparty]
+) -> None:
+    """Клиент и позиции сохраняются ещё до ввода количеств — и переживают перезагрузку."""
+    login("sales")
+    plan = _create_plan(client, TODAY.year)
+    payload = {
+        "items": [],
+        "clients": [{"client_id": str(clients[0].id)}],
+        "rows": [
+            {"client_id": str(clients[0].id), "product_id": str(products[0].id)},
+            {"client_id": str(clients[0].id), "product_id": str(products[1].id)},
+        ],
+    }
+    saved = client.put(f"/api/v1/sales-plans/{plan['id']}/items", json=payload)
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    assert body["items"] == []
+    assert [row["client_id"] for row in body["draft_clients"]] == [str(clients[0].id)]
+    assert {row["product_id"] for row in body["draft_rows"]} == {
+        str(products[0].id),
+        str(products[1].id),
+    }
+    assert body["draft_rows"][0]["unit"] in {"шт", "кг"}
+
+    # Повторное сохранение без количеств не обнуляет состав черновика.
+    again = client.put(f"/api/v1/sales-plans/{plan['id']}/items", json=payload)
+    assert again.status_code == 200, again.text
+    assert len(again.json()["draft_rows"]) == 2
+
+    reloaded = client.get(f"/api/v1/sales-plans/{plan['id']}").json()
+    assert len(reloaded["draft_rows"]) == 2
+    assert reloaded["draft_clients"][0]["client_name"] == "ООО Ромашка"
+
+
+def test_legacy_empty_save_does_not_wipe_filled_plan(
+    client: TestClient, login, products: list[Product], clients: list[Counterparty]
+) -> None:
+    """Старый клиент без состава черновика не может стереть заполненный план."""
+    login("sales")
+    plan = _create_plan(client, TODAY.year)
+    saved = client.put(
+        f"/api/v1/sales-plans/{plan['id']}/items",
+        json={"items": [_item(products[0], TODAY.month, "10", clients[0])]},
+    )
+    assert saved.status_code == 200, saved.text
+
+    wiped = client.put(f"/api/v1/sales-plans/{plan['id']}/items", json={"items": []})
+    assert wiped.status_code == 409, wiped.text
+    assert "обнулить" in wiped.json()["detail"]
+
+    reloaded = client.get(f"/api/v1/sales-plans/{plan['id']}").json()
+    assert len(reloaded["items"]) == 1
+    assert reloaded["items"][0]["quantity"] == "10.000"
+
+
+def test_unknown_product_in_draft_is_rejected(
+    client: TestClient, login, clients: list[Counterparty]
+) -> None:
+    login("sales")
+    plan = _create_plan(client, TODAY.year)
+    response = client.put(
+        f"/api/v1/sales-plans/{plan['id']}/items",
+        json={
+            "items": [],
+            "clients": [{"client_id": str(clients[0].id)}],
+            "rows": [
+                {
+                    "client_id": str(clients[0].id),
+                    "product_id": "00000000-0000-0000-0000-000000000000",
+                }
+            ],
+        },
+    )
+    assert response.status_code == 404, response.text
+    assert "номенклатуры" in response.json()["detail"]
