@@ -6456,6 +6456,12 @@ button.mini.danger {
   min-width: min(260px, 100%);
 }
 
+/* Номенклатура: длинные названия из 1С не должны ютиться в узком поле. */
+.search-select.wide {
+  width: min(460px, 100%);
+  min-width: min(460px, 100%);
+}
+
 .search-select input {
   width: 100%;
   min-width: 0;
@@ -6485,11 +6491,20 @@ button.mini.danger {
   box-shadow: var(--shadow);
 }
 
+/* Список номенклатуры шире поля: название читается целиком, без давки. */
+.search-select.wide .search-select-menu {
+  right: auto;
+  width: max-content;
+  min-width: 100%;
+  max-width: min(700px, calc(100vw - 2rem));
+}
+
 .search-select-option {
-  padding: 0.35rem 0.5rem;
+  padding: 0.45rem 0.6rem;
   border-radius: 0.35rem;
   color: var(--text);
   font-size: 0.9rem;
+  line-height: 1.35;
   cursor: pointer;
 }
 

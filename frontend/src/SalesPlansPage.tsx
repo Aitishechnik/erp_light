@@ -1086,6 +1086,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
                           value={correctionProductToAdd}
                           onChange={setCorrectionProductToAdd}
                           disabled={busy || !correctionClientId}
+                          wide
                           placeholder="Код или название позиции"
                           emptyText="Позиция не найдена"
                           options={products
@@ -1347,6 +1348,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
                   value={productToAdd}
                   onChange={setProductToAdd}
                   disabled={!canEdit || !clientId}
+                  wide
                   placeholder="Код или название позиции"
                   emptyText="Позиция не найдена"
                   options={products

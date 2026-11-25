@@ -16,6 +16,8 @@ type SearchSelectProps = {
   disabled?: boolean
   emptyText?: string
   maxResults?: number
+  /** Широкое поле для длинных названий номенклатуры. */
+  wide?: boolean
 }
 
 /**
@@ -33,6 +35,7 @@ export function SearchSelect({
   disabled = false,
   emptyText = 'Ничего не найдено',
   maxResults = 50,
+  wide = false,
 }: SearchSelectProps) {
   const listId = useId()
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -92,7 +95,10 @@ export function SearchSelect({
   }
 
   return (
-    <div className={`search-select${disabled ? ' disabled' : ''}`} ref={rootRef}>
+    <div
+      className={`search-select${wide ? ' wide' : ''}${disabled ? ' disabled' : ''}`}
+      ref={rootRef}
+    >
       <input
         ref={inputRef}
         type="text"

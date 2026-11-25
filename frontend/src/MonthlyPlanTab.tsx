@@ -473,6 +473,7 @@ export function MonthlyPlanTab({
                 label="Товар новой позиции"
                 value={addProduct}
                 onChange={setAddProduct}
+                wide
                 placeholder="Код или название позиции"
                 emptyText="Позиция не найдена"
                 options={products.map((row) => ({

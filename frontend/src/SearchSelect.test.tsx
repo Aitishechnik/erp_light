@@ -13,9 +13,11 @@ const CLIENTS: SearchSelectOption[] = [
 function Harness({
   options = CLIENTS,
   maxResults,
+  wide,
 }: {
   options?: SearchSelectOption[]
   maxResults?: number
+  wide?: boolean
 }) {
   const [value, setValue] = useState('')
   return (
@@ -26,6 +28,7 @@ function Harness({
         options={options}
         onChange={setValue}
         maxResults={maxResults}
+        wide={wide}
       />
       <span data-testid="picked">{value}</span>
     </div>
@@ -64,6 +67,11 @@ describe('SearchSelect', () => {
     await user.click(screen.getByRole('option', { name: /Изюм/ }))
 
     expect(screen.getByTestId('picked')).toHaveTextContent('p-2')
+  })
+
+  it('для номенклатуры включает широкий режим поля и списка', () => {
+    const { container } = render(<Harness wide />)
+    expect(container.querySelector('.search-select.wide')).not.toBeNull()
   })
 
   it('показывает, что список сокращён, и предлагает уточнить запрос', async () => {
