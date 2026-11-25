@@ -5,10 +5,10 @@ import {
   type Counterparty,
   errorMessage,
   fetchCounterparties,
+  fetchManagers,
   fetchMonthlyPlan,
   fetchMonthlyPlanHistory,
   fetchPlanningProducts,
-  fetchUsers,
   formatDate,
   formatQuantity,
   MONTH_TITLES,
@@ -18,7 +18,7 @@ import {
   type Product,
   type SessionUser,
   saveMonthlyPlan,
-  scopeOf,
+  scopeFor,
 } from './api'
 
 type Draft = { quantity: string; reason: string }
@@ -68,7 +68,7 @@ export function MonthlyPlanTab({
   year: number
   managers: SessionUser[]
 }) {
-  const isManager = scopeOf(user, 'monthly_plan') === 'own'
+  const isManager = scopeFor(user, 'monthly_plan', 'view') === 'own'
   const [managerId, setManagerId] = useState(isManager ? user.id : '')
   const [managerList, setManagerList] = useState<SessionUser[]>(managers)
   const [month, setMonth] = useState(1)
@@ -94,7 +94,7 @@ export function MonthlyPlanTab({
       return
     }
     if (managerList.length === 0) {
-      fetchUsers('sales_manager')
+      fetchManagers()
         .then(setManagerList)
         .catch(() => setManagerList([]))
     }

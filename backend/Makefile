@@ -5,7 +5,7 @@ PIP := $(VENV)/bin/pip
 API_HOST := 127.0.0.1
 API_PORT := 4111
 
-.PHONY: install run format lint typecheck test check db-bootstrap bootstrap seed-users
+.PHONY: install run format lint typecheck test check db-bootstrap db-migrate bootstrap seed-users
 
 install:
 	$(PYTHON) -m venv $(VENV)
@@ -31,7 +31,10 @@ typecheck:
 test:
 	$(VENV)/bin/pytest
 
-db-bootstrap: bootstrap
+db-bootstrap: bootstrap db-migrate
+
+db-migrate:
+	$(VENV)/bin/python -m app.migrate
 
 bootstrap:
 	$(VENV)/bin/python -c "from app.db import Base, engine; import app.models; Base.metadata.create_all(engine); print('схема создана')"

@@ -15,6 +15,8 @@ class AdminUserIn(BaseModel):
     password: str = Field(min_length=PASSWORD_MIN, max_length=128)
     # Ключ уровня доступа из шести бизнес-ролей; админа назначить нельзя.
     role: str
+    # «Ведёт клиентов»: личные продажи независимо от должности.
+    is_manager: bool = False
 
 
 class AdminUserUpdate(BaseModel):
@@ -23,6 +25,7 @@ class AdminUserUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=1, max_length=255)
     role: str | None = None
     is_active: bool | None = None
+    is_manager: bool | None = None
 
 
 class PasswordIn(BaseModel):

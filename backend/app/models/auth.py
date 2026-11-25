@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Uuid, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Uuid, false, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -61,6 +61,11 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(nullable=False, default=True)
+    # «Активный менеджер»: ведёт своих клиентов и планы независимо от должности.
+    # Должность задаёт права руководителя, этот признак — только личные продажи.
+    is_manager: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

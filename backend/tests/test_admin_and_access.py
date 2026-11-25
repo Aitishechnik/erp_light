@@ -161,6 +161,11 @@ def test_deactivated_user_loses_access(client: TestClient, login, logout) -> Non
 
 def test_level_rights_apply_to_all_users_of_level(client: TestClient, login) -> None:
     login("admin")
+    # Личный статус продавца — отдельная галочка; здесь проверяем права уровня.
+    users = client.get("/api/v1/admin/users").json()
+    sales = next(row for row in users if row["login"] == "sales")
+    unflagged = client.patch(f"/api/v1/admin/users/{sales['id']}", json={"is_manager": False})
+    assert unflagged.status_code == 200, unflagged.text
     # Менеджеру по продажам оставляем только просмотр своих планов.
     saved = client.put(
         "/api/v1/access/sales_manager",

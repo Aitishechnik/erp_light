@@ -126,6 +126,25 @@ def save_level(
         chosen = frozenset(str(action) for action in actions_raw)
         default = defaults_for(role).get(block_key)
         current = before.get(block_key)
+        # Блок, которого у уровня нет по умолчанию, не храним пустым: пустая
+        # запись ничего не разрешает и только засоряет таблицу настроек.
+        if default is None and not chosen:
+            db.execute(
+                delete(RolePermission).where(
+                    RolePermission.role == role, RolePermission.block == block_key
+                )
+            )
+            if current is not None:
+                changes.append(
+                    {
+                        "block": block_key,
+                        "before": sorted(current.actions),
+                        "after": [],
+                        "scope_before": current.scope,
+                        "scope_after": scope,
+                    }
+                )
+            continue
         if default == Rights(chosen, scope):
             db.execute(
                 delete(RolePermission).where(

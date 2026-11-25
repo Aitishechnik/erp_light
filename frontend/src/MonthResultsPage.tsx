@@ -22,6 +22,7 @@ import {
   reopenMonth,
   type SessionUser,
   saveMonthReason,
+  scopeFor,
   setMonthDecision,
   type TransferDrafts,
   uploadImport,
@@ -1239,6 +1240,10 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
                   ) : (
                     visible.map((row) => {
                       const key = `${row.client_id}:${row.product_id}`
+                      const mayReasonRow =
+                        mayReason &&
+                        (scopeFor(user, 'month_results', 'reasons') === 'all' ||
+                          row.manager_id === user.id)
                       return (
                         <Fragment key={key}>
                           <tr>
@@ -1272,13 +1277,13 @@ export function MonthResultsPage({ user, focus }: { user: SessionUser; focus?: s
                                   title={`${
                                     row.reason.comment ?? row.reason.title
                                   }${row.reason.author_name ? ` — ${row.reason.author_name}` : ''}`}
-                                  disabled={!mayReason || busy || result.status === 'closed'}
+                                  disabled={!mayReasonRow || busy || result.status === 'closed'}
                                   onClick={() => openReason(row)}
                                 >
                                   {row.reason.title}
                                 </button>
                               ) : Number(row.deviation) !== 0 &&
-                                mayReason &&
+                                mayReasonRow &&
                                 result.status === 'open' ? (
                                 <button
                                   type="button"

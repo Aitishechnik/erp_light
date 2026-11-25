@@ -31,6 +31,7 @@ class UserOut(BaseModel):
     role: str
     role_title: str
     is_active: bool = True
+    is_manager: bool = False
     created_at: datetime | None = None
     is_admin: bool = False
     # Заполняется только для текущего пользователя (/auth/me и вход).
@@ -46,6 +47,7 @@ def user_out(user: User, *, permissions: dict[str, BlockRightsOut] | None = None
         role=user.role,
         role_title=ROLE_TITLES.get(user.role, user.role),
         is_active=user.is_active,
+        is_manager=user.is_manager,
         created_at=user.created_at,
         is_admin=user.role == ROLE_ADMIN,
         permissions=permissions,

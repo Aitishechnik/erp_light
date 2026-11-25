@@ -26,6 +26,9 @@ from app.models.auth import (
     AuthSession,
     User,
 )
+from app.models.counterparties import Counterparty
+from app.models.monthly_plans import MonthlySalesPlan
+from app.models.planning import SalesPlan
 from app.schemas.users import PASSWORD_MIN
 from app.services import audit_service
 from app.services.auth import hash_password
@@ -69,6 +72,47 @@ def _revoke_sessions(db: Session, user_id: uuid.UUID) -> None:
     db.execute(delete(AuthSession).where(AuthSession.user_id == user_id))
 
 
+def _manager_data(db: Session, user_id: uuid.UUID) -> tuple[int, int, int]:
+    """Сколько данных держится на сотруднике как на менеджере."""
+    clients = int(
+        db.execute(
+            select(func.count()).select_from(Counterparty).where(Counterparty.manager_id == user_id)
+        ).scalar_one()
+    )
+    annual = int(
+        db.execute(
+            select(func.count()).select_from(SalesPlan).where(SalesPlan.manager_id == user_id)
+        ).scalar_one()
+    )
+    monthly = int(
+        db.execute(
+            select(func.count())
+            .select_from(MonthlySalesPlan)
+            .where(MonthlySalesPlan.manager_id == user_id)
+        ).scalar_one()
+    )
+    return clients, annual, monthly
+
+
+def _refuse_unflag(db: Session, user: User) -> None:
+    """Снять «ведёт клиентов» можно только без клиентов и планов."""
+    clients, annual, monthly = _manager_data(db, user.id)
+    if not (clients or annual or monthly):
+        return
+    parts = []
+    if clients:
+        parts.append(f"клиентов — {clients}")
+    if annual:
+        parts.append(f"годовых планов — {annual}")
+    if monthly:
+        parts.append(f"помесячных планов — {monthly}")
+    raise UserAdminError(
+        "Сотрудник ведёт клиентов и планы: сначала передайте их другому менеджеру "
+        f"({', '.join(parts)}).",
+        status_code=409,
+    )
+
+
 def list_users(db: Session) -> list[User]:
     """Все сотрудники, включая заблокированных: админ должен их видеть."""
     return list(
@@ -79,7 +123,14 @@ def list_users(db: Session) -> list[User]:
 
 
 def create_user(
-    db: Session, admin: User, *, login: str, full_name: str, password: str, role: str
+    db: Session,
+    admin: User,
+    *,
+    login: str,
+    full_name: str,
+    password: str,
+    role: str,
+    is_manager: bool = False,
 ) -> User:
     login = normalize_login(login)
     _validate_login(login)
@@ -100,6 +151,7 @@ def create_user(
         role=role,
         password_hash=hash_password(password),
         is_active=True,
+        is_manager=is_manager,
     )
     db.add(user)
     db.flush()
@@ -110,7 +162,7 @@ def create_user(
         summary=f"Заведён сотрудник {full_name} ({ROLE_TITLES[role]})",
         entity_id=user.id,
         entity_label=full_name,
-        payload={"login": login, "role": role},
+        payload={"login": login, "role": role, "is_manager": is_manager},
     )
     db.commit()
     return user
@@ -124,6 +176,7 @@ def update_user(
     full_name: str | None,
     role: str | None,
     is_active: bool | None,
+    is_manager: bool | None,
 ) -> User:
     user = db.get(User, user_id)
     if user is None:
@@ -153,6 +206,13 @@ def update_user(
         changes["is_active"] = {"before": user.is_active, "after": is_active}
         user.is_active = is_active
         if not is_active:
+            _revoke_sessions(db, user.id)
+    if is_manager is not None and is_manager != user.is_manager:
+        if not is_manager:
+            _refuse_unflag(db, user)
+        changes["is_manager"] = {"before": user.is_manager, "after": is_manager}
+        user.is_manager = is_manager
+        if not is_manager:
             _revoke_sessions(db, user.id)
 
     if changes:

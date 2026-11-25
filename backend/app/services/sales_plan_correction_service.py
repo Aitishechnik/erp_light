@@ -27,7 +27,7 @@ from app.models.planning import (
     SalesPlanCorrectionItem,
     SalesPlanItem,
 )
-from app.permissions import can, scope_of
+from app.permissions import can, scope_for
 from app.schemas.planning import (
     SalesPlanCorrectionCreate,
     SalesPlanCorrectionItemIn,
@@ -103,7 +103,7 @@ def _check_can_propose(user: User, plan: SalesPlan) -> None:
     """Корректировку предлагает тот, кому разрешён блок и чей это план."""
     if not can(user, "corrections", "propose"):
         raise CorrectionError("Предлагать корректировку вам недоступно", status_code=403)
-    if scope_of(user, "corrections") == "own" and plan.manager_id != user.id:
+    if scope_for(user, "corrections", "propose") == "own" and plan.manager_id != user.id:
         raise CorrectionError("Это план другого менеджера", status_code=403)
 
 
@@ -115,7 +115,7 @@ def _check_commercial(user: User) -> None:
 def _check_view(user: User, plan: SalesPlan) -> None:
     if not can(user, "corrections", "view"):
         raise CorrectionError("Корректировка вам не видна", status_code=403)
-    if scope_of(user, "corrections") == "own" and plan.manager_id != user.id:
+    if scope_for(user, "corrections", "view") == "own" and plan.manager_id != user.id:
         raise CorrectionError("Корректировка вам не видна", status_code=403)
 
 

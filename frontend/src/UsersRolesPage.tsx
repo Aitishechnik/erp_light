@@ -18,9 +18,21 @@ import { PageHelp } from './PageHelp'
 
 type Tab = 'staff' | 'rights'
 
-type StaffForm = { full_name: string; login: string; password: string; role: Role }
+type StaffForm = {
+  full_name: string
+  login: string
+  password: string
+  role: Role
+  is_manager: boolean
+}
 
-const EMPTY_STAFF: StaffForm = { full_name: '', login: '', password: '', role: 'sales_manager' }
+const EMPTY_STAFF: StaffForm = {
+  full_name: '',
+  login: '',
+  password: '',
+  role: 'sales_manager',
+  is_manager: true,
+}
 
 const GROUP_TITLES: Record<string, string> = {
   planning: 'Планирование',
@@ -101,7 +113,8 @@ export function UsersRolesPage({ user }: { user: { id: string } }) {
         <PageHelp>
           Сотрудники заводятся здесь: логин, пароль и уровень доступа. Уровни — фиксированные, а их
           права собираются во вкладке «Права уровней» и действуют сразу на всех сотрудников уровня.
-          Администратор один, его права не редактируются.
+          Галочка «Ведёт клиентов» даёт сотруднику свои планы продаж и закупки под них независимо от
+          должности. Администратор один, его права не редактируются.
         </PageHelp>
       </header>
 
@@ -186,6 +199,7 @@ function StaffTab({
     full_name: '',
     role: 'sales_manager' as Role,
     is_active: true,
+    is_manager: false,
   })
   const [passwordFor, setPasswordFor] = useState<AdminUser | null>(null)
   const [password, setPassword] = useState('')
@@ -221,6 +235,7 @@ function StaffTab({
       full_name: row.full_name,
       role: row.role,
       is_active: row.is_active,
+      is_manager: row.is_manager === true,
     })
     setError('')
     setNotice('')
@@ -308,7 +323,14 @@ function StaffTab({
           <tbody>
             {filtered.map((row) => (
               <tr key={row.id}>
-                <td>{row.full_name}</td>
+                <td>
+                  {row.full_name}
+                  {row.is_manager ? (
+                    <span className="badge badge-manager" title="Ведёт клиентов">
+                      менеджер
+                    </span>
+                  ) : null}
+                </td>
                 <td>{row.login}</td>
                 <td>{levelTitle.get(row.role) ?? row.role_title}</td>
                 <td>{row.is_active ? 'Работает' : 'Заблокирован'}</td>
@@ -386,7 +408,13 @@ function StaffTab({
               <select
                 aria-label="Уровень доступа"
                 value={form.role}
-                onChange={(event) => setForm({ ...form, role: event.target.value as Role })}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    role: event.target.value as Role,
+                    is_manager: event.target.value === 'sales_manager',
+                  })
+                }
               >
                 {levels.map((level) => (
                   <option key={level.key} value={level.key}>
@@ -394,6 +422,14 @@ function StaffTab({
                   </option>
                 ))}
               </select>
+            </label>
+            <label className="field checkbox-field">
+              <input
+                type="checkbox"
+                checked={form.is_manager}
+                onChange={(event) => setForm({ ...form, is_manager: event.target.checked })}
+              />
+              Ведёт клиентов: свои планы продаж и закупки под них
             </label>
             <footer className="modal-actions">
               <button type="button" className="mini" onClick={() => setCreating(false)}>
@@ -447,6 +483,14 @@ function StaffTab({
                 onChange={(event) => setEditForm({ ...editForm, is_active: event.target.checked })}
               />
               Работает (снятая галочка блокирует вход)
+            </label>
+            <label className="field checkbox-field">
+              <input
+                type="checkbox"
+                checked={editForm.is_manager}
+                onChange={(event) => setEditForm({ ...editForm, is_manager: event.target.checked })}
+              />
+              Ведёт клиентов: свои планы продаж и закупки под них
             </label>
             <footer className="modal-actions">
               <button type="button" className="mini" onClick={() => setEditing(null)}>

@@ -580,6 +580,30 @@ test('менеджер заполняет план продаж по клиен�
   await expect(page.getByText('На проверке')).toBeVisible()
 })
 
+test('ассистент с галочкой «ведёт клиентов» заводит свой план', async ({ page }) => {
+  const assistant = {
+    id: 'as-1',
+    login: 'assistant',
+    full_name: 'Анна Ассистент',
+    role: 'sales_assistant',
+    role_title: 'Ассистент отдела продаж',
+    is_manager: true,
+    permissions: PERMISSIONS.sales_assistant,
+  }
+  await mockSession(page, assistant)
+  await page.route('**/api/v1/stock', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/products**', (route) => route.fulfill({ json: PRODUCTS }))
+  await page.route('**/api/v1/counterparties**', (route) => route.fulfill({ json: [CLIENT] }))
+  await page.route('**/api/v1/sales-plans', (route) => route.fulfill({ json: [] }))
+
+  await page.goto('/')
+  await openSection(page, 'Планирование', 'Планирование продаж')
+
+  // Свои продажи — по личному статусу, хотя прав уровня на планы нет.
+  await expect(page.getByRole('button', { name: /Создать свой план/ })).toBeVisible()
+  await expect(page.getByLabel('Менеджер')).toHaveCount(0)
+})
+
 test('закупщик раскладывает потребность плана продаж на сырьё', async ({ page }) => {
   const year = new Date().getFullYear()
   const position = {

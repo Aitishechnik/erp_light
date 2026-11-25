@@ -15,7 +15,7 @@ class CounterpartyIn(BaseModel):
     is_local_supplier: bool = False
     is_import_supplier: bool = False
     manager_id: uuid.UUID | None = Field(
-        default=None, description="Менеджер по продажам, за которым закреплён клиент"
+        default=None, description="Сотрудник, который ведёт клиента (активный менеджер)"
     )
 
 

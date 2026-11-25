@@ -63,6 +63,7 @@ function routes(): Record<string, { status?: number; body?: unknown }> {
     'GET /api/v1/access': { body: ACCESS },
     'GET /api/v1/admin/users': { body: [ADMIN, SALES] },
     'POST /api/v1/admin/users': { status: 201, body: SALES },
+    'PATCH /api/v1/admin/users/u1': { body: { ...SALES, is_manager: true } },
     'DELETE /api/v1/admin/users/u1': { status: 204 },
     'PUT /api/v1/access/sales_manager': { body: ACCESS.levels[0] },
     'PUT /api/v1/access/commercial_director': { body: ACCESS.levels[1] },
@@ -72,7 +73,7 @@ function routes(): Record<string, { status?: number; body?: unknown }> {
 function lastBody(
   fragment: string,
   method: string,
-): { login?: string; role?: string; rights?: unknown } {
+): { login?: string; role?: string; is_manager?: boolean; rights?: unknown } {
   const mock = fetch as unknown as {
     mock: { calls: [RequestInfo | URL, { method?: string; body?: string }?][] }
   }
@@ -104,6 +105,25 @@ describe('UsersRolesPage', () => {
       const body = lastBody('/api/v1/admin/users', 'POST')
       expect(body.login).toBe('new_user')
       expect(body.role).toBe('sales_manager')
+      expect(body.is_manager).toBe(true)
+    })
+  })
+
+  it('включает «ведёт клиентов» при правке сотрудника', async () => {
+    const user = userEvent.setup()
+    mockApi(routes())
+    render(<UsersRolesPage user={{ id: 'admin-1' }} />)
+
+    const row = (await screen.findByText('Валерий Сергеевич')).closest('tr')
+    if (!row) throw new Error('строка сотрудника не найдена')
+    await user.click(within(row).getByRole('button', { name: 'Изменить' }))
+    const flag = await screen.findByLabelText('Ведёт клиентов: свои планы продаж и закупки под них')
+    expect(flag).not.toBeChecked()
+    await user.click(flag)
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }))
+
+    await waitFor(() => {
+      expect(lastBody('/api/v1/admin/users/u1', 'PATCH').is_manager).toBe(true)
     })
   })
 

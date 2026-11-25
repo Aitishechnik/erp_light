@@ -272,6 +272,7 @@ def test_manager_sees_only_own_plans(
         full_name="Второй менеджер",
         role=ROLE_SALES_MANAGER,
         password_hash=hash_password("test-password"),
+        is_manager=True,
     )
     db_session.add(other)
     db_session.commit()

@@ -13,14 +13,14 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.auth import ROLE_SALES_MANAGER, User
+from app.models.auth import User
 from app.models.counterparties import Counterparty
 from app.models.planning import (
     SALES_PLAN_STATUS_TITLES,
     SalesPlan,
     SalesPlanItem,
 )
-from app.permissions import can, scope_of
+from app.permissions import can, manages_all, scope_for
 from app.schemas.planning import SalesPlanCreate, SalesPlanItemIn, SalesPlanItemOut, SalesPlanOut
 from app.services import audit_service
 from app.services.plan_freeze import check_months_editable, editable_months
@@ -62,7 +62,7 @@ def _require(db: Session, plan_id: uuid.UUID) -> SalesPlan:
 def _check_view(user: User, plan: SalesPlan) -> None:
     if not can(user, "sales_plans", "view"):
         raise PlanError("Планы продаж вам не видны", status_code=403)
-    if scope_of(user, "sales_plans") == "own" and plan.manager_id != user.id:
+    if scope_for(user, "sales_plans", "view") == "own" and plan.manager_id != user.id:
         raise PlanError("Этот план вам не виден", status_code=403)
 
 
@@ -130,7 +130,7 @@ def list_plans(db: Session, user: User, *, year: int | None = None) -> list[Sale
     )
     if not can(user, "sales_plans", "view"):
         raise PlanError("Планы продаж вам не видны", status_code=403)
-    if scope_of(user, "sales_plans") == "own":
+    if scope_for(user, "sales_plans", "view") == "own":
         statement = statement.where(SalesPlan.manager_id == user.id)
     if year is not None:
         statement = statement.where(SalesPlan.year == year)
@@ -144,10 +144,10 @@ def get_plan(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
 
 
 def create_plan(db: Session, user: User, payload: SalesPlanCreate) -> SalesPlanOut:
-    """Охват «свои» заводит план на себя, «все» — на выбранного менеджера."""
+    """«Свои» заводят план на себя, право на всех — на выбранного менеджера."""
     if not can(user, "sales_plans", "edit"):
         raise PlanError("Создавать план продаж вам недоступно", status_code=403)
-    if scope_of(user, "sales_plans") == "own":
+    if not manages_all(user, "sales_plans", "edit"):
         manager_id = user.id
     else:
         if payload.manager_id is None:
@@ -156,9 +156,9 @@ def create_plan(db: Session, user: User, payload: SalesPlanCreate) -> SalesPlanO
 
     manager = db.get(User, manager_id)
     if manager is None or not manager.is_active:
-        raise PlanError("Менеджер не найден", status_code=404)
-    if manager.role != ROLE_SALES_MANAGER:
-        raise PlanError("План продаж заводится только на менеджера по продажам")
+        raise PlanError("Сотрудник не найден или заблокирован", status_code=404)
+    if not manager.is_manager:
+        raise PlanError("План продаж заводится только на сотрудника, который ведёт клиентов")
 
     plan = SalesPlan(
         year=payload.year,
@@ -191,7 +191,7 @@ def update_items(
 
     if not can(user, "sales_plans", "edit"):
         raise PlanError("Правка плана вам недоступна", status_code=403)
-    if scope_of(user, "sales_plans") == "own":
+    if scope_for(user, "sales_plans", "edit") == "own":
         if plan.manager_id != user.id:
             raise PlanError("Правка плана вам недоступна", status_code=403)
         if plan.status not in EDITABLE_BY_OWNER:
@@ -262,7 +262,7 @@ def submit(db: Session, user: User, plan_id: uuid.UUID) -> SalesPlanOut:
     plan = _require(db, plan_id)
     if not can(user, "sales_plans", "submit"):
         raise PlanError("Отправлять план на проверку вам недоступно", status_code=403)
-    if scope_of(user, "sales_plans") == "own" and plan.manager_id != user.id:
+    if scope_for(user, "sales_plans", "submit") == "own" and plan.manager_id != user.id:
         raise PlanError("Отправить план может только его менеджер", status_code=403)
     if plan.status not in EDITABLE_BY_OWNER:
         raise PlanError("План уже на проверке или утверждён", status_code=409)
@@ -313,7 +313,7 @@ def delete_plan(db: Session, user: User, plan_id: uuid.UUID) -> None:
     plan = _require(db, plan_id)
     if not can(user, "sales_plans", "delete"):
         raise PlanError("Удалить план вам недоступно", status_code=403)
-    if scope_of(user, "sales_plans") == "own" and plan.manager_id != user.id:
+    if scope_for(user, "sales_plans", "delete") == "own" and plan.manager_id != user.id:
         raise PlanError("Удалить план вам недоступно", status_code=403)
     if plan.status not in EDITABLE_BY_OWNER:
         raise PlanError("Удалить можно только черновик или план на заполнении", status_code=409)

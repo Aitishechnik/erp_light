@@ -136,7 +136,11 @@ DEMO_USERS: tuple[tuple[str, str, str], ...] = (
 
 
 def seed_demo_users(db: Session, password: str) -> list[User]:
-    """Создаёт/обновляет по одному пользователю на роль. Идемпотентно."""
+    """Создаёт/обновляет по одному пользователю на роль. Идемпотентно.
+
+    Демо-менеджеры по продажам сразу помечены «ведёт клиентов»: должность
+    остаётся, но личный статус теперь хранится отдельно.
+    """
     created: list[User] = []
     for role, login, full_name in DEMO_USERS:
         user = db.execute(select(User).where(User.login == login)).scalars().one_or_none()
@@ -146,6 +150,7 @@ def seed_demo_users(db: Session, password: str) -> list[User]:
                 full_name=full_name,
                 role=role,
                 password_hash=hash_password(password),
+                is_manager=role == ROLE_SALES_MANAGER,
             )
             db.add(user)
         else:
@@ -153,6 +158,7 @@ def seed_demo_users(db: Session, password: str) -> list[User]:
             user.full_name = full_name
             user.password_hash = hash_password(password)
             user.is_active = True
+            user.is_manager = role == ROLE_SALES_MANAGER
         created.append(user)
     db.commit()
     return created

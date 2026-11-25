@@ -36,6 +36,7 @@ def create_user(payload: AdminUserIn, user: AdminUser, db: DbSession) -> UserOut
             full_name=payload.full_name,
             password=payload.password,
             role=payload.role,
+            is_manager=payload.is_manager,
         )
     except UserAdminError as exc:
         raise _fail(exc) from exc
@@ -55,6 +56,7 @@ def update_user(
             full_name=payload.full_name,
             role=payload.role,
             is_active=payload.is_active,
+            is_manager=payload.is_manager,
         )
     except UserAdminError as exc:
         raise _fail(exc) from exc

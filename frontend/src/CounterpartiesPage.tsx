@@ -377,6 +377,7 @@ export function CounterpartiesPage({ user, focusId }: { user?: SessionUser; focu
                           {managers.map((manager) => (
                             <option key={manager.id} value={manager.id}>
                               {manager.full_name}
+                              {manager.role === 'sales_manager' ? '' : ` — ${manager.role_title}`}
                             </option>
                           ))}
                         </select>

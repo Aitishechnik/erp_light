@@ -27,7 +27,7 @@ from app.models.monthly_plans import (
     MonthlySalesPlanItem,
 )
 from app.models.planning import SalesPlan
-from app.permissions import can, scope_of
+from app.permissions import can, scope_for
 from app.schemas.monthly_plans import (
     MonthlyPlanEventOut,
     MonthlyPlanItemIn,
@@ -77,7 +77,7 @@ def _now() -> datetime:
 def _resolve_manager(user: User, manager_id: uuid.UUID | None) -> uuid.UUID:
     if manager_id is not None:
         return manager_id
-    if scope_of(user, "monthly_plan") == "own":
+    if scope_for(user, "monthly_plan", "view") == "own":
         return user.id
     raise MonthlyPlanError("Укажите менеджера", status_code=400)
 
@@ -85,14 +85,14 @@ def _resolve_manager(user: User, manager_id: uuid.UUID | None) -> uuid.UUID:
 def _check_view(user: User, manager_id: uuid.UUID) -> None:
     if not can(user, "monthly_plan", "view"):
         raise MonthlyPlanError("Помесячный план вам не виден", status_code=403)
-    if scope_of(user, "monthly_plan") == "own" and manager_id != user.id:
+    if scope_for(user, "monthly_plan", "view") == "own" and manager_id != user.id:
         raise MonthlyPlanError("Этот план вам не виден", status_code=403)
 
 
 def _check_editor(user: User, manager_id: uuid.UUID) -> None:
     if not can(user, "monthly_plan", "edit"):
         raise MonthlyPlanError("Правка плана вам недоступна", status_code=403)
-    if scope_of(user, "monthly_plan") == "own" and manager_id != user.id:
+    if scope_for(user, "monthly_plan", "edit") == "own" and manager_id != user.id:
         raise MonthlyPlanError("Правка плана вам недоступна", status_code=403)
 
 
@@ -269,7 +269,7 @@ def _serialize(db: Session, plan: MonthlySalesPlan, user: User) -> MonthlyPlanOu
     changed = sum(1 for item in items if item.quantity != item.annual_quantity)
     state = window_state(plan.year, plan.month)
     may_edit = can(user, "monthly_plan", "edit") and (
-        scope_of(user, "monthly_plan") == "all" or plan.manager_id == user.id
+        scope_for(user, "monthly_plan", "edit") == "all" or plan.manager_id == user.id
     )
     can_edit = plan.status == "draft" and state == "open" and may_edit
     can_approve = plan.status == "draft" and can(user, "monthly_plan", "approve")

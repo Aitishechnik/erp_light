@@ -65,12 +65,12 @@ def get_counterparty(db: Session, counterparty_id: uuid.UUID) -> Counterparty:
 
 
 def _check_manager(db: Session, manager_id: uuid.UUID | None) -> None:
-    """Менеджер клиента — активный пользователь с ролью «менеджер по продажам»."""
+    """Менеджер клиента — активный сотрудник с признаком «ведёт клиентов»."""
     if manager_id is None:
         return
     manager = db.get(User, manager_id)
-    if manager is None or manager.role != ROLE_SALES_MANAGER or not manager.is_active:
-        raise DirectoryError("Менеджер не найден или у него другая роль")
+    if manager is None or not manager.is_active or not manager.is_manager:
+        raise DirectoryError("Сотрудник не найден, заблокирован или не ведёт клиентов")
 
 
 def create_counterparty(db: Session, payload: CounterpartyIn) -> Counterparty:

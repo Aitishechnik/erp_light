@@ -3,18 +3,18 @@ import {
   approveSalesPlanCorrection,
   type Counterparty,
   can,
+  canManageAll,
   createSalesPlan,
   createSalesPlanCorrection,
   deleteSalesPlan,
   deleteSalesPlanCorrection,
   errorMessage,
   fetchCounterparties,
+  fetchManagers,
   fetchPlanningProducts,
   fetchSalesPlanCorrections,
   fetchSalesPlans,
-  fetchUsers,
   formatQuantity,
-  isAdmin,
   MONTH_SHORT,
   MONTH_TITLES,
   type Product,
@@ -28,7 +28,7 @@ import {
   salesPlanAction,
   saveSalesPlanCorrectionItems,
   saveSalesPlanItems,
-  scopeOf,
+  scopeFor,
   submitSalesPlanCorrection,
 } from './api'
 import { MonthlyPlanTab } from './MonthlyPlanTab'
@@ -252,9 +252,8 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
   const [error, setError] = useState<string | null>(null)
   const [mode, setMode] = useState<'year' | 'month'>('year')
 
-  const isCommercialDirector =
-    can(user, 'sales_plans', 'edit') && scopeOf(user, 'sales_plans') === 'all'
-  const hasAdmin = isAdmin(user)
+  // Право на всех даёт должность; личный статус менеджера — только свои планы.
+  const mayManage = canManageAll(user, 'sales_plans', 'edit')
   const yearPlans = plans.filter((plan) => plan.year === year)
   const plan = yearPlans.find((row) => row.id === selectedId) ?? null
   const isOwner = plan !== null && plan.manager_id === user.id
@@ -282,15 +281,15 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
     fetchCounterparties({ role: 'customer', includeInactive: true })
       .then(setClients)
       .catch(() => setClients([]))
-    if (isCommercialDirector || hasAdmin) {
-      fetchUsers('sales_manager')
+    if (mayManage) {
+      fetchManagers()
         .then((rows) => {
           setManagers(rows)
           setManagerId((current) => current || (rows[0]?.id ?? ''))
         })
         .catch(() => setManagers([]))
     }
-  }, [reload, isCommercialDirector, hasAdmin])
+  }, [reload, mayManage])
 
   useEffect(() => {
     const next = plan ? draftsFromPlan(plan) : {}
@@ -412,7 +411,6 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
     editable.reduce((sum, month) => sum + Number(normalize(row.months[month] ?? '') || 0), 0)
 
   const planClients = Object.keys(drafts)
-  const mayManage = isCommercialDirector || hasAdmin
   const canEdit =
     can(user, 'sales_plans', 'edit') &&
     plan !== null &&
@@ -421,7 +419,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
   const canSubmit =
     can(user, 'sales_plans', 'submit') &&
     plan !== null &&
-    (scopeOf(user, 'sales_plans') === 'all' || isOwner) &&
+    (mayManage || isOwner) &&
     ['draft', 'filling'].includes(plan.status)
   const canApprove =
     can(user, 'sales_plans', 'approve') && plan !== null && plan.status === 'on_review'
@@ -434,7 +432,8 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
   const openCorrection =
     corrections.find((row) => row.status === 'draft' || row.status === 'on_review') ?? null
   const canProposeCorrection =
-    can(user, 'corrections', 'propose') && (scopeOf(user, 'corrections') === 'all' || isOwner)
+    can(user, 'corrections', 'propose') &&
+    (scopeFor(user, 'corrections', 'propose') === 'all' || isOwner)
   const canCreateCorrection =
     plan !== null && canProposeCorrection && plan.status === 'approved' && openCorrection === null
   const correctionEditable =
@@ -641,6 +640,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
           <span className="sep" />
           {mayManage ? (
             <>
+              <span className="hint">План для:</span>
               <select
                 aria-label="Менеджер"
                 value={managerId}
@@ -649,6 +649,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
                 {managers.map((manager) => (
                   <option key={manager.id} value={manager.id}>
                     {manager.full_name}
+                    {manager.role === 'sales_manager' ? '' : ` — ${manager.role_title}`}
                   </option>
                 ))}
               </select>
@@ -665,7 +666,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
                 Создать план на {year}
               </button>
             </>
-          ) : user.role === 'sales_manager' ? (
+          ) : can(user, 'sales_plans', 'edit') ? (
             <button
               type="button"
               className="primary"

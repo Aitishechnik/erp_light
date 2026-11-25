@@ -1,9 +1,9 @@
 import { type ReactNode, useEffect, useState } from 'react'
 import {
   errorMessage,
+  fetchManagers,
   fetchPlanFact,
   fetchPlanFactMonth,
-  fetchUsers,
   MONTH_SHORT,
   MONTH_TITLES,
   type PlanFactDetail,
@@ -11,7 +11,7 @@ import {
   type PlanFactRow,
   type PlanFactSummary,
   type SessionUser,
-  scopeOf,
+  scopeFor,
 } from './api'
 import { PageHelp } from './PageHelp'
 
@@ -365,7 +365,7 @@ function ClientGroup({
 }
 
 export function PlanFactPage({ user, initialYear }: { user: SessionUser; initialYear?: number }) {
-  const isManager = scopeOf(user, 'plan_fact') === 'own'
+  const isManager = scopeFor(user, 'plan_fact', 'view') === 'own'
   const thisYear = new Date().getFullYear()
   const [year, setYear] = useState(initialYear ?? thisYear)
   const [managerId, setManagerId] = useState('')
@@ -379,7 +379,7 @@ export function PlanFactPage({ user, initialYear }: { user: SessionUser; initial
 
   useEffect(() => {
     if (isManager) return
-    fetchUsers('sales_manager')
+    fetchManagers()
       .then(setManagers)
       .catch(() => setManagers([]))
   }, [isManager])

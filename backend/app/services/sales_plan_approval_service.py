@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.auth import ROLE_SALES_MANAGER, User
+from app.models.auth import User
 from app.models.planning import (
     SALES_PLAN_APPROVAL_STATUS_TITLES,
     SALES_PLAN_STATUS_TITLES,
@@ -44,10 +44,11 @@ def _append_note(current: str | None, note: str) -> str:
 
 
 def _active_managers(db: Session) -> list[User]:
+    """Все активные сотрудники, которые ведут клиентов, независимо от должности."""
     return list(
         db.execute(
             select(User)
-            .where(User.role == ROLE_SALES_MANAGER, User.is_active.is_(True))
+            .where(User.is_manager.is_(True), User.is_active.is_(True))
             .order_by(User.full_name)
         )
         .scalars()

@@ -164,7 +164,10 @@ BLOCK_BY_KEY: dict[str, BlockSpec] = {block.key: block for block in BLOCKS}
 
 LEVEL_DESCRIPTIONS: dict[str, str] = {
     ROLE_SALES_MANAGER: "Свои клиенты и планы продаж, свои строки итогов месяца, задачи.",
-    ROLE_SALES_ASSISTANT: "Справочники и задачи отдела продаж; планы и отчёты не правит.",
+    ROLE_SALES_ASSISTANT: (
+        "Справочники и задачи отдела продаж. Если сотрудник ведёт клиентов — "
+        "свои планы и отчёты."
+    ),
     ROLE_COMMERCIAL_DIRECTOR: (
         "Весь коммерческий блок: планы продаж, корректировки, годовой и помесячный план, "
         "итоги месяца, задачи и справочники."
@@ -290,6 +293,25 @@ ADMIN_RIGHTS: dict[str, Rights] = {
     block.key: Rights(frozenset(action.key for action in block.actions)) for block in BLOCKS
 }
 
+# Что добавляет признак «ведёт клиентов» сверх прав должности. Только личные
+# продажи с охватом «свои»: утверждение, рассылка и чужие данные остаются
+# у должности. Признак не выдаёт прав руководителя.
+MANAGER_GRANTS: dict[str, frozenset[str]] = {
+    "sales_plans": frozenset({"view", "edit", "submit", "delete"}),
+    "corrections": frozenset({"view", "propose"}),
+    "annual_plan": frozenset({"view"}),
+    "monthly_plan": frozenset({"view", "edit"}),
+    "month_results": frozenset({"view", "reasons"}),
+    "plan_fact": frozenset({"view"}),
+}
+
+
+def _manager_allows(user: User, block: str, action: str) -> bool:
+    """Разрешает ли личный статус менеджера действие сверх должности."""
+    return bool(getattr(user, "is_manager", False)) and action in MANAGER_GRANTS.get(
+        block, frozenset()
+    )
+
 
 def defaults_for(role: str) -> dict[str, Rights]:
     """Стартовые права уровня; для админа — полный доступ."""
@@ -306,19 +328,48 @@ def _rights_of(user: User) -> dict[str, Rights]:
 
 
 def can(user: User, block: str, action: str) -> bool:
-    """Может ли пользователь выполнить действие в блоке."""
+    """Может ли пользователь выполнить действие в блоке.
+
+    Права должности складываются с личным статусом менеджера: сотрудник без
+    прав на планы всё равно работает со своими планами, если ведёт клиентов.
+    """
     if user.role == ROLE_ADMIN:
         return True
     rights = _rights_of(user).get(block)
-    return rights is not None and action in rights.actions
+    if rights is not None and action in rights.actions:
+        return True
+    return _manager_allows(user, block, action)
 
 
 def scope_of(user: User, block: str) -> str:
-    """Охват данных: own — только свои строки, all — все."""
+    """Охват данных: own — только свои строки, all — все (для чтения)."""
     if user.role == ROLE_ADMIN:
         return "all"
     rights = _rights_of(user).get(block)
     return rights.scope if rights is not None else "own"
+
+
+def scope_for(user: User, block: str, action: str) -> str:
+    """Охват конкретного действия.
+
+    Если действие даёт должность — её охват; если только личный статус
+    менеджера — всегда «свои». Так директор по закупкам, который тоже ведёт
+    клиентов, видит все планы, но правит только свой.
+    """
+    if user.role == ROLE_ADMIN:
+        return "all"
+    rights = _rights_of(user).get(block)
+    if rights is not None and action in rights.actions:
+        return rights.scope
+    return "own"
+
+
+def manages_all(user: User, block: str, action: str) -> bool:
+    """Даёт ли должность (не личный статус) это действие на всех данных."""
+    if user.role == ROLE_ADMIN:
+        return True
+    rights = _rights_of(user).get(block)
+    return rights is not None and rights.scope == "all" and action in rights.actions
 
 
 def level_keys() -> tuple[str, ...]:

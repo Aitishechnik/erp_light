@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
-from app.models.auth import ROLE_SALES_MANAGER, User
+from app.models.auth import User
 from app.permissions import can
 from app.schemas.auth import UserOut, user_out
 
@@ -32,13 +32,15 @@ def list_users(
 
 @router.get("/users/managers", response_model=list[UserOut])
 def list_managers(user: CurrentUser, db: DbSession) -> list[UserOut]:
-    """Активные менеджеры по продажам — для карточки клиента и планов.
+    """Активные сотрудники, которые ведут клиентов, — для карточки и планов.
 
-    Доступно любому вошедшему: в списке нет ничего, кроме имени и роли.
+    Должность не важна: коммерческий директор и ассистент попадают сюда, если
+    админ отметил «Ведёт клиентов». Доступно любому вошедшему: в списке нет
+    ничего, кроме имени, должности и признака менеджера.
     """
     statement = (
         select(User)
-        .where(User.is_active.is_(True), User.role == ROLE_SALES_MANAGER)
+        .where(User.is_active.is_(True), User.is_manager.is_(True))
         .order_by(User.full_name)
     )
     return [user_out(row) for row in db.execute(statement).scalars().all()]

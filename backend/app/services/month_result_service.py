@@ -32,7 +32,7 @@ from app.models.sales import (
     SalesFact,
     SalesFactUnmatched,
 )
-from app.permissions import can, scope_of
+from app.permissions import can, scope_for, scope_of
 
 ZERO = Decimal("0")
 
@@ -373,6 +373,8 @@ def set_reason(
     if text is not None and len(text) > MAX_COMMENT:
         raise ReasonError(f"Комментарий длиннее {MAX_COMMENT} символов")
     row = _find_row(db, user, year, month, client_id, product_id)
+    if scope_for(user, "month_results", "reasons") == "own" and row.manager_id != user.id:
+        raise ReasonError("Причину ставит менеджер этой строки", status_code=403)
     if row.deviation == ZERO:
         raise ReasonError("У этой строки нет отклонения — причина не нужна")
 
@@ -416,8 +418,10 @@ def clear_reason(
         raise ReasonError("Снимать причины вам недоступно", status_code=403)
     if _month_closed(db, year, month):
         raise ReasonError("Месяц закрыт — причину менять нельзя", status_code=409)
-    _find_row(db, user, year, month, client_id, product_id)
-    row = (
+    found = _find_row(db, user, year, month, client_id, product_id)
+    if scope_for(user, "month_results", "reasons") == "own" and found.manager_id != user.id:
+        raise ReasonError("Причину снимает менеджер этой строки", status_code=403)
+    existing = (
         db.execute(
             select(DeviationReason).where(
                 DeviationReason.year == year,
@@ -429,6 +433,6 @@ def clear_reason(
         .scalars()
         .one_or_none()
     )
-    if row is not None:
-        db.delete(row)
+    if existing is not None:
+        db.delete(existing)
         db.commit()

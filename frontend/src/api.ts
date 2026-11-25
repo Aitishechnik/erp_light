@@ -34,6 +34,8 @@ export type SessionUser = {
   role_title: string
   is_admin?: boolean
   is_active?: boolean
+  /** «Ведёт клиентов»: личные продажи независимо от должности. */
+  is_manager?: boolean
   created_at?: string | null
   permissions?: Record<string, BlockRights> | null
 }
@@ -45,18 +47,61 @@ export function isAdmin(user?: SessionUser | null): boolean {
   return user != null && (user.is_admin === true || ADMIN_ROLES.includes(user.role))
 }
 
-/** Разрешено ли действие в блоке — по правам, пришедшим с сервера. */
+/** Что добавляет личный статус «ведёт клиентов» сверх прав должности. */
+const MANAGER_GRANTS: Record<string, string[]> = {
+  sales_plans: ['view', 'edit', 'submit', 'delete'],
+  corrections: ['view', 'propose'],
+  annual_plan: ['view'],
+  monthly_plan: ['view', 'edit'],
+  month_results: ['view', 'reasons'],
+  plan_fact: ['view'],
+}
+
+export function isActiveManager(user?: SessionUser | null): boolean {
+  return user?.is_manager === true
+}
+
+/** Разрешено ли действие в блоке — по правам должности и личному статусу. */
 export function can(user: SessionUser | null | undefined, block: string, action: string): boolean {
   if (!user) return false
   if (isAdmin(user)) return true
-  return user.permissions?.[block]?.actions.includes(action) ?? false
+  if (user.permissions?.[block]?.actions.includes(action)) return true
+  return isActiveManager(user) && (MANAGER_GRANTS[block]?.includes(action) ?? false)
 }
 
-/** Охват блока: «только свои» или «все». */
+/** Охват блока для чтения: «только свои» или «все». */
 export function scopeOf(user: SessionUser | null | undefined, block: string): 'own' | 'all' {
   if (!user) return 'own'
   if (isAdmin(user)) return 'all'
   return user.permissions?.[block]?.scope ?? 'own'
+}
+
+/**
+ * Охват конкретного действия: если его даёт только личный статус менеджера —
+ * всегда «свои». Так директор по закупкам видит все планы, но правит свой.
+ */
+export function scopeFor(
+  user: SessionUser | null | undefined,
+  block: string,
+  action: string,
+): 'own' | 'all' {
+  if (!user) return 'own'
+  if (isAdmin(user)) return 'all'
+  const rights = user.permissions?.[block]
+  if (rights?.actions.includes(action)) return rights.scope
+  return 'own'
+}
+
+/** Даёт ли должность (не личный статус) это действие на всех данных. */
+export function canManageAll(
+  user: SessionUser | null | undefined,
+  block: string,
+  action: string,
+): boolean {
+  if (!user) return false
+  if (isAdmin(user)) return true
+  const rights = user.permissions?.[block]
+  return rights?.scope === 'all' && (rights.actions.includes(action) ?? false)
 }
 
 export type Product = {
@@ -1839,6 +1884,7 @@ export function createAdminUser(payload: {
   full_name: string
   password: string
   role: Role
+  is_manager: boolean
 }): Promise<AdminUser> {
   return request<AdminUser>('/api/v1/admin/users', {
     method: 'POST',
@@ -1848,7 +1894,7 @@ export function createAdminUser(payload: {
 
 export function updateAdminUser(
   id: string,
-  payload: { full_name?: string; role?: Role; is_active?: boolean },
+  payload: { full_name?: string; role?: Role; is_active?: boolean; is_manager?: boolean },
 ): Promise<AdminUser> {
   return request<AdminUser>(`/api/v1/admin/users/${id}`, {
     method: 'PATCH',
