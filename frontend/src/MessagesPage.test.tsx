@@ -60,6 +60,8 @@ describe('Журнал: ссылки и очистка', () => {
 
     const link = await screen.findByRole('link', { name: /Месяц 01.2027 закрыт/ })
     expect(link).toHaveAttribute('href', '#/month/2027/1')
+    // Должность автора — только для администратора.
+    expect(screen.queryByText('Коммерческий директор', { exact: true })).toBeNull()
   })
 
   it('сообщение от чужого действия видно, даже если его нет в журнале', async () => {

@@ -11,6 +11,8 @@ import {
 type Props = {
   /** Переход в полный журнал действий. */
   onOpenJournal: () => void
+  /** Должности авторов видит только администратор: для остальных это техданные. */
+  showRoles?: boolean
 }
 
 function formatTime(value: string): string {
@@ -43,7 +45,7 @@ function rowAriaLabel(row: AuditEvent): string {
  * прочитанным и убирает его из списка. Прочитанные и все действия остаются
  * в журнале — туда ведёт кнопка «Весь журнал».
  */
-export function NotificationsBell({ onOpenJournal }: Props) {
+export function NotificationsBell({ onOpenJournal, showRoles = false }: Props) {
   const [open, setOpen] = useState(false)
   const [unread, setUnread] = useState(0)
   const [rows, setRows] = useState<AuditEvent[]>([])
@@ -229,7 +231,8 @@ export function NotificationsBell({ onOpenJournal }: Props) {
                       </span>
                       <span className="bell-meta">
                         {row.actor_name ?? 'Система'}
-                        {row.actor_role_title &&
+                        {showRoles &&
+                        row.actor_role_title &&
                         row.actor_name &&
                         !row.actor_name.toLowerCase().startsWith(row.actor_role_title.toLowerCase())
                           ? ` · ${row.actor_role_title}`

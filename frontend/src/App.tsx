@@ -439,6 +439,7 @@ export function App() {
       <div className="workspace">
         <header className="topbar">
           <NotificationsBell
+            showRoles={isAdmin(user)}
             onOpenJournal={() => {
               setActive('messages')
               setOpenGroup('admin')
@@ -459,7 +460,7 @@ export function App() {
             </div>
             <div className="profile-meta">
               <div className="user-name">{user.full_name}</div>
-              <div className="user-role">{user.role_title}</div>
+              {isAdmin(user) ? <div className="user-role">{user.role_title}</div> : null}
             </div>
           </div>
           <button

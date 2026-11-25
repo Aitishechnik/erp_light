@@ -649,7 +649,6 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
                 {managers.map((manager) => (
                   <option key={manager.id} value={manager.id}>
                     {manager.full_name}
-                    {manager.role === 'sales_manager' ? '' : ` — ${manager.role_title}`}
                   </option>
                 ))}
               </select>

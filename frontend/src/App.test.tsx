@@ -86,6 +86,10 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Войти' }))
 
     expect(await screen.findByText('Иван Петров')).toBeInTheDocument()
+    // Уровень доступа — техданные администратора, в шапке его нет.
+    const meta = screen.getByText('Иван Петров').closest('.profile-meta')
+    expect(meta).not.toBeNull()
+    expect(within(meta as HTMLElement).queryByText('Менеджер по продажам')).toBeNull()
     const table = await screen.findByTestId('stock-table')
     expect(table).toHaveTextContent('SKU-1')
     expect(screen.getByTestId('total-value')).toHaveTextContent('1 500,00')

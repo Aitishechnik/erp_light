@@ -583,7 +583,7 @@ function NewTaskForm({
           <select value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)}>
             {people.map((person) => (
               <option key={person.id} value={person.id}>
-                {person.full_name} — {person.role_title}
+                {person.full_name}
               </option>
             ))}
           </select>

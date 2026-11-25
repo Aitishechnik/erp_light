@@ -70,6 +70,8 @@ describe('Служебные сообщения', () => {
     // Прочитанные остаются в панели: история не исчезает.
     expect(screen.getByTestId('bell-row-ev-2')).toBeInTheDocument()
     expect(screen.getAllByText(/Коммерческий директор \(демо\)/).length).toBeGreaterThan(0)
+    // Должность автора в колокольчике видит только администратор.
+    expect(screen.queryByText(/· Коммерческий директор/)).toBeNull()
   })
 
   it('отмечает всё прочитанным и убирает счётчик', async () => {

@@ -6,6 +6,7 @@ import {
   fetchCleanupSuggestion,
   fetchJournal,
   fetchMessages,
+  isAdmin,
   markAllMessagesRead,
   scopeOf,
 } from './api'
@@ -218,7 +219,9 @@ export function MessagesPage({ user }: Props) {
                   <td className="nowrap">{formatTime(row.created_at)}</td>
                   <td>
                     {row.actor_name ?? 'Система'}
-                    {showRole(row) ? <div className="hint">{row.actor_role_title}</div> : null}
+                    {isAdmin(user) && showRole(row) ? (
+                      <div className="hint">{row.actor_role_title}</div>
+                    ) : null}
                   </td>
                   <td>{row.action_title}</td>
                   <td>
