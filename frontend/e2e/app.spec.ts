@@ -565,11 +565,13 @@ test('менеджер заполняет план продаж по клиен�
 
   // Сначала в план добавляется клиент, потом строка товара.
   await expect(page.getByTestId('plan-no-clients')).toBeVisible()
-  await page.getByLabel('Добавить клиента').selectOption('client-1')
+  await page.getByLabel('Добавить клиента').fill('Ромашка')
+  await page.getByRole('option', { name: 'ООО Ромашка' }).click()
   await page.getByRole('button', { name: 'Добавить', exact: true }).click()
   await expect(page.getByTestId('current-client')).toContainText('ООО Ромашка')
 
-  await page.getByLabel('Добавить товар').selectOption('p-1')
+  await page.getByLabel('Добавить товар').fill('SKU-1')
+  await page.getByRole('option', { name: /SKU-1/ }).click()
   await page.getByRole('button', { name: 'Добавить строку' }).click()
   await page.getByLabel('SKU-1 Декабрь').fill('10')
 

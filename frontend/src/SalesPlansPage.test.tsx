@@ -176,6 +176,19 @@ function bodies(): string[] {
   return mock.mock.calls.map((call) => JSON.stringify(call[1] ?? {}))
 }
 
+/** Тела PUT/POST-запросов: из init достаём строку body и разбираем её. */
+function sentPayloads(): Record<string, unknown>[] {
+  return bodies().flatMap((raw) => {
+    const init = JSON.parse(raw) as { body?: string }
+    if (!init.body) return []
+    try {
+      return [JSON.parse(init.body) as Record<string, unknown>]
+    } catch {
+      return []
+    }
+  })
+}
+
 describe('SalesPlansPage', () => {
   it('показывает план по клиенту и утверждает его по кнопке', async () => {
     const user = userEvent.setup()
@@ -292,13 +305,19 @@ describe('SalesPlansPage', () => {
     const user = userEvent.setup()
     mockApi(
       routes({
+        'PUT /api/v1/sales-plans/plan-1/items': {
+          body: plan({ status: 'filling', status_title: 'Заполняется' }),
+        },
         '/api/v1/sales-plans': { body: [plan({ status: 'filling', status_title: 'Заполняется' })] },
       }),
     )
     render(<SalesPlansPage user={COMMERCIAL} />)
 
     await screen.findByText('Заполняется')
-    await user.selectOptions(screen.getByLabelText('Добавить клиента'), 'ООО Вектор')
+    const picker = screen.getByLabelText('Добавить клиента')
+    await user.click(picker)
+    await user.type(picker, 'Вектор')
+    await user.click(await screen.findByRole('option', { name: 'ООО Вектор' }))
     await user.click(screen.getByRole('button', { name: 'Добавить' }))
 
     expect(screen.getByTestId('current-client')).toHaveTextContent('ООО Вектор')
@@ -306,6 +325,76 @@ describe('SalesPlansPage', () => {
     // Оба клиента видны как вкладки.
     expect(screen.getByRole('button', { name: 'ООО Ромашка' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'ООО Вектор' })).toBeInTheDocument()
+  })
+
+  it('автосохраняет клиента и позицию, даже пока количества не заполнены', async () => {
+    const user = userEvent.setup()
+    const empty = plan({ status: 'filling', status_title: 'Заполняется', items: [] })
+    mockApi(
+      routes({
+        'PUT /api/v1/sales-plans/plan-1/items': { body: empty },
+        '/api/v1/sales-plans': { body: [empty] },
+      }),
+    )
+    render(<SalesPlansPage user={COMMERCIAL} />)
+
+    await screen.findByText('Заполняется')
+    await screen.findByTestId('plan-table')
+    const clientPicker = screen.getByLabelText('Добавить клиента')
+    await user.click(clientPicker)
+    await user.type(clientPicker, 'Вектор')
+    await user.click(await screen.findByRole('option', { name: 'ООО Вектор' }))
+    await user.click(screen.getByRole('button', { name: 'Добавить' }))
+
+    const productPicker = screen.getByLabelText('Добавить товар')
+    await user.click(productPicker)
+    await user.type(productPicker, 'Товар 1')
+    await user.click(await screen.findByRole('option', { name: /SKU-1/ }))
+    await user.click(screen.getByRole('button', { name: 'Добавить строку' }))
+
+    await waitFor(
+      () => {
+        const saved = sentPayloads().find((payload) => {
+          const rows = payload.rows as { client_id: string; product_id: string }[] | undefined
+          return rows?.some((row) => row.client_id === 'client-2' && row.product_id === 'product-1')
+        })
+        expect(saved).toBeDefined()
+        expect(saved?.items).toEqual([])
+        expect(saved?.rows).toEqual([{ client_id: 'client-2', product_id: 'product-1' }])
+        expect(saved?.clients).toEqual([{ client_id: 'client-2' }])
+      },
+      { timeout: 2000 },
+    )
+  })
+
+  it('автосохраняет введённое количество без кнопки «Сохранить»', async () => {
+    const user = userEvent.setup()
+    mockApi(
+      routes({
+        'PUT /api/v1/sales-plans/plan-1/items': {
+          body: plan({ status: 'filling', status_title: 'Заполняется' }),
+        },
+        '/api/v1/sales-plans': { body: [plan({ status: 'filling', status_title: 'Заполняется' })] },
+      }),
+    )
+    render(<SalesPlansPage user={COMMERCIAL} />)
+
+    await screen.findByText('Заполняется')
+    await screen.findByTestId('plan-table')
+    const december = screen.getByLabelText('SKU-1 Декабрь')
+    await user.clear(december)
+    await user.type(december, '7')
+
+    await waitFor(
+      () => {
+        const saved = sentPayloads().find((payload) => {
+          const items = payload.items as { product_id: string; quantity: string }[] | undefined
+          return items?.some((item) => item.product_id === 'product-1' && item.quantity === '7')
+        })
+        expect(saved).toBeDefined()
+      },
+      { timeout: 2500 },
+    )
   })
 
   it('менеджер отправляет свой план на проверку', async () => {
@@ -481,10 +570,10 @@ describe('SalesPlansPage', () => {
     await user.clear(december)
     await user.type(december, '25')
     const box = screen.getByTestId('correction-box')
-    await user.selectOptions(
-      within(box).getByLabelText('Добавить товар в корректировку'),
-      'SKU-2 · Товар 2',
-    )
+    const picker = within(box).getByLabelText('Добавить товар в корректировку')
+    await user.click(picker)
+    await user.type(picker, 'Товар 2')
+    await user.click(await within(box).findByRole('option', { name: /SKU-2/ }))
     await user.click(within(box).getByRole('button', { name: 'Добавить строку' }))
     await user.type(screen.getByLabelText('Корректировка SKU-2 Декабрь'), '5')
     await user.click(within(box).getByRole('button', { name: 'Сохранить' }))
@@ -585,6 +674,7 @@ describe('SalesPlansPage', () => {
   })
 
   it('в плане менеджера нет материалов — только сырьё и готовая продукция', async () => {
+    const user = userEvent.setup()
     mockApi(
       routes({
         '/api/v1/products': {
@@ -610,9 +700,10 @@ describe('SalesPlansPage', () => {
     await waitFor(() => {
       expect(calls().some((url) => url.includes('kinds=raw,finished'))).toBe(true)
     })
-    expect(
-      within(select).queryByRole('option', { name: /Крышка от коробки/ }),
-    ).not.toBeInTheDocument()
-    expect(within(select).getByRole('option', { name: /Товар 2/ })).toBeInTheDocument()
+    await user.click(select)
+    await waitFor(() => {
+      expect(screen.queryByRole('option', { name: /Крышка от коробки/ })).not.toBeInTheDocument()
+      expect(screen.getByRole('option', { name: /Товар 2/ })).toBeInTheDocument()
+    })
   })
 })

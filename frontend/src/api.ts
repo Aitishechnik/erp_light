@@ -130,6 +130,21 @@ export type SalesPlanItem = {
 
 export type SalesPlanStatus = 'draft' | 'filling' | 'on_review' | 'approved'
 
+/** Состав черновика: клиент и позиция, добавленные до ввода количеств. */
+export type SalesPlanDraftClient = {
+  client_id: string
+  client_name: string
+}
+
+export type SalesPlanDraftRow = {
+  client_id: string
+  client_name: string
+  product_id: string
+  product_code: string
+  product_name: string
+  unit: string
+}
+
 export type SalesPlan = {
   id: string
   year: number
@@ -143,6 +158,8 @@ export type SalesPlan = {
   updated_at: string
   editable_months: number[]
   items: SalesPlanItem[]
+  draft_clients?: SalesPlanDraftClient[]
+  draft_rows?: SalesPlanDraftRow[]
 }
 
 export type SalesPlanItemIn = {
@@ -150,6 +167,11 @@ export type SalesPlanItemIn = {
   product_id: string
   month: number
   quantity: string
+}
+
+export type SalesPlanDraftRowIn = {
+  client_id: string
+  product_id: string
 }
 
 /** Помесячный план: строка месяца с количеством из годового плана и причиной. */
@@ -1065,10 +1087,19 @@ export function createSalesPlan(year: number, managerId?: string): Promise<Sales
   })
 }
 
-export function saveSalesPlanItems(planId: string, items: SalesPlanItemIn[]): Promise<SalesPlan> {
+export function saveSalesPlanItems(
+  planId: string,
+  items: SalesPlanItemIn[],
+  rows: SalesPlanDraftRowIn[] = [],
+  clients: string[] = [],
+): Promise<SalesPlan> {
   return request<SalesPlan>(`/api/v1/sales-plans/${planId}/items`, {
     method: 'PUT',
-    body: JSON.stringify({ items }),
+    body: JSON.stringify({
+      items,
+      clients: clients.map((clientId) => ({ client_id: clientId })),
+      rows,
+    }),
   })
 }
 

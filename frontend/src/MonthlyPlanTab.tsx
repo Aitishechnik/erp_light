@@ -20,6 +20,7 @@ import {
   saveMonthlyPlan,
   scopeFor,
 } from './api'
+import { SearchSelect } from './SearchSelect'
 
 type Draft = { quantity: string; reason: string }
 type Drafts = Record<string, Draft>
@@ -460,30 +461,26 @@ export function MonthlyPlanTab({
 
           {editable ? (
             <div className="toolbar monthly-add">
-              <select
-                aria-label="Клиент новой позиции"
+              <SearchSelect
+                label="Клиент новой позиции"
                 value={addClient}
-                onChange={(event) => setAddClient(event.target.value)}
-              >
-                <option value="">Клиент</option>
-                {clients.map((row) => (
-                  <option key={row.id} value={row.id}>
-                    {row.name}
-                  </option>
-                ))}
-              </select>
-              <select
-                aria-label="Товар новой позиции"
+                onChange={setAddClient}
+                placeholder="Начните вводить клиента"
+                emptyText="Клиент не найден"
+                options={clients.map((row) => ({ value: row.id, label: row.name }))}
+              />
+              <SearchSelect
+                label="Товар новой позиции"
                 value={addProduct}
-                onChange={(event) => setAddProduct(event.target.value)}
-              >
-                <option value="">Товар</option>
-                {products.map((row) => (
-                  <option key={row.id} value={row.id}>
-                    {row.code} · {row.name}
-                  </option>
-                ))}
-              </select>
+                onChange={setAddProduct}
+                placeholder="Код или название позиции"
+                emptyText="Позиция не найдена"
+                options={products.map((row) => ({
+                  value: row.id,
+                  label: `${row.code} · ${row.name}`,
+                  keywords: row.code,
+                }))}
+              />
               <button type="button" onClick={addRow} disabled={!addClient || !addProduct}>
                 Добавить позицию
               </button>

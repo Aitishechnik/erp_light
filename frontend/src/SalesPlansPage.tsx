@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   approveSalesPlanCorrection,
   type Counterparty,
@@ -23,6 +23,7 @@ import {
   type SalesPlan,
   type SalesPlanCorrection,
   type SalesPlanCorrectionItemIn,
+  type SalesPlanDraftRowIn,
   type SalesPlanItemIn,
   type SessionUser,
   salesPlanAction,
@@ -33,6 +34,7 @@ import {
 } from './api'
 import { MonthlyPlanTab } from './MonthlyPlanTab'
 import { PageHelp } from './PageHelp'
+import { SearchSelect } from './SearchSelect'
 
 type DraftRow = {
   productId: string
@@ -58,6 +60,23 @@ function trimQuantity(raw: string): string {
 
 function draftsFromPlan(plan: SalesPlan): Drafts {
   const drafts: Drafts = {}
+  // Клиенты и позиции, добавленные в черновик до ввода количеств.
+  for (const client of plan.draft_clients ?? []) {
+    drafts[client.client_id] = drafts[client.client_id] ?? []
+  }
+  for (const saved of plan.draft_rows ?? []) {
+    const rows = drafts[saved.client_id] ?? []
+    if (!rows.some((candidate) => candidate.productId === saved.product_id)) {
+      rows.push({
+        productId: saved.product_id,
+        code: saved.product_code,
+        name: saved.product_name,
+        unit: saved.unit,
+        months: {},
+      })
+    }
+    drafts[saved.client_id] = rows
+  }
   for (const item of plan.items) {
     const rows = drafts[item.client_id] ?? []
     let row = rows.find((candidate) => candidate.productId === item.product_id)
@@ -78,6 +97,76 @@ function draftsFromPlan(plan: SalesPlan): Drafts {
     rows.sort((a, b) => a.name.localeCompare(b.name, 'ru'))
   }
   return drafts
+}
+
+/** Состав черновика для автосохранения: клиенты и позиции, даже пустые. */
+function draftRowsOf(drafts: Drafts): SalesPlanDraftRowIn[] {
+  const seen = new Set<string>()
+  const rows: SalesPlanDraftRowIn[] = []
+  for (const [clientId, clientRows] of Object.entries(drafts)) {
+    for (const row of clientRows) {
+      const key = `${clientId}|${row.productId}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      rows.push({ client_id: clientId, product_id: row.productId })
+    }
+  }
+  return rows
+}
+
+function draftClientsOf(drafts: Drafts): string[] {
+  return Object.keys(drafts)
+}
+
+type DraftPayload = {
+  items: SalesPlanItemIn[]
+  rows: SalesPlanDraftRowIn[]
+  clients: string[]
+}
+
+/**
+ * Полный снимок черновика. Количества — только заполненные; состав строк и
+ * клиентов уходит всегда, поэтому пустые позиции не исчезают при сохранении.
+ */
+function buildDraftPayload(
+  plan: SalesPlan,
+  drafts: Drafts,
+  clientName: (id: string) => string,
+  onError?: (message: string) => void,
+): DraftPayload | null {
+  const items: SalesPlanItemIn[] = []
+  for (const [currentClientId, clientRows] of Object.entries(drafts)) {
+    for (const row of clientRows) {
+      for (const month of plan.editable_months) {
+        const raw = normalize(row.months[month] ?? '')
+        if (raw === '') continue
+        if (!QTY_PATTERN.test(raw)) {
+          onError?.(
+            `Количество «${row.months[month]}» в строке ${row.name} (${clientName(currentClientId)}) — не число`,
+          )
+          return null
+        }
+        // Ноль — это очистка ячейки. Строка останется в составе черновика.
+        if (Number(raw) === 0) continue
+        items.push({
+          client_id: currentClientId,
+          product_id: row.productId,
+          month,
+          quantity: raw,
+        })
+      }
+    }
+  }
+
+  const rows = draftRowsOf(drafts)
+  const clients = draftClientsOf(drafts)
+  if (rows.length === 0 && plan.items.length > 0) {
+    // Защита от гонки загрузки: форма не должна отправить пустой состав
+    // вместо уже сохранённых строк.
+    onError?.('Состав плана не загрузился — обновите страницу, чтобы не потерять строки')
+    return null
+  }
+  return { items, rows, clients }
 }
 
 function correctionKey(clientId: string, productId: string, month: number): string {
@@ -251,12 +340,29 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [mode, setMode] = useState<'year' | 'month'>('year')
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [savedAt, setSavedAt] = useState<Date | null>(null)
+
+  const draftsRef = useRef<Drafts>({})
+  const clientsRef = useRef<Counterparty[]>([])
+  const planRef = useRef<SalesPlan | null>(null)
+  const hydratedPlanIdRef = useRef<string | null>(null)
+  const skipHydrateRef = useRef<string | null>(null)
+  const dirtyRevisionRef = useRef(0)
+  const savedRevisionRef = useRef(0)
+  const canEditRef = useRef(false)
+  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve())
 
   // Право на всех даёт должность; личный статус менеджера — только свои планы.
   const mayManage = canManageAll(user, 'sales_plans', 'edit')
   const yearPlans = plans.filter((plan) => plan.year === year)
   const plan = yearPlans.find((row) => row.id === selectedId) ?? null
   const isOwner = plan !== null && plan.manager_id === user.id
+  const canEdit =
+    can(user, 'sales_plans', 'edit') &&
+    plan !== null &&
+    plan.status !== 'approved' &&
+    (mayManage || (isOwner && ['draft', 'filling'].includes(plan.status)))
 
   const clientName = (id: string): string => clients.find((row) => row.id === id)?.name ?? 'Клиент'
   const activeClients = clients.filter((row) => row.is_active)
@@ -292,13 +398,99 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
   }, [reload, mayManage])
 
   useEffect(() => {
+    planRef.current = plan
+    if (plan && skipHydrateRef.current === plan.id) {
+      // Это ответ автосохранения, а не другой план: не перетираем то, что
+      // человек успел изменить, пока запрос летел.
+      skipHydrateRef.current = null
+      return
+    }
     const next = plan ? draftsFromPlan(plan) : {}
+    draftsRef.current = next
+    hydratedPlanIdRef.current = plan?.id ?? null
+    dirtyRevisionRef.current = 0
+    savedRevisionRef.current = 0
+    setSaveState('idle')
+    setSavedAt(null)
     setDrafts(next)
     setClientId((current) => {
       if (current && next[current]) return current
       return Object.keys(next)[0] ?? ''
     })
   }, [plan])
+
+  useEffect(() => {
+    clientsRef.current = clients
+  }, [clients])
+
+  useEffect(() => {
+    canEditRef.current = canEdit
+  }, [canEdit])
+
+  /** Сохранение черновика: запросы идут строго по очереди, последний снимок — свежий. */
+  const requestSave = useCallback(async (reportErrors = false): Promise<boolean> => {
+    const runSave = async (): Promise<boolean> => {
+      const currentPlan = planRef.current
+      if (!currentPlan || !canEditRef.current) return false
+      if (hydratedPlanIdRef.current !== currentPlan.id) return false
+      if (dirtyRevisionRef.current === savedRevisionRef.current && !reportErrors) return true
+      const revision = dirtyRevisionRef.current
+      const payload = buildDraftPayload(
+        currentPlan,
+        draftsRef.current,
+        (id) => clientsRef.current.find((row) => row.id === id)?.name ?? 'Клиент',
+        reportErrors ? setError : undefined,
+      )
+      if (!payload) return false
+      setSaveState('saving')
+      try {
+        const updated = await saveSalesPlanItems(
+          currentPlan.id,
+          payload.items,
+          payload.rows,
+          payload.clients,
+        )
+        savedRevisionRef.current = revision
+        skipHydrateRef.current = updated.id
+        setPlans((current) => current.map((row) => (row.id === updated.id ? updated : row)))
+        setSaveState('saved')
+        setSavedAt(new Date())
+        setError(null)
+        return true
+      } catch (err) {
+        setSaveState('error')
+        setError(errorMessage(err))
+        return false
+      }
+    }
+    const task = saveChainRef.current.then(runSave, runSave)
+    saveChainRef.current = task.then(
+      () => undefined,
+      () => undefined,
+    )
+    return task
+  }, [])
+
+  // Каждое изменение черновика уходит на сервер само: добавление клиента,
+  // позиции и ввод количеств. Пауза в наборе склеивает символы в один запрос.
+  useEffect(() => {
+    // Сами данные черновика лежат в ref; зависимость от drafts нужна,
+    // чтобы эффект перезапускал таймер на каждое изменение.
+    void drafts
+    if (!canEdit || !plan || hydratedPlanIdRef.current !== plan.id) return
+    if (dirtyRevisionRef.current === savedRevisionRef.current) return
+    const timer = window.setTimeout(() => {
+      if (dirtyRevisionRef.current !== savedRevisionRef.current) void requestSave()
+    }, 600)
+    return () => window.clearTimeout(timer)
+  }, [drafts, canEdit, plan, requestSave])
+
+  // Уход со страницы не должен терять последнее действие.
+  useEffect(() => {
+    return () => {
+      if (dirtyRevisionRef.current !== savedRevisionRef.current) void requestSave()
+    }
+  }, [requestSave])
 
   useEffect(() => {
     if (!plan || !can(user, 'corrections', 'view')) {
@@ -346,33 +538,24 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
   const editable = plan?.editable_months ?? []
   const rows = clientId ? (drafts[clientId] ?? []) : []
 
-  const setRows = (updater: (current: DraftRow[]) => DraftRow[]) => {
-    setDrafts((current) => ({ ...current, [clientId]: updater(current[clientId] ?? []) }))
+  const updateDrafts = (updater: (current: Drafts) => Drafts, immediate = false) => {
+    setDrafts((current) => {
+      const next = updater(current)
+      draftsRef.current = next
+      return next
+    })
+    dirtyRevisionRef.current += 1
+    if (immediate) {
+      // Даём React применить состояние, затем сохраняем добавленный состав.
+      window.setTimeout(() => void requestSave(), 0)
+    }
   }
 
-  const collectItems = (): SalesPlanItemIn[] | null => {
-    const items: SalesPlanItemIn[] = []
-    for (const [currentClientId, clientRows] of Object.entries(drafts)) {
-      for (const row of clientRows) {
-        for (const month of editable) {
-          const raw = normalize(row.months[month] ?? '')
-          if (raw === '') continue
-          if (!QTY_PATTERN.test(raw)) {
-            setError(
-              `Количество «${row.months[month]}» в строке ${row.name} (${clientName(currentClientId)}) — не число`,
-            )
-            return null
-          }
-          items.push({
-            client_id: currentClientId,
-            product_id: row.productId,
-            month,
-            quantity: raw,
-          })
-        }
-      }
-    }
-    return items
+  const setRows = (updater: (current: DraftRow[]) => DraftRow[]) => {
+    updateDrafts((current) => ({
+      ...current,
+      [clientId]: updater(current[clientId] ?? []),
+    }))
   }
 
   const setMonth = (productId: string, month: number, value: string) => {
@@ -386,24 +569,43 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
   const addRow = () => {
     const product = products.find((row) => row.id === productToAdd)
     if (!product || !clientId) return
-    setRows((current) => [
-      ...current,
-      {
-        productId: product.id,
-        code: product.code,
-        name: product.name,
-        unit: product.unit,
-        months: {},
-      },
-    ])
+    if (rows.some((row) => row.productId === product.id)) return
+    updateDrafts(
+      (current) => ({
+        ...current,
+        [clientId]: [
+          ...(current[clientId] ?? []),
+          {
+            productId: product.id,
+            code: product.code,
+            name: product.name,
+            unit: product.unit,
+            months: {},
+          },
+        ],
+      }),
+      true,
+    )
     setProductToAdd('')
   }
 
   const addClientToPlan = () => {
     if (!clientToAdd) return
-    setDrafts((current) => ({ ...current, [clientToAdd]: current[clientToAdd] ?? [] }))
+    updateDrafts((current) => ({ ...current, [clientToAdd]: current[clientToAdd] ?? [] }), true)
     setClientId(clientToAdd)
     setClientToAdd('')
+  }
+
+  const saveExplicitly = () => {
+    setError(null)
+    void requestSave(true)
+  }
+
+  const submitPlan = async () => {
+    if (!plan) return
+    const saved = await requestSave(true)
+    if (!saved) return
+    await run(() => salesPlanAction(plan.id, 'submit'))
   }
 
   /** Итог строки — сумма месяцев: единица измерения у строки одна, складывать корректно. */
@@ -411,11 +613,6 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
     editable.reduce((sum, month) => sum + Number(normalize(row.months[month] ?? '') || 0), 0)
 
   const planClients = Object.keys(drafts)
-  const canEdit =
-    can(user, 'sales_plans', 'edit') &&
-    plan !== null &&
-    plan.status !== 'approved' &&
-    (mayManage || (isOwner && ['draft', 'filling'].includes(plan.status)))
   const canSubmit =
     can(user, 'sales_plans', 'submit') &&
     plan !== null &&
@@ -705,8 +902,11 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
               <span className="plan-card-title">{row.manager_name}</span>
               <span className={`badge status-${row.status}`}>{row.status_title}</span>
               <span className="plan-card-sum">
-                строк: {row.items.length}, клиентов:{' '}
-                {new Set(row.items.map((item) => item.client_id)).size}
+                строк:{' '}
+                {row.draft_rows?.length ??
+                  new Set(row.items.map((item) => `${item.client_id}|${item.product_id}`)).size}
+                , клиентов:{' '}
+                {row.draft_clients?.length ?? new Set(row.items.map((item) => item.client_id)).size}
               </span>
             </button>
           ))
@@ -720,21 +920,27 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
               <button
                 type="button"
                 className="primary"
-                disabled={busy}
-                onClick={() => {
-                  const items = collectItems()
-                  if (items) void run(() => saveSalesPlanItems(plan.id, items))
-                }}
+                disabled={busy || saveState === 'saving'}
+                onClick={saveExplicitly}
               >
                 Сохранить
               </button>
             ) : null}
-            {canSubmit ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => run(() => salesPlanAction(plan.id, 'submit'))}
+            {canEdit && saveState !== 'idle' ? (
+              <span
+                className={saveState === 'error' ? 'hint warn' : 'hint saved'}
+                data-testid="draft-save-state"
+                role="status"
               >
+                {saveState === 'saving'
+                  ? 'Сохраняем…'
+                  : saveState === 'error'
+                    ? 'Не сохранено — проверьте ошибку'
+                    : `Черновик сохранён${savedAt ? ` в ${savedAt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}` : ''}`}
+              </span>
+            ) : null}
+            {canSubmit ? (
+              <button type="button" disabled={busy} onClick={() => void submitPlan()}>
                 Отправить на проверку
               </button>
             ) : null}
@@ -843,25 +1049,21 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
                           ))
                         )}
                         <span className="sep" />
-                        <select
-                          aria-label="Добавить клиента в корректировку"
+                        <SearchSelect
+                          label="Добавить клиента в корректировку"
                           value={correctionClientToAdd}
-                          onChange={(event) => setCorrectionClientToAdd(event.target.value)}
+                          onChange={setCorrectionClientToAdd}
                           disabled={busy}
-                        >
-                          <option value="">— добавить клиента —</option>
-                          {activeClients
+                          placeholder="Начните вводить клиента"
+                          emptyText="Клиент не найден"
+                          options={activeClients
                             .filter(
                               (row) =>
                                 !correctionClients.includes(row.id) ||
                                 row.id === correctionClientToAdd,
                             )
-                            .map((row) => (
-                              <option key={row.id} value={row.id}>
-                                {row.name}
-                              </option>
-                            ))}
-                        </select>
+                            .map((row) => ({ value: row.id, label: row.name }))}
+                        />
                         <button
                           type="button"
                           disabled={busy || !correctionClientToAdd}
@@ -879,24 +1081,24 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
                       </div>
 
                       <div className="toolbar">
-                        <select
-                          aria-label="Добавить товар в корректировку"
+                        <SearchSelect
+                          label="Добавить товар в корректировку"
                           value={correctionProductToAdd}
-                          onChange={(event) => setCorrectionProductToAdd(event.target.value)}
+                          onChange={setCorrectionProductToAdd}
                           disabled={busy || !correctionClientId}
-                        >
-                          <option value="">— выберите товар —</option>
-                          {products
+                          placeholder="Код или название позиции"
+                          emptyText="Позиция не найдена"
+                          options={products
                             .filter(
                               (product) =>
                                 !correctionRows.some((row) => row.productId === product.id),
                             )
-                            .map((product) => (
-                              <option key={product.id} value={product.id}>
-                                {product.code} · {product.name}
-                              </option>
-                            ))}
-                        </select>
+                            .map((product) => ({
+                              value: product.id,
+                              label: `${product.code} · ${product.name}`,
+                              keywords: product.code,
+                            }))}
+                        />
                         <button
                           type="button"
                           disabled={busy || !correctionProductToAdd || !correctionClientId}
@@ -1123,42 +1325,38 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
                   ))
                 )}
                 <span className="sep" />
-                <select
-                  aria-label="Добавить клиента"
+                <SearchSelect
+                  label="Добавить клиента"
                   value={clientToAdd}
-                  onChange={(event) => setClientToAdd(event.target.value)}
+                  onChange={setClientToAdd}
                   disabled={!canEdit}
-                >
-                  <option value="">— добавить клиента —</option>
-                  {activeClients
+                  placeholder="Начните вводить клиента"
+                  emptyText="Клиент не найден"
+                  options={activeClients
                     .filter((row) => !planClients.includes(row.id) || row.id === clientToAdd)
-                    .map((row) => (
-                      <option key={row.id} value={row.id}>
-                        {row.name}
-                      </option>
-                    ))}
-                </select>
+                    .map((row) => ({ value: row.id, label: row.name }))}
+                />
                 <button type="button" disabled={!clientToAdd || !canEdit} onClick={addClientToPlan}>
                   Добавить
                 </button>
               </div>
 
               <div className="toolbar">
-                <select
-                  aria-label="Добавить товар"
+                <SearchSelect
+                  label="Добавить товар"
                   value={productToAdd}
-                  onChange={(event) => setProductToAdd(event.target.value)}
+                  onChange={setProductToAdd}
                   disabled={!canEdit || !clientId}
-                >
-                  <option value="">— выберите товар —</option>
-                  {products
+                  placeholder="Код или название позиции"
+                  emptyText="Позиция не найдена"
+                  options={products
                     .filter((product) => !rows.some((row) => row.productId === product.id))
-                    .map((product) => (
-                      <option key={product.id} value={product.id}>
-                        {product.code} · {product.name}
-                      </option>
-                    ))}
-                </select>
+                    .map((product) => ({
+                      value: product.id,
+                      label: `${product.code} · ${product.name}`,
+                      keywords: product.code,
+                    }))}
+                />
                 <button type="button" disabled={!productToAdd || !canEdit} onClick={addRow}>
                   Добавить строку
                 </button>
