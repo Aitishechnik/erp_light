@@ -6476,12 +6476,11 @@ button.mini.danger {
   cursor: not-allowed;
 }
 
+/* Список рисуется порталом в body (position: fixed): иначе прокручиваемые
+   блоки страницы обрезали его по своей границе. Координаты ставит компонент. */
 .search-select-menu {
-  position: absolute;
-  z-index: 40;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
+  position: fixed;
+  z-index: 60;
   max-height: 280px;
   overflow-y: auto;
   padding: 4px;
@@ -6491,12 +6490,10 @@ button.mini.danger {
   box-shadow: var(--shadow);
 }
 
-/* Список номенклатуры шире поля: название читается целиком, без давки. */
-.search-select.wide .search-select-menu {
-  right: auto;
+/* Список номенклатуры шире поля: название читается целиком, без давки.
+   Ширину задаёт компонент, здесь — только режим «по содержимому». */
+.search-select-menu.wide {
   width: max-content;
-  min-width: 100%;
-  max-width: min(700px, calc(100vw - 2rem));
 }
 
 .search-select-option {

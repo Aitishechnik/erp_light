@@ -574,7 +574,7 @@ describe('SalesPlansPage', () => {
     const picker = within(box).getByLabelText('Добавить товар в корректировку')
     await user.click(picker)
     await user.type(picker, 'Товар 2')
-    await user.click(await within(box).findByRole('option', { name: /SKU-2/ }))
+    await user.click(await screen.findByRole('option', { name: /SKU-2/ }))
     await user.click(within(box).getByRole('button', { name: 'Добавить строку' }))
     await user.type(screen.getByLabelText('Корректировка SKU-2 Декабрь'), '5')
     await user.click(within(box).getByRole('button', { name: 'Сохранить' }))

@@ -74,6 +74,19 @@ describe('SearchSelect', () => {
     expect(container.querySelector('.search-select.wide')).not.toBeNull()
   })
 
+  it('рисует список в body — прокручиваемый блок страницы его не обрежет', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+
+    await user.click(screen.getByLabelText('Клиент'))
+    const list = screen.getByRole('listbox', { name: 'Клиент' })
+
+    expect(list.parentElement).toBe(document.body)
+    expect(list.closest('.search-select')).toBeNull()
+    expect(list.style.top).toMatch(/px$/)
+    expect(list.style.maxHeight).toMatch(/px$/)
+  })
+
   it('показывает, что список сокращён, и предлагает уточнить запрос', async () => {
     const user = userEvent.setup()
     render(<Harness maxResults={2} />)
