@@ -115,7 +115,7 @@ export function MonthlyPlanTab({
     fetchCounterparties({ role: 'customer', includeInactive: false })
       .then(setClients)
       .catch(() => setClients([]))
-    fetchPlanningProducts()
+    fetchPlanningProducts({ includeFuture: true })
       .then((rows) => setProducts(rows.filter((product) => product.is_active)))
       .catch(() => setProducts([]))
   }, [])
@@ -478,8 +478,8 @@ export function MonthlyPlanTab({
                 emptyText="Позиция не найдена"
                 options={products.map((row) => ({
                   value: row.id,
-                  label: `${row.code} · ${row.name}`,
-                  keywords: row.code,
+                  label: row.is_future ? `${row.name} · будущая` : `${row.code} · ${row.name}`,
+                  keywords: row.is_future ? 'будущая' : row.code,
                 }))}
               />
               <button type="button" onClick={addRow} disabled={!addClient || !addProduct}>

@@ -210,6 +210,7 @@ def _serialize(db: Session, correction: SalesPlanCorrection) -> SalesPlanCorrect
                 )
             ),
             notes=item.notes,
+            product_is_future=item.product.is_future,
         )
         for item in sorted(
             correction.items,

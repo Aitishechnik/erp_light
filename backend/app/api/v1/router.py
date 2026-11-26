@@ -11,6 +11,7 @@ from app.api.v1 import (
     batches,
     counterparties,
     countries,
+    future_products,
     health,
     imports,
     month_results,
@@ -34,6 +35,7 @@ api_router.include_router(users.router)
 api_router.include_router(admin_users.router)
 api_router.include_router(access.router)
 api_router.include_router(products.router)
+api_router.include_router(future_products.router)
 api_router.include_router(counterparties.router)
 api_router.include_router(countries.router)
 api_router.include_router(imports.router)

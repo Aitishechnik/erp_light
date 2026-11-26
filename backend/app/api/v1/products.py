@@ -47,10 +47,11 @@ def list_products(
         description="Виды через запятую: raw,finished. Приоритетнее kind",
     ),
     include_inactive: bool = Query(default=True, description="Показать и неактивные"),
+    include_future: bool = Query(default=False, description="Показать и позиции будущих периодов"),
 ) -> list[Product]:
     """Список номенклатуры целиком: фильтры и сортировка — на стороне таблицы."""
     selected = _parse_kinds(kinds) if kinds is not None else ([kind] if kind else None)
-    rows = service.list_products(db, kinds=selected)
+    rows = service.list_products(db, kinds=selected, include_future=include_future)
     if not include_inactive:
         rows = [row for row in rows if row.is_active]
     return rows

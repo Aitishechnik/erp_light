@@ -144,6 +144,7 @@ def _serialize(db: Session, plan: SalesPlan) -> SalesPlanOut:
             month=item.month,
             quantity=item.quantity,
             notes=item.notes,
+            product_is_future=item.product.is_future,
         )
         for item in sorted(
             plan.items, key=lambda row: (row.client.name, row.product.name, row.month)
@@ -189,6 +190,7 @@ def _serialize(db: Session, plan: SalesPlan) -> SalesPlanOut:
                 product_code=products[product_id].code,
                 product_name=products[product_id].name,
                 unit=products[product_id].unit,
+                product_is_future=products[product_id].is_future,
             )
             for client_id, product_id in pairs
             if client_id in clients and product_id in products
@@ -327,6 +329,29 @@ def update_items(
     draft_clients = set(clients or []) | {client_id for client_id, _ in draft_pairs}
     draft_clients |= {item.client_id for item in items}
     draft_pairs |= {(item.client_id, item.product_id) for item in items}
+    if explicit_draft:
+        # Удалить из черновика можно только то, что не имеет объёмов в
+        # замороженных месяцах: иначе строки вернулись бы при перечитывании.
+        frozen_rows = [row for row in plan.items if row.month not in allowed]
+        removed_clients = {row.client_id for row in frozen_rows} - draft_clients
+        if removed_clients:
+            client = db.get(Counterparty, next(iter(removed_clients)))
+            client_name = client.name if client is not None else "клиент"
+            raise PlanError(
+                f"У клиента «{client_name}» есть объёмы в замороженных месяцах — "
+                "удалить его из плана нельзя",
+                status_code=409,
+            )
+        removed_pairs = {(row.client_id, row.product_id) for row in frozen_rows} - draft_pairs
+        if removed_pairs:
+            _client_id, product_id = next(iter(removed_pairs))
+            product = db.get(Product, product_id)
+            product_name = product.name if product is not None else "позиция"
+            raise PlanError(
+                f"У позиции «{product_name}» есть объёмы в замороженных месяцах — "
+                "удалить её из плана нельзя",
+                status_code=409,
+            )
     # Замороженные строки не редактируются, но их клиенты и позиции остаются
     # в составе черновика — иначе после сохранения они бы «пропали» из формы.
     for existing in plan.items:

@@ -4,6 +4,7 @@ import {
   type Counterparty,
   can,
   canManageAll,
+  createFutureProduct,
   createSalesPlan,
   createSalesPlanCorrection,
   deleteSalesPlan,
@@ -41,6 +42,8 @@ type DraftRow = {
   code: string
   name: string
   unit: string
+  /** Позиция будущего периода: кода 1С ещё нет, в плане показываем пометку. */
+  future?: boolean
   months: Record<number, string>
 }
 
@@ -72,6 +75,7 @@ function draftsFromPlan(plan: SalesPlan): Drafts {
         code: saved.product_code,
         name: saved.product_name,
         unit: saved.unit,
+        future: saved.product_is_future ?? false,
         months: {},
       })
     }
@@ -86,6 +90,7 @@ function draftsFromPlan(plan: SalesPlan): Drafts {
         code: item.product_code,
         name: item.product_name,
         unit: item.unit,
+        future: item.product_is_future ?? false,
         months: {},
       }
       rows.push(row)
@@ -160,12 +165,9 @@ function buildDraftPayload(
 
   const rows = draftRowsOf(drafts)
   const clients = draftClientsOf(drafts)
-  if (rows.length === 0 && plan.items.length > 0) {
-    // Защита от гонки загрузки: форма не должна отправить пустой состав
-    // вместо уже сохранённых строк.
-    onError?.('Состав плана не загрузился — обновите страницу, чтобы не потерять строки')
-    return null
-  }
+  // Пустой состав — законный результат удаления последней строки. Гонку
+  // загрузки отсекает requestSave: он не сохраняет, пока черновик не
+  // гидратирован для выбранного плана.
   return { items, rows, clients }
 }
 
@@ -187,6 +189,7 @@ function draftsFromCorrection(plan: SalesPlan, correction: SalesPlanCorrection):
         code: item.product_code,
         name: item.product_name,
         unit: item.unit,
+        future: item.product_is_future ?? false,
         months: {},
       }
       rows.push(row)
@@ -329,6 +332,9 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
   const [managerId, setManagerId] = useState('')
   const [productToAdd, setProductToAdd] = useState('')
   const [clientToAdd, setClientToAdd] = useState('')
+  const [futureOpen, setFutureOpen] = useState(false)
+  const [futureName, setFutureName] = useState('')
+  const [futureUnit, setFutureUnit] = useState('шт')
   const [rejectReason, setRejectReason] = useState('')
   const [corrections, setCorrections] = useState<SalesPlanCorrection[]>([])
   const [correction, setCorrection] = useState<SalesPlanCorrection | null>(null)
@@ -363,6 +369,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
     plan !== null &&
     plan.status !== 'approved' &&
     (mayManage || (isOwner && ['draft', 'filling'].includes(plan.status)))
+  const mayCreateFuture = mayManage || can(user, 'directories', 'edit')
 
   const clientName = (id: string): string => clients.find((row) => row.id === id)?.name ?? 'Клиент'
   const activeClients = clients.filter((row) => row.is_active)
@@ -381,7 +388,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
 
   useEffect(() => {
     void reload()
-    fetchPlanningProducts()
+    fetchPlanningProducts({ includeFuture: true })
       .then((rows) => setProducts(rows.filter((product) => product.is_active)))
       .catch(() => setProducts([]))
     fetchCounterparties({ role: 'customer', includeInactive: true })
@@ -580,6 +587,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
             code: product.code,
             name: product.name,
             unit: product.unit,
+            future: product.is_future ?? false,
             months: {},
           },
         ],
@@ -594,6 +602,83 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
     updateDrafts((current) => ({ ...current, [clientToAdd]: current[clientToAdd] ?? [] }), true)
     setClientId(clientToAdd)
     setClientToAdd('')
+  }
+
+  /** Есть ли у строки объём в месяце, который уже заморожен. */
+  const hasFrozenMonths = (row: DraftRow): boolean =>
+    Object.keys(row.months).some((month) => !editable.includes(Number(month)))
+
+  const removeRow = (productId: string) => {
+    const row = rows.find((candidate) => candidate.productId === productId)
+    if (!row) return
+    if (hasFrozenMonths(row)) {
+      setError(`У позиции «${row.name}» есть объёмы в замороженных месяцах — удалить её нельзя`)
+      return
+    }
+    updateDrafts(
+      (current) => ({
+        ...current,
+        [clientId]: (current[clientId] ?? []).filter(
+          (candidate) => candidate.productId !== productId,
+        ),
+      }),
+      true,
+    )
+  }
+
+  const removeClient = () => {
+    if (!clientId) return
+    const clientRows = drafts[clientId] ?? []
+    if (clientRows.some(hasFrozenMonths)) {
+      setError(
+        `У клиента «${clientName(clientId)}» есть объёмы в замороженных месяцах — удалить его нельзя`,
+      )
+      return
+    }
+    if (!confirm(`Убрать клиента «${clientName(clientId)}» из плана?`)) return
+    const remaining = Object.keys(drafts).filter((id) => id !== clientId)
+    updateDrafts((current) => {
+      const next = { ...current }
+      delete next[clientId]
+      return next
+    }, true)
+    setClientId(remaining[0] ?? '')
+  }
+
+  /** Завести позицию без кода 1С и сразу добавить её текущему клиенту. */
+  const addFutureProduct = async () => {
+    if (!clientId) return
+    const name = futureName.trim()
+    if (!name) return
+    setBusy(true)
+    setError(null)
+    try {
+      const product = await createFutureProduct({ name, unit: futureUnit.trim() || 'шт' })
+      setProducts((current) => [...current, product])
+      updateDrafts(
+        (current) => ({
+          ...current,
+          [clientId]: [
+            ...(current[clientId] ?? []),
+            {
+              productId: product.id,
+              code: product.code,
+              name: product.name,
+              unit: product.unit,
+              future: true,
+              months: {},
+            },
+          ],
+        }),
+        true,
+      )
+      setFutureName('')
+      setFutureOpen(false)
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
   }
 
   const saveExplicitly = () => {
@@ -700,6 +785,7 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
         code: product.code,
         name: product.name,
         unit: product.unit,
+        future: product.is_future ?? false,
         months: {},
       },
     ])
@@ -1096,8 +1182,10 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
                             )
                             .map((product) => ({
                               value: product.id,
-                              label: `${product.code} · ${product.name}`,
-                              keywords: product.code,
+                              label: product.is_future
+                                ? `${product.name} · будущая`
+                                : `${product.code} · ${product.name}`,
+                              keywords: product.is_future ? 'будущая' : product.code,
                             }))}
                         />
                         <button
@@ -1340,6 +1428,9 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
                 <button type="button" disabled={!clientToAdd || !canEdit} onClick={addClientToPlan}>
                   Добавить
                 </button>
+                <button type="button" disabled={!clientId || !canEdit} onClick={removeClient}>
+                  Убрать клиента
+                </button>
               </div>
 
               <div className="toolbar">
@@ -1355,18 +1446,62 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
                     .filter((product) => !rows.some((row) => row.productId === product.id))
                     .map((product) => ({
                       value: product.id,
-                      label: `${product.code} · ${product.name}`,
-                      keywords: product.code,
+                      label: product.is_future
+                        ? `${product.name} · будущая`
+                        : `${product.code} · ${product.name}`,
+                      keywords: product.is_future ? 'будущая' : product.code,
                     }))}
                 />
                 <button type="button" disabled={!productToAdd || !canEdit} onClick={addRow}>
                   Добавить строку
                 </button>
+                {canEdit && mayCreateFuture ? (
+                  <button type="button" disabled={!clientId} onClick={() => setFutureOpen(true)}>
+                    + Будущая позиция
+                  </button>
+                ) : null}
                 <span className="sep" />
                 <span className="hint" data-testid="current-client">
                   {clientId ? `Строки клиента: ${clientName(clientId)}` : 'клиент не выбран'}
                 </span>
               </div>
+
+              {futureOpen ? (
+                <div className="toolbar" data-testid="future-product-form">
+                  <input
+                    aria-label="Название будущей позиции"
+                    placeholder="Название без кода 1С"
+                    value={futureName}
+                    onChange={(event) => setFutureName(event.target.value)}
+                    disabled={busy}
+                  />
+                  <input
+                    aria-label="Единица будущей позиции"
+                    placeholder="Ед."
+                    value={futureUnit}
+                    onChange={(event) => setFutureUnit(event.target.value)}
+                    disabled={busy}
+                  />
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={busy || !futureName.trim()}
+                    onClick={() => void addFutureProduct()}
+                  >
+                    Создать и добавить
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setFutureOpen(false)
+                      setFutureName('')
+                    }}
+                  >
+                    Отмена
+                  </button>
+                </div>
+              ) : null}
 
               <table className="plan-table" data-testid="plan-table">
                 <thead>
@@ -1395,8 +1530,30 @@ export function SalesPlansPage({ user, focus }: { user: SessionUser; focus?: str
                     rows.map((row) => (
                       <tr key={row.productId}>
                         <td>
-                          {row.code} · {row.name}
-                          <span className="unit">, {row.unit}</span>
+                          {row.future ? (
+                            <>
+                              {row.name}
+                              <span className="unit">, {row.unit}</span>
+                              <span className="badge">будущая</span>
+                            </>
+                          ) : (
+                            <>
+                              {row.code} · {row.name}
+                              <span className="unit">, {row.unit}</span>
+                            </>
+                          )}
+                          {canEdit ? (
+                            <button
+                              type="button"
+                              className="mini"
+                              aria-label={`Убрать строку ${row.name}`}
+                              title="Убрать строку"
+                              disabled={busy}
+                              onClick={() => removeRow(row.productId)}
+                            >
+                              Убрать
+                            </button>
+                          ) : null}
                         </td>
                         {MONTH_SHORT.map((title, index) => {
                           const month = index + 1

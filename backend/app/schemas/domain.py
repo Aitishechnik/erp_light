@@ -20,6 +20,7 @@ class ProductOut(BaseModel):
     unit: str
     source: str
     is_active: bool
+    is_future: bool = False
 
 
 class ProductIn(BaseModel):
@@ -39,6 +40,47 @@ class ProductUpdate(BaseModel):
     kind: str | None = None
     unit: str | None = Field(default=None, min_length=1, max_length=16)
     is_active: bool | None = None
+
+
+class FutureProductIn(BaseModel):
+    """Будущая позиция: только название и единица, кода 1С ещё нет."""
+
+    name: str = Field(min_length=1, max_length=255)
+    unit: str = Field(default="шт", min_length=1, max_length=16)
+
+
+class FutureProductUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    unit: str | None = Field(default=None, min_length=1, max_length=16)
+
+
+class FutureProductOut(BaseModel):
+    """Строка списка: сколько планов и строк её упоминают."""
+
+    id: uuid.UUID
+    name: str
+    unit: str
+    kind: str
+    created_at: datetime
+    plans_count: int
+    rows_count: int
+    other_documents: int
+    years: list[int]
+    delete_allowed: bool
+
+
+class FutureProductBindIn(BaseModel):
+    product_id: uuid.UUID = Field(description="Реальная позиция номенклатуры из 1С")
+
+
+class FutureProductBindOut(BaseModel):
+    product_id: uuid.UUID
+    product_code: str
+    product_name: str
+    plan_rows: int
+    plans: int
+    other_rows: int
+    years: list[int]
 
 
 class BatchExpenseCreate(BaseModel):

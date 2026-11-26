@@ -164,6 +164,7 @@ function routes(extra: Record<string, { status?: number; body?: unknown }> = {})
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
 function calls(): string[] {
@@ -699,11 +700,161 @@ describe('SalesPlansPage', () => {
     const select = await screen.findByLabelText('Добавить товар')
     await waitFor(() => {
       expect(calls().some((url) => url.includes('kinds=raw,finished'))).toBe(true)
+      expect(calls().some((url) => url.includes('include_future=true'))).toBe(true)
     })
     await user.click(select)
     await waitFor(() => {
       expect(screen.queryByRole('option', { name: /Крышка от коробки/ })).not.toBeInTheDocument()
       expect(screen.getByRole('option', { name: /Товар 2/ })).toBeInTheDocument()
     })
+  })
+})
+
+const FUTURE_PRODUCT = {
+  id: 'future-1',
+  code: 'БУД-AAA111',
+  name: 'Сок яблочный',
+  kind: 'finished',
+  unit: 'л',
+  source: 'manual',
+  is_active: true,
+  is_future: true,
+}
+
+const draftPlan = () =>
+  plan({
+    status: 'draft',
+    status_title: 'Черновик',
+    items: [],
+    draft_clients: [{ client_id: 'client-1', client_name: 'ООО Ромашка' }],
+    draft_rows: [
+      {
+        client_id: 'client-1',
+        client_name: 'ООО Ромашка',
+        product_id: 'product-1',
+        product_code: 'SKU-1',
+        product_name: 'Товар 1',
+        unit: 'шт',
+      },
+    ],
+  })
+
+describe('SalesPlansPage — удаление и будущие позиции', () => {
+  it('убирает позицию и клиента из черновика', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mockApi(
+      routes({
+        '/api/v1/sales-plans/plan-1/items': {
+          body: plan({
+            status: 'draft',
+            status_title: 'Черновик',
+            items: [],
+            draft_clients: [],
+            draft_rows: [],
+          }),
+        },
+        '/api/v1/sales-plans': { body: [draftPlan()] },
+        '/api/v1/sales-plan-corrections': { body: [] },
+      }),
+    )
+    render(<SalesPlansPage user={MANAGER} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Убрать строку Товар 1' }))
+    await waitFor(() => {
+      expect(
+        sentPayloads().some(
+          (body) =>
+            Array.isArray(body.items) &&
+            body.items.length === 0 &&
+            Array.isArray(body.rows) &&
+            body.rows.length === 0,
+        ),
+      ).toBe(true)
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Убрать клиента' }))
+    await waitFor(() => {
+      expect(
+        sentPayloads().some((body) => Array.isArray(body.clients) && body.clients.length === 0),
+      ).toBe(true)
+    })
+  })
+
+  it('не даёт убрать строку с объёмом в замороженном месяце', async () => {
+    const user = userEvent.setup()
+    const frozen = plan({
+      status: 'draft',
+      status_title: 'Черновик',
+      editable_months: [12],
+      items: [
+        {
+          id: 'item-1',
+          client_id: 'client-1',
+          client_name: 'ООО Ромашка',
+          product_id: 'product-1',
+          product_code: 'SKU-1',
+          product_name: 'Товар 1',
+          product_kind: 'finished',
+          unit: 'шт',
+          month: 1,
+          quantity: '5.000',
+          notes: null,
+        },
+      ],
+    })
+    mockApi(
+      routes({
+        '/api/v1/sales-plans': { body: [frozen] },
+        '/api/v1/sales-plan-corrections': { body: [] },
+      }),
+    )
+    render(<SalesPlansPage user={MANAGER} />)
+
+    await user.click(await screen.findByRole('button', { name: 'Убрать строку Товар 1' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('замороженных')
+    expect(sentPayloads().filter((body) => Array.isArray(body.items)).length).toBe(0)
+  })
+
+  it('создаёт будущую позицию из плана и помечает её', async () => {
+    const user = userEvent.setup()
+    mockApi(
+      routes({
+        'POST /api/v1/future-products': { status: 201, body: FUTURE_PRODUCT },
+        '/api/v1/sales-plans/plan-1/items': {
+          body: plan({
+            status: 'draft',
+            status_title: 'Черновик',
+            items: [],
+            draft_clients: [{ client_id: 'client-1', client_name: 'ООО Ромашка' }],
+            draft_rows: [
+              {
+                client_id: 'client-1',
+                client_name: 'ООО Ромашка',
+                product_id: 'future-1',
+                product_code: 'БУД-AAA111',
+                product_name: 'Сок яблочный',
+                unit: 'л',
+                product_is_future: true,
+              },
+            ],
+          }),
+        },
+        '/api/v1/sales-plans': { body: [draftPlan()] },
+        '/api/v1/sales-plan-corrections': { body: [] },
+      }),
+    )
+    render(<SalesPlansPage user={MANAGER} />)
+
+    await screen.findByTestId('current-client')
+    await user.click(screen.getByRole('button', { name: /Будущая позиция/ }))
+    await user.type(screen.getByLabelText('Название будущей позиции'), 'Сок яблочный')
+    await user.click(screen.getByRole('button', { name: 'Создать и добавить' }))
+
+    await waitFor(() => {
+      expect(sentPayloads().some((body) => body.name === 'Сок яблочный')).toBe(true)
+    })
+    expect(await screen.findByText('Сок яблочный')).toBeInTheDocument()
+    expect(screen.getByText('будущая')).toBeInTheDocument()
   })
 })

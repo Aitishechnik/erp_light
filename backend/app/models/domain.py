@@ -59,10 +59,16 @@ PAYMENT_CATEGORIES = ("invoice", "risk")
 EXPENSE_CURRENCIES = ("RUB", "USD")
 
 
+# Служебный префикс кода будущей позиции: у неё ещё нет кода 1С, но код в
+# номенклатуре уникален и обязателен. В интерфейсе вместо кода — «будущая».
+FUTURE_PRODUCT_CODE_PREFIX = "БУД-"
+
+
 class Product(Base):
     """Номенклатура: товар, материал, сырьё или готовая продукция.
 
     Код — код из 1С, поэтому выгрузки обновляют позиции по нему, а не создают дубли.
+    У будущей позиции кода 1С ещё нет: ``is_future`` и служебный код-заглушка.
     """
 
     __tablename__ = "products"
@@ -74,6 +80,11 @@ class Product(Base):
     unit: Mapped[str] = mapped_column(String(16), nullable=False, default="шт")
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
     is_active: Mapped[bool] = mapped_column(nullable=False, default=True)
+    # Позиция планирования, которой ещё нет в 1С. Живёт в номенклатуре, чтобы
+    # планы, корректировки и закупки ссылались на неё обычным product_id.
+    is_future: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false(), index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

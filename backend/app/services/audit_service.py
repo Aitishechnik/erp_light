@@ -85,6 +85,12 @@ CATALOG: dict[str, EventSpec] = {
     "batch.deleted": EventSpec("Поступление удалено", "critical", "batch"),
     "product.created": EventSpec("Заведена номенклатура", "critical", "product"),
     "product.updated": EventSpec("Изменена номенклатура", "critical", "product"),
+    "future_product.created": EventSpec("Заведена будущая позиция", "critical", "product"),
+    "future_product.updated": EventSpec("Изменена будущая позиция", "critical", "product"),
+    "future_product.deleted": EventSpec("Удалена будущая позиция", "critical", "product"),
+    "future_product.bound": EventSpec(
+        "Будущая позиция привязана к номенклатуре", "critical", "product"
+    ),
     "counterparty.created": EventSpec("Заведён контрагент", "critical", "counterparty"),
     "counterparty.updated": EventSpec("Изменён контрагент", "critical", "counterparty"),
     "country.updated": EventSpec("Изменена страна и срок доставки", "critical", "country"),

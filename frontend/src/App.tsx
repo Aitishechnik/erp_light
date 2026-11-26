@@ -4,6 +4,7 @@ import { AnnualSalesPlanPage } from './AnnualSalesPlanPage'
 import { logout as apiLogout, can, fetchMe, isAdmin, type SessionUser } from './api'
 import { CounterpartiesPage } from './CounterpartiesPage'
 import { CountriesPage } from './CountriesPage'
+import { FutureProductsPage } from './FutureProductsPage'
 import { ImportsPage } from './ImportsPage'
 import {
   IconAdmin,
@@ -45,6 +46,7 @@ type SectionId =
   | 'receipts'
   | 'suppliers'
   | 'nomenclature'
+  | 'future'
   | 'counterparties'
   | 'currencies'
   | 'countries'
@@ -124,6 +126,12 @@ const GROUPS: Group[] = [
       {
         id: 'nomenclature',
         title: 'Номенклатура',
+        ready: true,
+        perm: { block: 'directories', action: 'view' },
+      },
+      {
+        id: 'future',
+        title: 'Позиции будущих периодов',
         ready: true,
         perm: { block: 'directories', action: 'view' },
       },
@@ -215,6 +223,7 @@ const SECTION_TO_PATH: Record<string, string> = {
   planfact: 'plan-fact',
   receipts: 'receipt',
   nomenclature: 'nomenclature',
+  future: 'future-products',
   counterparties: 'counterparties',
   countries: 'countries',
   imports: 'imports',
@@ -488,6 +497,7 @@ export function App() {
           {current.id === 'nomenclature' && current.ready ? (
             <NomenclaturePage focusId={focus[0]} />
           ) : null}
+          {current.id === 'future' && current.ready ? <FutureProductsPage user={user} /> : null}
           {current.id === 'counterparties' && current.ready ? (
             <CounterpartiesPage user={user} focusId={focus[0]} />
           ) : null}

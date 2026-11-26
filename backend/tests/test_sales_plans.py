@@ -3,6 +3,7 @@
 from datetime import date
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.models.auth import ROLE_SALES_MANAGER, User
 from app.models.counterparties import Counterparty
 from app.models.domain import Product
+from app.models.planning import SalesPlanItem
 from app.services.auth import hash_password
 
 TODAY = date.today()
@@ -433,3 +435,96 @@ def test_unknown_product_in_draft_is_rejected(
     )
     assert response.status_code == 404, response.text
     assert "номенклатуры" in response.json()["detail"]
+
+
+def test_draft_row_and_client_can_be_removed(
+    client: TestClient, login, products: list[Product], clients: list[Counterparty]
+) -> None:
+    """Убрать позицию или клиента из черновика можно, пока нет замороженных объёмов."""
+    login("sales")
+    plan = _create_plan(client, TODAY.year + 1)
+    first, second = str(clients[0].id), str(clients[1].id)
+    saved = client.put(
+        f"/api/v1/sales-plans/{plan['id']}/items",
+        json={
+            "items": [
+                _item(products[0], 1, "5", clients[0]),
+                _item(products[0], 1, "7", clients[1]),
+            ],
+            "clients": [{"client_id": first}, {"client_id": second}],
+            "rows": [
+                {"client_id": first, "product_id": str(products[0].id)},
+                {"client_id": second, "product_id": str(products[0].id)},
+            ],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    # Убрали позицию у первого клиента: строка исчезла, клиент остался.
+    row_removed = client.put(
+        f"/api/v1/sales-plans/{plan['id']}/items",
+        json={
+            "items": [_item(products[0], 1, "7", clients[1])],
+            "clients": [{"client_id": first}, {"client_id": second}],
+            "rows": [{"client_id": second, "product_id": str(products[0].id)}],
+        },
+    )
+    assert row_removed.status_code == 200, row_removed.text
+    body = row_removed.json()
+    assert [row["client_id"] for row in body["items"]] == [second]
+    assert {row["client_id"] for row in body["draft_clients"]} == {first, second}
+    assert all(row["client_id"] != first for row in body["draft_rows"])
+
+    # Убрали обоих клиентов: план снова пустой, как только его создали.
+    cleared = client.put(
+        f"/api/v1/sales-plans/{plan['id']}/items",
+        json={"items": [], "clients": [], "rows": []},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["items"] == []
+    assert cleared.json()["draft_clients"] == []
+    assert cleared.json()["draft_rows"] == []
+
+
+def test_frozen_rows_block_removing_client_or_position(
+    client: TestClient,
+    login,
+    products: list[Product],
+    clients: list[Counterparty],
+    db_session: Session,
+) -> None:
+    """Строку с объёмом в замороженном месяце удалить нельзя — она вернулась бы."""
+    login("sales")
+    plan = _create_plan(client, TODAY.year - 1)
+    db_session.add(
+        SalesPlanItem(
+            plan_id=UUID(plan["id"]),
+            client_id=clients[0].id,
+            product_id=products[0].id,
+            month=1,
+            quantity=Decimal("5"),
+        )
+    )
+    db_session.commit()
+
+    without_client = client.put(
+        f"/api/v1/sales-plans/{plan['id']}/items",
+        json={"items": [], "clients": [], "rows": []},
+    )
+    assert without_client.status_code == 409, without_client.text
+    assert "замороженных" in without_client.json()["detail"]
+
+    without_row = client.put(
+        f"/api/v1/sales-plans/{plan['id']}/items",
+        json={
+            "items": [],
+            "clients": [{"client_id": str(clients[0].id)}],
+            "rows": [],
+        },
+    )
+    assert without_row.status_code == 409, without_row.text
+    assert "замороженных" in without_row.json()["detail"]
+
+    reloaded = client.get(f"/api/v1/sales-plans/{plan['id']}").json()
+    assert len(reloaded["items"]) == 1
+    assert reloaded["items"][0]["quantity"] == "5.000"

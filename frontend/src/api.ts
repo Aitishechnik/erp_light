@@ -112,6 +112,8 @@ export type Product = {
   unit: string
   source: string
   is_active: boolean
+  /** Позиция будущего периода: ещё нет кода 1С, есть только название. */
+  is_future?: boolean
 }
 
 export type SalesPlanItem = {
@@ -126,6 +128,7 @@ export type SalesPlanItem = {
   month: number
   quantity: string
   notes: string | null
+  product_is_future?: boolean
 }
 
 export type SalesPlanStatus = 'draft' | 'filling' | 'on_review' | 'approved'
@@ -143,6 +146,7 @@ export type SalesPlanDraftRow = {
   product_code: string
   product_name: string
   unit: string
+  product_is_future?: boolean
 }
 
 export type SalesPlan = {
@@ -336,6 +340,7 @@ export type SalesPlanCorrectionItem = {
   quantity: string
   current_quantity: string
   notes: string | null
+  product_is_future?: boolean
 }
 
 export type SalesPlanCorrection = {
@@ -951,16 +956,23 @@ export function fetchManagers(): Promise<SessionUser[]> {
 /** Виды номенклатуры, доступные в планировании: только сырьё и готовая продукция. */
 export const PLANNING_PRODUCT_KINDS: readonly string[] = ['raw', 'finished']
 
-export function fetchProducts(options?: { kinds?: readonly string[] }): Promise<Product[]> {
-  const kinds = options?.kinds?.length ? `?kinds=${options.kinds.join(',')}` : ''
-  return request<Product[]>(`/api/v1/products${kinds}`)
+export function fetchProducts(options?: {
+  kinds?: readonly string[]
+  includeFuture?: boolean
+}): Promise<Product[]> {
+  const parts: string[] = []
+  if (options?.kinds?.length) parts.push(`kinds=${options.kinds.join(',')}`)
+  if (options?.includeFuture) parts.push('include_future=true')
+  const query = parts.join('&')
+  return request<Product[]>(`/api/v1/products${query ? `?${query}` : ''}`)
 }
 
-/** Номенклатура для меню планирования: материалы в списки не попадают. */
-export function fetchPlanningProducts(): Promise<Product[]> {
-  return fetchProducts({ kinds: PLANNING_PRODUCT_KINDS }).then((rows) =>
-    rows.filter((row) => PLANNING_PRODUCT_KINDS.includes(row.kind)),
-  )
+/** Номенклатура для меню планирования: материалы не попадают, будущие — по запросу. */
+export function fetchPlanningProducts(options?: { includeFuture?: boolean }): Promise<Product[]> {
+  return fetchProducts({
+    kinds: PLANNING_PRODUCT_KINDS,
+    includeFuture: options?.includeFuture,
+  }).then((rows) => rows.filter((row) => PLANNING_PRODUCT_KINDS.includes(row.kind)))
 }
 
 /** Одна позиция номенклатуры: объект из сообщения открывается по ссылке. */
@@ -982,6 +994,65 @@ export function updateProduct(
   return request<Product>(`/api/v1/products/${productId}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
+  })
+}
+
+/** Позиция будущего периода: только название и единица, кода 1С ещё нет. */
+export type FutureProduct = {
+  id: string
+  name: string
+  unit: string
+  kind: string
+  created_at: string
+  plans_count: number
+  rows_count: number
+  other_documents: number
+  years: number[]
+  delete_allowed: boolean
+}
+
+export type FutureProductBindResult = {
+  product_id: string
+  product_code: string
+  product_name: string
+  plan_rows: number
+  plans: number
+  other_rows: number
+  years: number[]
+}
+
+export function fetchFutureProducts(): Promise<FutureProduct[]> {
+  return request<FutureProduct[]>('/api/v1/future-products')
+}
+
+export function createFutureProduct(payload: { name: string; unit: string }): Promise<Product> {
+  return request<Product>('/api/v1/future-products', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateFutureProduct(
+  productId: string,
+  payload: { name?: string; unit?: string },
+): Promise<Product> {
+  return request<Product>(`/api/v1/future-products/${productId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteFutureProduct(productId: string): Promise<void> {
+  return request<void>(`/api/v1/future-products/${productId}`, { method: 'DELETE' })
+}
+
+export function bindFutureProduct(
+  productId: string,
+  targetProductId: string,
+): Promise<FutureProductBindResult> {
+  return request<FutureProductBindResult>(`/api/v1/future-products/${productId}/bind`, {
+    method: 'POST',
+    body: JSON.stringify({ product_id: targetProductId }),
   })
 }
 

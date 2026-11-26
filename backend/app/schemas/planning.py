@@ -61,6 +61,7 @@ class SalesPlanDraftRowOut(BaseModel):
     product_code: str
     product_name: str
     unit: str
+    product_is_future: bool = False
 
 
 class SalesPlanItemOut(BaseModel):
@@ -75,6 +76,7 @@ class SalesPlanItemOut(BaseModel):
     month: int
     quantity: Decimal
     notes: str | None
+    product_is_future: bool = False
 
 
 class SalesPlanOut(BaseModel):
@@ -415,6 +417,7 @@ class SalesPlanCorrectionItemOut(BaseModel):
     quantity: Decimal
     current_quantity: Decimal
     notes: str | None
+    product_is_future: bool = False
 
 
 class SalesPlanCorrectionOut(BaseModel):

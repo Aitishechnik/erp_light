@@ -139,10 +139,20 @@ def update_counterparty(
 
 
 def list_products(
-    db: Session, *, kind: str | None = None, kinds: list[str] | None = None
+    db: Session,
+    *,
+    kind: str | None = None,
+    kinds: list[str] | None = None,
+    include_future: bool = False,
 ) -> list[Product]:
-    """Номенклатура по коду. ``kinds`` — несколько видов сразу (списки выбора)."""
+    """Номенклатура по коду. ``kinds`` — несколько видов сразу (списки выбора).
+
+    Будущие позиции по умолчанию не видны: у них свой список и своё право
+    привязки. Планирование запрашивает их явно (``include_future``).
+    """
     statement = select(Product).order_by(Product.code)
+    if not include_future:
+        statement = statement.where(Product.is_future.is_(False))
     selected = kinds if kinds is not None else ([kind] if kind else None)
     if selected:
         statement = statement.where(Product.kind.in_(selected))
@@ -191,6 +201,11 @@ def create_product(db: Session, payload: ProductIn) -> Product:
 
 def update_product(db: Session, product_id: uuid.UUID, payload: ProductUpdate) -> Product:
     product = get_product(db, product_id)
+    if product.is_future:
+        raise DirectoryError(
+            "Будущая позиция правится в списке «Позиции будущих периодов»",
+            status_code=409,
+        )
     data = payload.model_dump(exclude_unset=True)
     if data.get("kind") is not None:
         _check_kind(str(data["kind"]))

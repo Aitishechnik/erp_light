@@ -2173,3 +2173,94 @@ test('месяц с расхождениями без причины не зак
   await expect(page.getByRole('button', { name: 'Закрыть месяц' })).toBeDisabled()
   await expect(page.getByTestId('close-blocked')).toContainText('2')
 })
+
+test('будущая позиция заводится по названию и привязывается к номенклатуре 1С', async ({
+  page,
+}) => {
+  let created = false
+  let bound = false
+  await mockSession(page, COMMERCIAL)
+  await page.route('**/api/v1/products**', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 'p-1',
+          code: 'SKU-1',
+          name: 'Товар 1',
+          kind: 'finished',
+          unit: 'л',
+          source: '1c',
+          is_active: true,
+          is_future: false,
+        },
+      ],
+    }),
+  )
+  await page.route('**/api/v1/future-products/*/bind', (route) => {
+    bound = true
+    return route.fulfill({
+      json: {
+        product_id: 'p-1',
+        product_code: 'SKU-1',
+        product_name: 'Товар 1',
+        plan_rows: 1,
+        plans: 1,
+        other_rows: 0,
+        years: [YEAR],
+      },
+    })
+  })
+  await page.route('**/api/v1/future-products', (route) => {
+    if (route.request().method() === 'POST') {
+      created = true
+      return route.fulfill({
+        status: 201,
+        json: {
+          id: 'fut-1',
+          code: 'БУД-AAA111',
+          name: 'Сок яблочный',
+          kind: 'finished',
+          unit: 'л',
+          source: 'manual',
+          is_active: true,
+          is_future: true,
+        },
+      })
+    }
+    return route.fulfill({
+      json: created
+        ? [
+            {
+              id: 'fut-1',
+              name: 'Сок яблочный',
+              unit: 'л',
+              kind: 'finished',
+              created_at: '2026-11-26T10:00:00Z',
+              plans_count: bound ? 0 : 1,
+              rows_count: bound ? 0 : 1,
+              other_documents: 0,
+              years: [YEAR],
+              delete_allowed: false,
+            },
+          ]
+        : [],
+    })
+  })
+
+  await page.goto('/')
+  await openSection(page, 'Справочники', 'Позиции будущих периодов')
+
+  await expect(page.getByTestId('future-products-empty')).toBeVisible()
+  await page.getByLabel('Название будущей позиции').fill('Сок яблочный')
+  await page.getByLabel('Единица будущей позиции').fill('л')
+  await page.getByRole('button', { name: 'Добавить', exact: true }).click()
+  await expect(page.getByRole('cell', { name: 'Сок яблочный' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Привязать' }).click()
+  const panel = page.getByTestId('future-bind-panel')
+  await panel.getByLabel('Реальная позиция из 1С').fill('Товар')
+  await page.getByRole('option', { name: /SKU-1/ }).click()
+  page.once('dialog', (dialog) => dialog.accept())
+  await panel.getByRole('button', { name: 'Привязать' }).click()
+  await expect(page.getByTestId('future-notice')).toContainText('заменена на «SKU-1')
+})
