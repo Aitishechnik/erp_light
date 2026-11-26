@@ -27,7 +27,7 @@ const COMMERCIAL_NO_DIRS: SessionUser = {
 const USED: FutureProduct = {
   id: 'future-1',
   name: 'Сок яблочный',
-  unit: 'л',
+  unit: 'кг',
   kind: 'finished',
   created_at: '2026-11-26T10:00:00Z',
   plans_count: 1,
@@ -40,7 +40,7 @@ const USED: FutureProduct = {
 const UNUSED: FutureProduct = {
   id: 'future-2',
   name: 'Сок вишнёвый',
-  unit: 'л',
+  unit: 'шт',
   kind: 'finished',
   created_at: '2026-11-26T10:00:00Z',
   plans_count: 0,
@@ -91,6 +91,7 @@ function baseRoutes(extra: Record<string, { status?: number; body?: unknown }> =
         product_id: 'p-1',
         product_code: 'SKU-1',
         product_name: 'Сок яблочный 1 л',
+        product_unit: 'л',
         plan_rows: 2,
         plans: 1,
         other_rows: 0,
@@ -105,7 +106,7 @@ function baseRoutes(extra: Record<string, { status?: number; body?: unknown }> =
         code: 'БУД-NEW001',
         name: 'Сок вишнёвый',
         kind: 'finished',
-        unit: 'л',
+        unit: 'кг',
         source: 'manual',
         is_active: true,
         is_future: true,
@@ -156,20 +157,35 @@ describe('FutureProductsPage', () => {
     })
   })
 
+  it('даёт выбрать только «шт» и «кг» — и при создании, и при правке', async () => {
+    const user = userEvent.setup()
+    mockApi(baseRoutes())
+    render(<FutureProductsPage user={COMMERCIAL} />)
+
+    const createSelect = (await screen.findByLabelText(
+      'Единица будущей позиции',
+    )) as HTMLSelectElement
+    expect(Array.from(createSelect.options).map((option) => option.value)).toEqual(['шт', 'кг'])
+
+    await screen.findByText('Сок яблочный')
+    await user.click(screen.getAllByRole('button', { name: 'Переименовать' })[0] as HTMLElement)
+    const editSelect = screen.getByLabelText('Новая единица Сок яблочный') as HTMLSelectElement
+    expect(Array.from(editSelect.options).map((option) => option.value)).toEqual(['шт', 'кг'])
+  })
+
   it('заводит позицию по названию без кода', async () => {
     const user = userEvent.setup()
     mockApi(baseRoutes())
     render(<FutureProductsPage user={COMMERCIAL} />)
 
     await user.type(await screen.findByLabelText('Название будущей позиции'), 'Сок вишнёвый')
-    await user.clear(screen.getByLabelText('Единица будущей позиции'))
-    await user.type(screen.getByLabelText('Единица будущей позиции'), 'л')
+    await user.selectOptions(screen.getByLabelText('Единица будущей позиции'), 'кг')
     await user.click(screen.getByRole('button', { name: 'Добавить' }))
 
     await waitFor(() => {
       expect(sentPayloads().some((body) => body.name === 'Сок вишнёвый')).toBe(true)
     })
-    expect(sentPayloads().find((body) => body.name === 'Сок вишнёвый')?.unit).toBe('л')
+    expect(sentPayloads().find((body) => body.name === 'Сок вишнёвый')?.unit).toBe('кг')
     await waitFor(() => {
       expect(screen.getByTestId('future-notice')).toHaveTextContent('добавлена')
     })

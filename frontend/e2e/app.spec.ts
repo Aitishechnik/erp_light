@@ -2203,6 +2203,7 @@ test('будущая позиция заводится по названию и 
         product_id: 'p-1',
         product_code: 'SKU-1',
         product_name: 'Товар 1',
+        product_unit: 'л',
         plan_rows: 1,
         plans: 1,
         other_rows: 0,
@@ -2220,7 +2221,7 @@ test('будущая позиция заводится по названию и 
           code: 'БУД-AAA111',
           name: 'Сок яблочный',
           kind: 'finished',
-          unit: 'л',
+          unit: 'кг',
           source: 'manual',
           is_active: true,
           is_future: true,
@@ -2233,7 +2234,7 @@ test('будущая позиция заводится по названию и 
             {
               id: 'fut-1',
               name: 'Сок яблочный',
-              unit: 'л',
+              unit: 'кг',
               kind: 'finished',
               created_at: '2026-11-26T10:00:00Z',
               plans_count: bound ? 0 : 1,
@@ -2252,7 +2253,7 @@ test('будущая позиция заводится по названию и 
 
   await expect(page.getByTestId('future-products-empty')).toBeVisible()
   await page.getByLabel('Название будущей позиции').fill('Сок яблочный')
-  await page.getByLabel('Единица будущей позиции').fill('л')
+  await page.getByLabel('Единица будущей позиции').selectOption('кг')
   await page.getByRole('button', { name: 'Добавить', exact: true }).click()
   await expect(page.getByRole('cell', { name: 'Сок яблочный' })).toBeVisible()
 
@@ -2263,4 +2264,5 @@ test('будущая позиция заводится по названию и 
   page.once('dialog', (dialog) => dialog.accept())
   await panel.getByRole('button', { name: 'Привязать' }).click()
   await expect(page.getByTestId('future-notice')).toContainText('заменена на «SKU-1')
+  await expect(page.getByTestId('future-notice')).toContainText('единица: л')
 })

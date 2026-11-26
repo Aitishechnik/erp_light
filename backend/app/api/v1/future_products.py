@@ -147,6 +147,7 @@ def bind_future_product(
         entity_label=f"{result.product_code} · {result.product_name}",
         payload={
             "было": source_name,
+            "стало": f"{result.product_code} · {result.product_name}, {result.product_unit}",
             "планов": result.plans,
             "строк_плана": result.plan_rows,
             "прочих_строк": result.other_rows,

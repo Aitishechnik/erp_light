@@ -25,7 +25,7 @@ def _plan(client: TestClient, year: int) -> dict[str, Any]:
     return body
 
 
-def _future(client: TestClient, name: str = "Сок яблочный", unit: str = "л") -> dict[str, Any]:
+def _future(client: TestClient, name: str = "Сок яблочный", unit: str = "кг") -> dict[str, Any]:
     response = client.post("/api/v1/future-products", json={"name": name, "unit": unit})
     assert response.status_code == 201, response.text
     body: dict[str, Any] = response.json()
@@ -60,7 +60,7 @@ def test_future_product_lives_in_separate_list(
     future = _future(client)
     assert future["is_future"] is True
     assert future["name"] == "Сок яблочный"
-    assert future["unit"] == "л"
+    assert future["unit"] == "кг"
     assert future["code"].startswith("БУД-")
 
     listed = client.get("/api/v1/future-products").json()
@@ -77,10 +77,27 @@ def test_future_product_lives_in_separate_list(
     assert client.get("/api/v1/future-products").json() == []
 
 
+def test_future_unit_is_only_pieces_or_kilograms(
+    client: TestClient, login, catalog: dict[str, Any]
+) -> None:
+    """Третью единицу завести нельзя — ни при создании, ни при правке."""
+    login("sales")
+    bad_create = client.post("/api/v1/future-products", json={"name": "Сок в литрах", "unit": "л"})
+    assert bad_create.status_code == 422, bad_create.text
+
+    future = _future(client, "Сок в килограммах", "кг")
+    bad_update = client.patch(f"/api/v1/future-products/{future['id']}", json={"unit": "уп"})
+    assert bad_update.status_code == 422, bad_update.text
+
+    ok_update = client.patch(f"/api/v1/future-products/{future['id']}", json={"unit": "шт"})
+    assert ok_update.status_code == 200, ok_update.text
+    assert ok_update.json()["unit"] == "шт"
+
+
 def test_duplicate_name_and_permissions(client: TestClient, login, catalog: dict[str, Any]) -> None:
     login("sales")
     _future(client, "Сок яблочный")
-    duplicate = client.post("/api/v1/future-products", json={"name": "сок яблочный", "unit": "л"})
+    duplicate = client.post("/api/v1/future-products", json={"name": "сок яблочный", "unit": "кг"})
     assert duplicate.status_code == 409, duplicate.text
 
     login("import")
@@ -166,14 +183,22 @@ def test_used_future_cannot_be_deleted_and_binding_replaces_all_mentions(
     body = bound.json()
     assert body["product_id"] == str(target.id)
     assert body["product_name"] == target.name
+    assert body["product_unit"] == target.unit
     assert body["plan_rows"] == 1
     assert body["plans"] == 1
     assert body["years"] == [TODAY.year + 1]
 
     reloaded = client.get(f"/api/v1/sales-plans/{plan['id']}").json()
     assert len(reloaded["items"]) == 1
-    assert reloaded["items"][0]["product_id"] == str(target.id)
-    assert reloaded["items"][0]["quantity"] == "14.000"
+    item = reloaded["items"][0]
+    assert item["product_id"] == str(target.id)
+    # Будущая позиция была в килограммах, в 1С — в штуках: после привязки
+    # название, код и единица в плане берутся из карточки 1С, количество остаётся.
+    assert item["product_code"] == target.code
+    assert item["product_name"] == target.name
+    assert item["unit"] == target.unit == "шт"
+    assert item["product_is_future"] is False
+    assert item["quantity"] == "14.000"
     assert {row["product_id"] for row in reloaded["draft_rows"]} == {str(target.id)}
     assert client.get("/api/v1/future-products").json() == []
 
@@ -227,6 +252,6 @@ def test_commercial_without_directory_edit_still_manages_future_products(
     db_session.commit()
     login("commercial")
 
-    created = client.post("/api/v1/future-products", json={"name": "Сок манго", "unit": "л"})
+    created = client.post("/api/v1/future-products", json={"name": "Сок манго", "unit": "кг"})
     assert created.status_code == 201, created.text
     assert created.json()["is_future"] is True

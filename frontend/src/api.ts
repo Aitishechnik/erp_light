@@ -1015,6 +1015,7 @@ export type FutureProductBindResult = {
   product_id: string
   product_code: string
   product_name: string
+  product_unit: string
   plan_rows: number
   plans: number
   other_rows: number

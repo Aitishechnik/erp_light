@@ -42,16 +42,21 @@ class ProductUpdate(BaseModel):
     is_active: bool | None = None
 
 
+# Будущую позицию планируем только в штуках и килограммах: это две единицы,
+# в которых ведутся количества до появления карточки в 1С.
+FutureProductUnit = Literal["шт", "кг"]
+
+
 class FutureProductIn(BaseModel):
     """Будущая позиция: только название и единица, кода 1С ещё нет."""
 
     name: str = Field(min_length=1, max_length=255)
-    unit: str = Field(default="шт", min_length=1, max_length=16)
+    unit: FutureProductUnit = Field(default="шт", description="Только «шт» или «кг»")
 
 
 class FutureProductUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
-    unit: str | None = Field(default=None, min_length=1, max_length=16)
+    unit: FutureProductUnit | None = Field(default=None, description="Только «шт» или «кг»")
 
 
 class FutureProductOut(BaseModel):
@@ -77,6 +82,7 @@ class FutureProductBindOut(BaseModel):
     product_id: uuid.UUID
     product_code: str
     product_name: str
+    product_unit: str
     plan_rows: int
     plans: int
     other_rows: int

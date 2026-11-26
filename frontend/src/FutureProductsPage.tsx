@@ -19,6 +19,9 @@ import { SearchSelect } from './SearchSelect'
 
 const EMPTY_FORM = { name: '', unit: 'шт' }
 
+/** Будущую позицию планируем только в штуках и килограммах — как в 1С. */
+const UNIT_OPTIONS = ['шт', 'кг'] as const
+
 /** Использование позиции для строки списка: планы, документы и годы. */
 function usageText(row: FutureProduct): string {
   const parts: string[] = []
@@ -146,8 +149,13 @@ export function FutureProductsPage({ user }: { user: SessionUser }) {
     if (!row || !target) return
     if (
       !confirm(
-        `Заменить «${row.name}» на «${target.code} · ${target.name}» во всех планах? ` +
-          'Совпадающие строки сложатся, старое название удалится. Отменить привязку нельзя.',
+        `Заменить «${row.name}» на «${target.code} · ${target.name}» (${target.unit}) ` +
+          'во всех планах? Название, код и единица станут как в 1С' +
+          (row.unit === target.unit
+            ? ''
+            : `, единица изменится с «${row.unit}» на «${target.unit}»`) +
+          '. Совпадающие строки сложатся, старое название удалится. ' +
+          'Отменить привязку нельзя.',
       )
     ) {
       return
@@ -161,7 +169,8 @@ export function FutureProductsPage({ user }: { user: SessionUser }) {
       setTargetId('')
       await reload()
       setNotice(
-        `«${row.name}» заменена на «${result.product_code} · ${result.product_name}». ` +
+        `«${row.name}» заменена на «${result.product_code} · ${result.product_name}» ` +
+          `(единица: ${result.product_unit}). ` +
           `Строк плана: ${result.plan_rows}, планов: ${result.plans}` +
           (result.other_rows ? `, прочих строк: ${result.other_rows}` : ''),
       )
@@ -184,11 +193,12 @@ export function FutureProductsPage({ user }: { user: SessionUser }) {
       <header className="page-head">
         <h1>Позиции будущих периодов</h1>
         <PageHelp>
-          Номенклатура, которой ещё нет в 1С: планируем её по названию. В обычной номенклатуре,
-          остатках и сопоставлении продаж таких позиций нет. Когда позиция появилась в выгрузке 1С,
-          привяжите её здесь — годовые и месячные планы, корректировки и закупки перейдут на
-          реальную карточку, а старое название удалится. Неиспользованную позицию можно удалить;
-          если она уже попала в план или документ — только привязать.
+          Номенклатура, которой ещё нет в 1С: планируем её по названию в штуках или килограммах. В
+          обычной номенклатуре, остатках и сопоставлении продаж таких позиций нет. Когда позиция
+          появилась в выгрузке 1С, привяжите её здесь — годовые и месячные планы, корректировки и
+          закупки перейдут на реальную карточку, а название, код и единица станут как в 1С.
+          Неиспользованную позицию можно удалить; если она уже попала в план или документ — только
+          привязать.
         </PageHelp>
       </header>
 
@@ -212,13 +222,17 @@ export function FutureProductsPage({ user }: { user: SessionUser }) {
             onChange={(event) => setForm({ ...form, name: event.target.value })}
             required
           />
-          <input
+          <select
             aria-label="Единица будущей позиции"
-            placeholder="Ед."
             value={form.unit}
             onChange={(event) => setForm({ ...form, unit: event.target.value })}
-            required
-          />
+          >
+            {UNIT_OPTIONS.map((unit) => (
+              <option key={unit} value={unit}>
+                {unit}
+              </option>
+            ))}
+          </select>
           <button type="submit" className="primary" disabled={busy || !form.name.trim()}>
             Добавить
           </button>
@@ -272,8 +286,9 @@ export function FutureProductsPage({ user }: { user: SessionUser }) {
             </button>
           </div>
           <p className="hint">
-            Заменяет позицию во всех планах и корректировках. Строки «тот же клиент и месяц»
-            складываются, старое название удаляется. Отменить привязку нельзя.
+            Заменяет позицию во всех планах и корректировках: название, код и единица берутся из
+            карточки 1С. Строки «тот же клиент и месяц» складываются, старое название удаляется.
+            Отменить привязку нельзя.
           </p>
         </div>
       ) : null}
@@ -311,11 +326,17 @@ export function FutureProductsPage({ user }: { user: SessionUser }) {
                       />
                     </td>
                     <td>
-                      <input
+                      <select
                         aria-label={`Новая единица ${row.name}`}
                         value={editForm.unit}
                         onChange={(event) => setEditForm({ ...editForm, unit: event.target.value })}
-                      />
+                      >
+                        {UNIT_OPTIONS.map((unit) => (
+                          <option key={unit} value={unit}>
+                            {unit}
+                          </option>
+                        ))}
+                      </select>
                     </td>
                     <td className="hint">—</td>
                     <td>

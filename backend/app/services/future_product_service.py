@@ -228,12 +228,11 @@ def list_future_products(db: Session) -> list[FutureProductOut]:
 def create_future_product(db: Session, payload: FutureProductIn) -> Product:
     """Завести позицию по названию: код 1С появится только при привязке."""
     name = _check_name(db, payload.name)
-    unit = payload.unit.strip() or "шт"
     product = Product(
         code=_generate_code(db),
         name=name,
         kind="finished",
-        unit=unit,
+        unit=payload.unit,
         source="manual",
         is_future=True,
     )
@@ -257,7 +256,7 @@ def update_future_product(
     if data.get("name") is not None:
         product.name = _check_name(db, str(data["name"]), exclude_id=product.id)
     if data.get("unit") is not None:
-        product.unit = str(data["unit"]).strip() or "шт"
+        product.unit = str(data["unit"])
     db.commit()
     db.refresh(product)
     return product
@@ -549,6 +548,7 @@ def bind_future_product(
         product_id=target.id,
         product_code=target.code,
         product_name=target.name,
+        product_unit=target.unit,
         plan_rows=plan_rows,
         plans=len(plan_ids),
         other_rows=other_rows,
